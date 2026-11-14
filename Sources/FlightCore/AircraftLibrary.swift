@@ -141,6 +141,16 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     spec.smokePos = V3(0, -h * 0.4, nz + 0.55 * L)
     spec.parts = parts
     spec.soundBase = g.sound
+    spec.blades = g.blades
+    // engine character: scale models of piston and turbine aircraft sound like them; sport models, gliders and foamies are electric
+    let original = ["Vortex 3D", "Jester Biplane", "Falcon Warbird", "Bushmaster STOL", "Twin Courier"].contains(g.name)
+    let roundCowl = g.spinnerScale < 0.33 && g.fuseExp <= 2.4
+    if g.ducted { spec.engineSound = 2 }
+    else if original || g.profile { spec.engineSound = 0 }
+    else if (g.category == "Scale Civil" || g.category == "Aerobatic") && g.sound >= 165 { spec.engineSound = 3 }
+    else if g.category == "Warbirds" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 12 }
+    else if g.category == "Scale Civil" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 4 }
+    else if g.category == "Aerobatic" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 6 }
     spec.eyeOffset = V3(0, max(h, g.wingY) + 0.1, nz + 0.35 * L)
     return spec
 }

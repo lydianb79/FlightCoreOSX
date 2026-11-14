@@ -370,7 +370,6 @@ final class Game {
     private func breakUp() {
         let ac = aircraft
         let sev = clampf(ac.crashImpact / 10, 0.25, 1)
-        sound.crash(sev)
         for (i, part) in ac.spec.parts.enumerated() where i > 0 {
             var animated = true
             if case .fixed = part.anim { animated = false }
@@ -384,6 +383,7 @@ final class Game {
         }
         let ground = V3(ac.pos.x, max(terrain.height(ac.pos.x, ac.pos.z), site.waterLevel ?? -1e9) + 0.1, ac.pos.z)
         let wet = site.waterLevel.map { terrain.height(ac.pos.x, ac.pos.z) < $0 } ?? false
+        sound.crash(sev, water: wet, pan: sound.state.pan)
         let dust: V4 = wet ? rgb(0.9, 0.95, 1.0) : site.pal.dust
         for _ in 0..<Int(10 + 22 * sev) {
             particles.append(Particle(pos: ground + V3(rng.range(-0.3, 0.3), 0, rng.range(-0.3, 0.3)),
@@ -474,23 +474,49 @@ final class Game {
         let spec = aircraft.spec
         let rel = aircraft.pos - eye
         let d = max(length(rel), 0.5)
-        let doppler: Float = cameraMode == 0 ? 343 / (343 + dot(aircraft.vel, rel / d)) : 1
+        let onboard = cameraMode == 2
+        var st = SoundState()
+        st.doppler = cameraMode == 0 ? 343 / (343 + dot(aircraft.vel, rel / d)) : 1
         let lv = aircraft.power
-        var amp: Float, freq: Float
         switch spec.kind {
         case .helicopter:
-            sound.kind = 2
-            freq = spec.soundBase * max(aircraft.levels[0], 0.05)
-            amp = aircraft.levels[0] * (0.55 + 0.45 * abs(2 * controls.throttle - 1))
+            st.engine = 4
+            st.shaftHz = spec.soundBase / 2 * aircraft.levels[0]
+            st.power = clampf(abs(2 * controls.throttle - 1) * 0.8 + 0.15, 0, 1)
+            st.running = aircraft.levels[0] > 0.05 ? min(aircraft.levels[0], 1) : 0
         case .multirotor:
-            sound.kind = 3
-            freq = spec.soundBase * (0.3 + 0.9 * sqrt(lv)); amp = lv > 0.01 ? 0.3 + 0.7 * lv : 0
+            st.engine = 5
+            st.shaftHz = spec.soundBase
+            st.power = lv; st.running = lv > 0.01 ? 1 : 0
+            st.motors = SIMD4(aircraft.levels[0], aircraft.levels[1], aircraft.levels[2], aircraft.levels[3])
         case .airplane:
-            sound.kind = spec.soundBase > 300 ? 1 : 0
-            freq = spec.soundBase * (0.3 + 0.7 * lv); amp = lv > 0.01 ? 0.2 + 0.8 * lv : 0
+            st.engine = spec.engineSound
+            st.blades = Float(spec.blades); st.cylinders = Float(spec.cylinders); st.radial = spec.radial
+            // piston and turbine engines idle; electric motors stop
+            let idles = spec.engineSound != 0 && !aircraft.crashed
+            let rpm = idles ? max(lv, 0.24) : lv
+            st.shaftHz = spec.soundBase / Float(max(spec.blades, 1)) * (0.25 + 0.75 * rpm)
+            st.power = lv
+            st.running = idles ? 1 : (lv > 0.01 ? 1 : 0)
         }
-        sound.targetFreq = freq * doppler
-        sound.targetGain = paused || hud.overlay.pausesSim ? 0 : amp * (cameraMode == 0 ? min(1, 7 / (d + 2)) : 0.6)
+        st.shaftHz *= st.doppler
+        // distance: inverse-distance loudness, and the air soaks up the highs
+        let size = max(spec.span, 0.6)
+        st.gain = onboard ? 0.8 : min(1, (3 + 2.5 * size) / (d + 2))
+        st.muffle = onboard ? 0 : clampf(d / 320, 0, 1)
+        var fwd = target - eye; fwd.y = 0
+        if length(fwd) > 0.001 && !onboard {
+            fwd = normalize(fwd)
+            let right = V3(-fwd.z, 0, fwd.x)
+            st.pan = clampf(dot(rel / d, right) * 1.6, -1, 1)
+        }
+        st.airspeed = aircraft.airspeed
+        st.groundRoll = aircraft.onGround && !aircraft.crashed ? length(V3(aircraft.vel.x, 0, aircraft.vel.z)) : 0
+        st.windSpeed = env.windSpeed
+        st.ambience = site.waterLevel != nil ? 1 : (site.pal.flowers ? 0 : (site.palette == 4 ? 3 : 2))
+        if site.panorama != nil { st.ambience = site.category == "Winter" || site.category == "Desert" ? 2 : 0 }
+        st.paused = paused || hud.overlay.pausesSim
+        sound.state = st
     }
 
     private func updateHUD() {

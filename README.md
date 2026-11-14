@@ -161,7 +161,13 @@ Press **H** in the app for this list.
   - bloom, filmic tone mapping, a light colour grade, vignette and dithering are applied in a final pass.
   The sky and clouds are procedural and rendered at half resolution; grass and trees are frustum-culled in chunks. Render resolution adjusts automatically to hold the frame rate, up to a ceiling set by the Graphics quality level (Low, Medium, High). Shaders are compiled from source at launch.
 - **The app starts in full screen.** Press ⌃⌘F to switch to a window.
-- **Sound** is synthesized, with distance attenuation and Doppler shift.
+- **Sound** is synthesized in stereo, with nothing sampled:
+  - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle), ducted fans, turboprops, helicopter rotor with blade slap and tail rotor, and four separate multirotor motors;
+  - the aircraft is placed left to right by where it is, gets quieter and duller with distance, and is Doppler-shifted;
+  - airframe wind noise and tyre rumble on the ground;
+  - ambience at the pilot's position: wind that follows the wind speed, birdsong on green sites, surf on water sites;
+  - crashes (impact, debris) and splashes.
+  `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
 - **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
 
@@ -178,7 +184,8 @@ Press **H** in the app for this list.
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and shader source |
 | `Game.swift` | Game loop, cameras, interface state |
 | `UI.swift` | Main menu, aircraft and site browsers, weather panel, in-flight display |
-| `Input.swift` | Keyboard, gamepad, USB joystick input; sound synthesis |
+| `Input.swift` | Keyboard, gamepad, USB joystick input |
+| `Sound.swift` | Sound synthesis |
 | `main.swift` | App window, menus, controller setup |
 
 ### Testing

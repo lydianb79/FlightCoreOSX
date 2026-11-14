@@ -54,6 +54,11 @@ func runAutorotationTest() {
     }
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--soundtest"), i + 1 < CommandLine.arguments.count {
+    writeSoundTest(to: CommandLine.arguments[i + 1])
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--selftest") {
     runSelfTest()
     runAutorotationTest()

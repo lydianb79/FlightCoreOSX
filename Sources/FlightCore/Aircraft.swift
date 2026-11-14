@@ -140,7 +140,11 @@ struct AircraftSpec {
     var smokePos = V3(0, 0, 0.2)
     var parts: [Part] = []
     var modes: [String] = []
-    var soundBase: Float = 120   // Hz at full power
+    var soundBase: Float = 120   // blade-pass frequency (Hz) at full power
+    var engineSound = 0          // 0 electric, 1 piston, 2 ducted fan, 3 turboprop
+    var cylinders = 4
+    var radial = false
+    var blades = 2
     var eyeOffset: V3 = V3(0, 0.15, 0.05)
 }
 

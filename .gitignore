@@ -4,3 +4,4 @@ FlightCore.app/
 *.xcodeproj
 .swiftpm/
 DerivedData/
+sound_test.wav
