@@ -1,18 +1,28 @@
-<img src="Resources/AppIcon.png" width="128" alt="FlightCore icon">
+<img src="Resources/AppIcon.png" width="128" alt="FlightCore OSX icon">
 
-# FlightCore
+# FlightCore OSX
 
-A radio-control line-of-sight flight simulator for macOS, written in Swift and rendered with Metal.
+A radio-control line-of-sight flight simulator for macOS, written in Swift and rendered with Metal. Created by Rock FPV.
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. FlightCore is an early, playable version: the flight physics, cameras, sites and controller support are in place, but it is far from a complete commercial simulator (see [Not yet implemented](#not-yet-implemented)).
+![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-## Requirements
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 90 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
-- macOS 13 or later
-- Xcode 15 or later (or the Swift 5.9+ command-line toolchain)
-- A Mac with Metal support
+## Download
 
-## Build and run
+Get `FlightCore-OSX.zip` from the [latest release](https://github.com/lydianb79/FlightCoreOSX/releases/latest), unzip it and move `FlightCore.app` to your Applications folder.
+
+The app is not signed with an Apple developer certificate or notarised, so macOS will refuse to open it the first time. Either right-click the app, choose **Open**, and confirm (on recent macOS versions: try to open it once, then allow it under **System Settings ▸ Privacy & Security**), or clear the download flag in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/FlightCore.app
+```
+
+The release is built for Apple silicon Macs running macOS 13 or later.
+
+## Build from source
+
+Requirements: macOS 13 or later, a Mac with Metal support, and Xcode 15 or later (or the Swift 5.9+ command-line toolchain).
 
 Build the app bundle:
 
@@ -31,13 +41,13 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 ## Interface
 
 - **Splash screen** at launch; any key or click continues, or it moves on by itself after a few seconds.
-- **Main menu** (Esc): shows the current aircraft and flying site with previews, and starts the flight.
+- **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures.
-- **Site browser** (click the site name): preview, description and conditions for each 3D and photo site, plus a button to add your own panorama.
+- **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama.
 - **Weather panel** (wind button in the top bar): wind speed and direction, turbulence, thermals and time of day, applied live.
 - **In flight:** a top bar with the current aircraft and site, and a telemetry strip with altitude, airspeed, climb, distance, throttle and wind. Press V to hide it.
 
-The last aircraft and site are remembered between launches.
+The last aircraft and site are remembered between launches. The interface uses the red, cream and black of the splash artwork.
 
 ## Aircraft
 
@@ -125,8 +135,8 @@ Press **H** in the app for this list.
 | Z | Zoom: auto, keep ground in view, fixed |
 | F | Flight mode (quadcopters) |
 | L | High / low rates |
-| E | Flaps: up, half, full (Bushmaster, Falcon, Twin Courier) |
-| G | Landing gear up / down (Falcon, Arrow EDF, Twin Courier) |
+| E | Flaps: up, half, full (aircraft that have them) |
+| G | Landing gear up / down (aircraft with retractable gear) |
 | Y | Smoke on / off |
 | U | Helicopter throttle hold (autorotation) |
 | P | Pause |
@@ -135,7 +145,11 @@ Press **H** in the app for this list.
 | B | Balloon Burst challenge |
 | K | Demo pilot on / off |
 | M | Mute sound |
-| V | Hide / show HUD |
+| V | Hide / show the in-flight display |
+| H | Controls list |
+| Tab | Aircraft browser |
+| Esc | Main menu |
+| ⌃⌘F | Full screen / window |
 
 ### Controllers
 
@@ -153,8 +167,8 @@ Press **H** in the app for this list.
 
 - **Physics** runs at 1 kHz. Airplanes are built from individual lifting panels, each with its own local airflow, so stalls, spins, knife-edge flight and prop-wash hovering come from the geometry. Helicopters use a rotor inflow model with a rate-command flight controller; multirotors use per-motor thrust with a mixer.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
-- **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, and six trim schemes (sport, aerobatic, warbird, glider, jet, vintage). Surfaces are shaded as glossy film covering with sky reflections.
-- **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, a farm, long grass that sways in the wind, wild flowers, bushes, hedges, and rocks or cacti depending on the site.
+- **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, flat-foam profile airframes, and ten trim schemes including camouflage. Surfaces are shaded as glossy film covering with sky reflections.
+- **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, long grass that sways in the wind, wild flowers and bushes. Each site has its own terrain shape, ground colours and trees (deciduous, conifers, palms, acacias, cypresses, cacti), and some have water, a farm, or an airport with hangars and a tower.
 - **Rendering** uses Metal. Each frame:
   - the scene is drawn in linear HDR (16-bit float) with 4× MSAA, resolving both colour and depth;
   - two shadow maps are used: a tight one around the aircraft whose penumbra widens with the aircraft's height above the ground, and a 4096² one for the airfield that is redrawn only when the scene changes;
@@ -204,5 +218,11 @@ swift run -c release FlightCore --selftest
 - Aircraft and airport editors
 - Flight recording and playback
 - Flight-instructor lessons
-- Float planes and water
+- Float planes and taking off from water
 - Sloping ground and occlusion by photographed objects on photo sites
+
+## Credits
+
+- Created by Rock FPV.
+- The photo-site presets are written for CC0 panoramas from [Poly Haven](https://polyhaven.com), which are not included.
+- Aircraft named after real types are approximate scale models and are not affiliated with or endorsed by their manufacturers.
