@@ -440,9 +440,9 @@ struct SiteBrowser: View {
         Text(t).font(.system(size: 9.5, weight: .semibold)).tracking(1).foregroundColor(Theme.faint).padding(.leading, 10).padding(.top, 12).padding(.bottom, 3)
     }
     private func badge(_ site: SiteSpec) -> some View {
-        Text(site.panorama != nil ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .bold)).tracking(0.5).foregroundColor(Theme.cream)
-            .padding(.horizontal, 6).padding(.vertical, 3)
+        Text(site.panorama != nil ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .heavy)).tracking(0.5)
             .foregroundColor(site.panorama != nil ? Theme.ink : Theme.cream)
+            .padding(.horizontal, 6).padding(.vertical, 3)
             .background(Capsule().fill(site.panorama != nil ? Theme.cream : Theme.red))
     }
 
