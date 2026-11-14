@@ -28,6 +28,16 @@ open FlightCore.app
 
 To work on the code, open `Package.swift` in Xcode, or run it directly from the command line with `swift run -c release`.
 
+## Interface
+
+- **Main menu** (Esc): shows the current aircraft and flying site with previews, and starts the flight.
+- **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures.
+- **Site browser** (click the site name): preview, description and conditions for each 3D and photo site, plus a button to add your own panorama.
+- **Weather panel** (wind button in the top bar): wind speed and direction, turbulence, thermals and time of day, applied live.
+- **In flight:** a top bar with the current aircraft and site, and a telemetry strip with altitude, airspeed, climb, distance, throttle and wind. Press V to hide it.
+
+The last aircraft and site are remembered between launches.
+
 ## Aircraft
 
 Forty aircraft, grouped by category in the Aircraft menu. Step through them with `[` and `]`; keys 1–9 pick the first nine.
@@ -130,7 +140,13 @@ Press **H** in the app for this list.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, and six trim schemes (sport, aerobatic, warbird, glider, jet, vintage). Surfaces are shaded as glossy film covering with sky reflections.
 - **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, a farm, long grass that sways in the wind, wild flowers, bushes, hedges, and rocks or cacti depending on the site.
-- **Rendering** uses Metal with procedural terrain, sky and clouds, two shadow maps (one tight around the aircraft, one for the airfield) and 4× MSAA. Shaders are compiled from source at launch.
+- **Rendering** uses Metal. Each frame:
+  - the scene is drawn in linear HDR (16-bit float) with 4× MSAA, resolving both colour and depth;
+  - two shadow maps are used: a tight one around the aircraft whose penumbra widens with the aircraft's height above the ground, and a 4096² one for the airfield that is redrawn only when the scene changes;
+  - ambient occlusion is computed from the resolved depth buffer;
+  - bloom, filmic tone mapping, a light colour grade, vignette and dithering are applied in a final pass.
+  The sky and clouds are procedural and rendered at half resolution; grass and trees are frustum-culled in chunks. Render resolution adjusts automatically to hold the frame rate, up to a ceiling set by the Graphics quality level (Low, Medium, High). Shaders are compiled from source at launch.
+- **The app starts in full screen.** Press ⌃⌘F to switch to a window.
 - **Sound** is synthesized, with distance attenuation and Doppler shift.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
 - **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
@@ -146,7 +162,8 @@ Press **H** in the app for this list.
 | `World.swift` | Sites, terrain, scenery, wind, and the demo autopilot |
 | `Panorama.swift` | Photo sites |
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and shader source |
-| `Game.swift` | Game loop, cameras, HUD |
+| `Game.swift` | Game loop, cameras, interface state |
+| `UI.swift` | Main menu, aircraft and site browsers, weather panel, in-flight display |
 | `Input.swift` | Keyboard, gamepad, USB joystick input; sound synthesis |
 | `main.swift` | App window, menus, controller setup |
 

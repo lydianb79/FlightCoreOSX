@@ -5,38 +5,65 @@ import AppKit
 struct FrameUniforms {
     var viewProj = M4.identity, invViewProj = M4.identity, shadow0 = M4.identity, shadow1 = M4.identity
     var camPos = V4.zero, sunDir = V4.zero, sunColor = V4.zero, zenith = V4.zero, horizon = V4.zero, runway = V4.zero, ambient = V4.zero
+    var post = V4(0, 1, 0.85, 0.3), screen = V4(0, 0, 4096, 1)
 }
 struct DrawUniforms { var model = M4.identity; var tint = V4(1, 1, 1, 1); var params = V4.zero }
 
 struct DrawItem { var mesh: GPUMesh; var model: M4; var tint = V4(1, 1, 1, 1); var material: Float = 0; var spec: Float = 0; var wind = SIMD2<Float>(0, 0) }
 
+private struct GPUChunk { var mesh: GPUMesh; var center: V3; var radius: Float }
+
+/// Forward renderer with an HDR post-processing chain (see Shaders.swift for the frame layout).
 final class Renderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
     let queue: MTLCommandQueue
     let game: Game
-    private var scenePSO: MTLRenderPipelineState!
+
+    // pipelines
+    private var scenePSO: MTLRenderPipelineState!        // HDR, 4x MSAA
+    private var sceneLDR: MTLRenderPipelineState!        // straight to 8-bit, for thumbnails
     private var skyPSO: MTLRenderPipelineState!
+    private var skyBlitPSO: MTLRenderPipelineState!
+    private var panoPSO: MTLRenderPipelineState!
     private var shadowPSO: MTLRenderPipelineState!
+    private var aoPSO: MTLRenderPipelineState!
+    private var aoBlurPSO: MTLRenderPipelineState!
+    private var bloomPrePSO: MTLRenderPipelineState!
+    private var bloomDownPSO: MTLRenderPipelineState!
+    private var compositePSO: MTLRenderPipelineState!
     private var depthMain: MTLDepthStencilState!
     private var depthOff: MTLDepthStencilState!
     private var depthRead: MTLDepthStencilState!
     private var depthShadow: MTLDepthStencilState!
-    private var sampler: MTLSamplerState!
-    private var shadowTex: [MTLTexture] = []
-    private var panoPSO: MTLRenderPipelineState!
+    private var shadowSampler: MTLSamplerState!
+    private var pointSampler: MTLSamplerState!
+    private var linearSampler: MTLSamplerState!
     private var panoSampler: MTLSamplerState!
+
+    // render targets
+    private var shadowTex: [MTLTexture] = []
+    private let shadow1Size = 4096
+    private var hdrMS: MTLTexture?, depthMS: MTLTexture?, hdr: MTLTexture?, depth: MTLTexture?
+    private var aoTex: MTLTexture?, aoBlur: MTLTexture?, white: MTLTexture?, skyTex: MTLTexture?
+    private var dynScale: Float = 1          // automatic resolution scale, lowered when the GPU falls behind
+    private var gpuMs: Float = 8, frameMs: Float = 16.7
+    private var lastScaleChange = CACurrentMediaTime()
+    private var bloom: [MTLTexture] = []
+    private var targetSize = (0, 0)
+
+    // scene
     private var panoTex: MTLTexture?
     private var catcherMesh: GPUMesh?
-
     private var terrainMesh: GPUMesh?
     private var sceneryMesh: GPUMesh?
-    private var vegetationMesh: GPUMesh?
-    private var grassMesh: GPUMesh?
+    private var vegetation: [GPUChunk] = []
+    private var grass: [GPUChunk] = []
     private var treeShadowMesh: GPUMesh?
     private var windsockMesh: GPUMesh?
     private var balloonMesh: GPUMesh?
     private var partMeshes: [GPUMesh?] = []
     private var siteVersion = -1, aircraftVersion = -1
+    private var shadow1Key = -1
     private var lastTime = CACurrentMediaTime()
 
     // screenshot support (used for automated verification)
@@ -44,21 +71,27 @@ final class Renderer: NSObject, MTKViewDelegate {
     var shotAfter: Double = 2
     private var startTime = CACurrentMediaTime()
 
+    private let hdrFormat = MTLPixelFormat.rgba16Float
+    // profiling switches for the command line
+    static let debugScale: Float? = { let a = CommandLine.arguments; if let i = a.firstIndex(of: "--scale"), i + 1 < a.count { return Float(a[i + 1]) }; return nil }()
+    static let debugOff = Set(CommandLine.arguments.filter { $0.hasPrefix("--no-") }.map { String($0.dropFirst(5)) })
+    private let bloomFormat = MTLPixelFormat.rg11b10Float
+
     init?(view: MTKView, game: Game) {
         guard let dev = MTLCreateSystemDefaultDevice(), let q = dev.makeCommandQueue() else { return nil }
         device = dev; queue = q; self.game = game
         super.init()
         view.device = dev
         view.colorPixelFormat = .bgra8Unorm_srgb
-        view.depthStencilPixelFormat = .depth32Float
-        view.sampleCount = 4
-        view.clearDepth = 0
-        view.clearColor = MTLClearColor(red: 0.5, green: 0.65, blue: 0.85, alpha: 1)
+        view.depthStencilPixelFormat = .invalid          // the scene has its own depth target; the drawable only receives the composite
+        view.sampleCount = 1
+        view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         view.preferredFramesPerSecond = 120
         do { try build(view) } catch { NSLog("Metal setup failed: \(error)"); return nil }
         balloonMesh = { var b = MeshBuilder(); b.ellipsoid(center: .zero, radii: V3(0.6, 0.72, 0.6), color: rgb(1, 1, 1), seg: 12, rings: 8)
             b.cylinder(from: V3(0, -0.7, 0), to: V3(0, -0.82, 0), r0: 0.03, r1: 0.07, seg: 6, color: rgb(1, 1, 1)); return GPUMesh(dev, b) }()
         windsockMesh = GPUMesh(dev, buildWindsock())
+        game.hud.thumbnailer = { [unowned self] spec in self.thumbnail(for: spec) }
     }
 
     private func build(_ view: MTKView) throws {
@@ -69,34 +102,39 @@ final class Renderer: NSObject, MTKViewDelegate {
         vd.attributes[2].format = .float4; vd.attributes[2].offset = 24; vd.attributes[2].bufferIndex = 0
         vd.layouts[0].stride = 40
 
-        let sd = MTLRenderPipelineDescriptor()
-        sd.vertexFunction = lib.makeFunction(name: "sceneVS"); sd.fragmentFunction = lib.makeFunction(name: "sceneFS")
-        sd.vertexDescriptor = vd
-        sd.colorAttachments[0].pixelFormat = view.colorPixelFormat
-        sd.depthAttachmentPixelFormat = view.depthStencilPixelFormat
-        sd.rasterSampleCount = view.sampleCount
-        sd.colorAttachments[0].isBlendingEnabled = true
-        sd.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        sd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        sd.colorAttachments[0].sourceAlphaBlendFactor = .one
-        sd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        scenePSO = try device.makeRenderPipelineState(descriptor: sd)
+        func scene(_ format: MTLPixelFormat) throws -> MTLRenderPipelineState {
+            let sd = MTLRenderPipelineDescriptor()
+            sd.vertexFunction = lib.makeFunction(name: "sceneVS"); sd.fragmentFunction = lib.makeFunction(name: "sceneFS")
+            sd.vertexDescriptor = vd
+            sd.colorAttachments[0].pixelFormat = format
+            sd.depthAttachmentPixelFormat = .depth32Float
+            sd.rasterSampleCount = 4
+            sd.colorAttachments[0].isBlendingEnabled = true
+            sd.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            sd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            sd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            sd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            return try device.makeRenderPipelineState(descriptor: sd)
+        }
+        scenePSO = try scene(hdrFormat)
+        sceneLDR = try scene(.bgra8Unorm_srgb)
 
-        let kd = MTLRenderPipelineDescriptor()
-        kd.vertexFunction = lib.makeFunction(name: "skyVS"); kd.fragmentFunction = lib.makeFunction(name: "skyFS")
-        kd.colorAttachments[0].pixelFormat = view.colorPixelFormat
-        kd.depthAttachmentPixelFormat = view.depthStencilPixelFormat
-        kd.rasterSampleCount = view.sampleCount
-        skyPSO = try device.makeRenderPipelineState(descriptor: kd)
-        kd.fragmentFunction = lib.makeFunction(name: "panoFS")
-        panoPSO = try device.makeRenderPipelineState(descriptor: kd)
-        let pd = MTLSamplerDescriptor()
-        pd.minFilter = .linear; pd.magFilter = .linear; pd.mipFilter = .linear; pd.maxAnisotropy = 8
-        pd.sAddressMode = .repeat; pd.tAddressMode = .clampToEdge
-        panoSampler = device.makeSamplerState(descriptor: pd)
-        var cm = MeshBuilder()
-        cm.quad(V3(-600, 0, 600), V3(600, 0, 600), V3(600, 0, -600), V3(-600, 0, -600), rgb(1, 1, 1))
-        catcherMesh = GPUMesh(device, cm)
+        func fullscreen(_ fragment: String, _ format: MTLPixelFormat, samples: Int = 1, depth: Bool = false) throws -> MTLRenderPipelineState {
+            let d = MTLRenderPipelineDescriptor()
+            d.vertexFunction = lib.makeFunction(name: "skyVS"); d.fragmentFunction = lib.makeFunction(name: fragment)
+            d.colorAttachments[0].pixelFormat = format
+            d.rasterSampleCount = samples
+            if depth { d.depthAttachmentPixelFormat = .depth32Float }
+            return try device.makeRenderPipelineState(descriptor: d)
+        }
+        skyPSO = try fullscreen("skyFS", bloomFormat)
+        skyBlitPSO = try fullscreen("skyBlitFS", hdrFormat, samples: 4, depth: true)
+        panoPSO = try fullscreen("panoFS", hdrFormat, samples: 4, depth: true)
+        aoPSO = try fullscreen("aoFS", .r8Unorm)
+        aoBlurPSO = try fullscreen("aoBlurFS", .r8Unorm)
+        bloomPrePSO = try fullscreen("bloomPreFS", bloomFormat)
+        bloomDownPSO = try fullscreen("bloomDownFS", bloomFormat)
+        compositePSO = try fullscreen("compositeFS", view.colorPixelFormat)
 
         let hd = MTLRenderPipelineDescriptor()
         hd.vertexFunction = lib.makeFunction(name: "shadowVS")
@@ -104,38 +142,85 @@ final class Renderer: NSObject, MTKViewDelegate {
         hd.depthAttachmentPixelFormat = .depth32Float
         shadowPSO = try device.makeRenderPipelineState(descriptor: hd)
 
-        func depth(_ f: MTLCompareFunction, _ write: Bool) -> MTLDepthStencilState {
+        func depthState(_ f: MTLCompareFunction, _ write: Bool) -> MTLDepthStencilState {
             let d = MTLDepthStencilDescriptor(); d.depthCompareFunction = f; d.isDepthWriteEnabled = write
             return device.makeDepthStencilState(descriptor: d)!
         }
-        depthMain = depth(.greaterEqual, true)       // reverse-Z
-        depthOff = depth(.always, false)
-        depthRead = depth(.greaterEqual, false)
-        depthShadow = depth(.lessEqual, true)
+        depthMain = depthState(.greaterEqual, true)       // reverse-Z
+        depthOff = depthState(.always, false)
+        depthRead = depthState(.greaterEqual, false)
+        depthShadow = depthState(.lessEqual, true)
 
         let smp = MTLSamplerDescriptor()
         smp.minFilter = .linear; smp.magFilter = .linear; smp.compareFunction = .lessEqual
         smp.sAddressMode = .clampToEdge; smp.tAddressMode = .clampToEdge
-        sampler = device.makeSamplerState(descriptor: smp)
+        shadowSampler = device.makeSamplerState(descriptor: smp)
+        let ps = MTLSamplerDescriptor()
+        ps.minFilter = .nearest; ps.magFilter = .nearest; ps.sAddressMode = .clampToEdge; ps.tAddressMode = .clampToEdge
+        pointSampler = device.makeSamplerState(descriptor: ps)
+        let ls = MTLSamplerDescriptor()
+        ls.minFilter = .linear; ls.magFilter = .linear; ls.sAddressMode = .clampToEdge; ls.tAddressMode = .clampToEdge
+        linearSampler = device.makeSamplerState(descriptor: ls)
+        let pd = MTLSamplerDescriptor()
+        pd.minFilter = .linear; pd.magFilter = .linear; pd.mipFilter = .linear; pd.maxAnisotropy = 8
+        pd.sAddressMode = .repeat; pd.tAddressMode = .clampToEdge
+        panoSampler = device.makeSamplerState(descriptor: pd)
 
-        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: 2048, height: 2048, mipmapped: false)
-        td.usage = [.renderTarget, .shaderRead]; td.storageMode = .private
-        shadowTex = [device.makeTexture(descriptor: td)!, device.makeTexture(descriptor: td)!]
+        func shadowMap(_ size: Int) -> MTLTexture {
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: size, height: size, mipmapped: false)
+            td.usage = [.renderTarget, .shaderRead]; td.storageMode = .private
+            return device.makeTexture(descriptor: td)!
+        }
+        shadowTex = [shadowMap(2048), shadowMap(shadow1Size)]
+
+        let wd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        white = device.makeTexture(descriptor: wd)
+        var one: UInt8 = 255
+        white?.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &one, bytesPerRow: 1)
+
+        var cm = MeshBuilder()
+        cm.quad(V3(-600, 0, 600), V3(600, 0, 600), V3(600, 0, -600), V3(-600, 0, -600), rgb(1, 1, 1))
+        catcherMesh = GPUMesh(device, cm)
+    }
+
+    /// (Re)create the off-screen targets for a render size.
+    private func makeTargets(_ w: Int, _ h: Int) {
+        guard targetSize != (w, h) else { return }
+        targetSize = (w, h)
+        func tex(_ format: MTLPixelFormat, _ w: Int, _ h: Int, samples: Int = 1) -> MTLTexture? {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: max(w, 1), height: max(h, 1), mipmapped: false)
+            if samples > 1 { d.textureType = .type2DMultisample; d.sampleCount = samples; d.usage = .renderTarget }
+            else { d.usage = [.renderTarget, .shaderRead] }
+            d.storageMode = .private
+            return device.makeTexture(descriptor: d)
+        }
+        hdrMS = tex(hdrFormat, w, h, samples: 4)
+        depthMS = tex(.depth32Float, w, h, samples: 4)
+        hdr = tex(hdrFormat, w, h)
+        depth = tex(.depth32Float, w, h)
+        aoTex = tex(.r8Unorm, w / 2, h / 2)
+        aoBlur = tex(.r8Unorm, w / 2, h / 2)
+        skyTex = tex(bloomFormat, w / 2, h / 2)
+        bloom = (1...5).compactMap { tex(bloomFormat, w >> $0, h >> $0) }
     }
 
     private func syncMeshes() {
         if siteVersion != game.siteVersion {
             siteVersion = game.siteVersion
+            shadow1Key = -1
             panoTex = nil
             if let url = game.site.panorama {
-                terrainMesh = nil; sceneryMesh = nil; vegetationMesh = nil; grassMesh = nil; treeShadowMesh = nil
+                terrainMesh = nil; sceneryMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil
                 if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img) }
                 if panoTex == nil { game.say("Could not load panorama image", 6) }
             } else {
                 terrainMesh = GPUMesh(device, game.terrain.buildMesh())
                 sceneryMesh = GPUMesh(device, game.terrain.buildScenery())
-                vegetationMesh = GPUMesh(device, game.terrain.buildVegetation())
-                grassMesh = GPUMesh(device, game.terrain.buildGrass())
+                func upload(_ b: MeshBuilder, _ cell: Float) -> [GPUChunk] {
+                    chunked(b, cell: cell).compactMap { c in GPUMesh(device, c.mesh).map { GPUChunk(mesh: $0, center: c.center, radius: c.radius) } }
+                }
+                vegetation = upload(game.terrain.buildVegetation(), 150)
+                grass = upload(game.terrain.buildGrass(), 30)
                 treeShadowMesh = GPUMesh(device, game.terrain.buildTreeShadows())
             }
         }
@@ -143,6 +228,346 @@ final class Renderer: NSObject, MTKViewDelegate {
             aircraftVersion = game.aircraftVersion
             partMeshes = game.aircraft.spec.parts.map { GPUMesh(device, $0.mesh) }
         }
+    }
+
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+    private func drawItems(_ enc: MTLRenderCommandEncoder, _ items: [DrawItem], fragment: Bool) {
+        for it in items {
+            var du = DrawUniforms(model: it.model, tint: it.tint, params: V4(it.material, it.spec, it.wind.x, it.wind.y))
+            enc.setVertexBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+            if fragment { enc.setFragmentBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2) }
+            enc.setVertexBuffer(it.mesh.buffer, offset: 0, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: it.mesh.count)
+        }
+    }
+
+    /// One full-screen post-processing pass into `target`.
+    private func post(_ cb: MTLCommandBuffer, _ pso: MTLRenderPipelineState, to target: MTLTexture, _ textures: [MTLTexture?], _ fu: inout FrameUniforms) {
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = target
+        rpd.colorAttachments[0].loadAction = .dontCare
+        rpd.colorAttachments[0].storeAction = .store
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
+        enc.setRenderPipelineState(pso)
+        enc.setFragmentBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+        for (i, t) in textures.enumerated() { enc.setFragmentTexture(t, index: i) }
+        enc.setFragmentSamplerState(linearSampler, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        enc.endEncoding()
+    }
+
+    func draw(in view: MTKView) {
+        let now = CACurrentMediaTime()
+        frameMs += (Float(now - lastTime) * 1000 - frameMs) * 0.08
+        game.frame(dt: Float(now - lastTime))
+        lastTime = now
+        syncMeshes()
+        guard let drawable = view.currentDrawable, let cb = queue.makeCommandBuffer() else { return }
+        let quality = game.quality
+        // resolution follows the GPU load, up to a ceiling set by the quality level
+        let ceiling: Float = [0.7, 0.85, 1.0][min(max(quality, 0), 2)]
+        // drop resolution when frames are being missed; raise it again only with clear GPU headroom
+        if now - lastScaleChange > 0.8 && now - startTime > 3 && game.hud.overlay == .none {
+            if frameMs > 18.6 && dynScale > 0.5 { dynScale -= frameMs > 26 ? 0.1 : 0.05; lastScaleChange = now }
+            // the GPU timer cannot show headroom under vsync, so after a steady spell just try the next step up
+            else if frameMs < 17.3 && dynScale < 1 && now - lastScaleChange > 8 { dynScale += 0.05; lastScaleChange = now }
+        }
+        dynScale = min(max(dynScale, 0.5), 1)
+        var scale = min(dynScale, ceiling)
+        if let fixed = Renderer.debugScale { scale = fixed }
+        game.renderScale = scale
+        let dw = drawable.texture.width, dh = drawable.texture.height
+        let rw = max(Int(Float(dw) * scale), 16), rh = max(Int(Float(dh) * scale), 16)
+        makeTargets(rw, rh)
+        guard let hdrMS = hdrMS, let depthMS = depthMS, let hdr = hdr, let depth = depth, let skyTex = skyTex, bloom.count == 5 else { return }
+
+        // ---- uniforms
+        let ac = game.aircraft
+        let light = game.lighting
+        let L = light.sunDir
+        func lightVP(_ center: V3, _ size: Float) -> M4 {
+            let up: V3 = abs(L.y) > 0.95 ? V3(0, 0, 1) : V3(0, 1, 0)
+            return M4.ortho(halfSize: size, near: 1, far: 1500) * M4.lookAt(eye: center + L * 700, target: center, up: up)
+        }
+        let pano = game.site.panorama != nil
+        let s0Half = max(ac.spec.span * 0.9, 1.2)
+        let proj = M4.perspective(fovY: game.fov, aspect: Float(dw) / Float(max(dh, 1)), near: 20000, far: 0.08)   // reverse-Z
+        let viewM = M4.lookAt(eye: game.eye, target: game.target, up: game.upVec)
+        var fu = FrameUniforms()
+        fu.viewProj = proj * viewM
+        fu.invViewProj = fu.viewProj.inverse
+        fu.shadow0 = lightVP(ac.pos, s0Half)
+        fu.shadow1 = lightVP(V3(0, 0, game.site.flatCenterZ), 300)
+        fu.camPos = V4(game.eye.x, game.eye.y, game.eye.z, game.env.time)
+        fu.sunDir = V4(L.x, L.y, L.z, Float(game.site.runwayType))
+        fu.sunColor = V4(light.sun.x, light.sun.y, light.sun.z, pano ? 0 : game.site.fog)
+        fu.zenith = V4(light.zenith.x, light.zenith.y, light.zenith.z, game.site.north / 360)
+        fu.horizon = V4(light.horizon.x, light.horizon.y, light.horizon.z, game.site.horizon * deg)
+        fu.runway = V4(game.site.runwayLen / 2, game.site.runwayWid / 2, Float(game.site.style), game.site.cloud)
+        fu.ambient = V4(light.ambient.x, light.ambient.y, light.ambient.z, 0)
+        fu.post = V4(0, 1, quality > 0 ? 0.85 : 0, pano ? 0.12 : 0.32)
+        fu.screen = V4(1 / Float(rw), 1 / Float(rh), Float(shadow1Size), s0Half)
+
+        // frustum side planes, for culling grass and trees
+        let m = fu.viewProj
+        func row(_ i: Int) -> V4 { V4(m.columns.0[i], m.columns.1[i], m.columns.2[i], m.columns.3[i]) }
+        let planes = [row(3) + row(0), row(3) - row(0), row(3) + row(1), row(3) - row(1)].map { p -> V4 in p / length(V3(p.x, p.y, p.z)) }
+        func visible(_ c: GPUChunk, maxDist: Float) -> Bool {
+            if distance(c.center, game.eye) - c.radius > maxDist { return false }
+            for p in planes where p.x * c.center.x + p.y * c.center.y + p.z * c.center.z + p.w < -c.radius { return false }
+            return true
+        }
+
+        // ---- draw lists
+        var acItems: [DrawItem] = []
+        var acBlend: [DrawItem] = []       // translucent prop / rotor discs
+        let base = M4.translation(ac.pos) * M4(ac.q)
+        for (i, part) in ac.spec.parts.enumerated() {
+            guard i < partMeshes.count, let mesh = partMeshes[i], !ac.detached.contains(i) else { continue }
+            var local = M4.identity
+            switch part.anim {
+            case .fixed: break
+            case .spin(let k): local = M4.translation(part.pivot) * M4.rotation(ac.spin[k], part.axis)
+            case .hinge(let ch, let maxA): local = M4.translation(part.pivot) * M4.rotation(ac.animValue(ch) * maxA, part.axis)
+            }
+            if part.blur != 0, case .spin(let k) = part.anim {
+                let lv = ac.spec.kind == .helicopter ? ac.levels[0] : ac.levels[min(k, ac.levels.count - 1)]
+                if part.blur == 1 { if lv > 0.3 { continue } }                   // blades vanish into the disc
+                else {
+                    let a = smoothstep(0.12, 0.45, lv)
+                    if a > 0.01 { acBlend.append(DrawItem(mesh: mesh, model: base * local, tint: V4(1, 1, 1, a), material: 4)) }
+                    continue
+                }
+            }
+            acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 1))
+        }
+        for d in game.debris {
+            guard d.part < partMeshes.count, let mesh = partMeshes[d.part] else { continue }
+            acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 1))
+        }
+        let wv = game.env.windVec
+        let wind2 = SIMD2<Float>(wv.x, wv.z) + SIMD2<Float>(0.6, 0.3)
+        var world: [DrawItem] = []
+        if let mesh = sceneryMesh { world.append(DrawItem(mesh: mesh, model: .identity, spec: 1)) }
+        if let mesh = windsockMesh, !pano {
+            let sp = game.env.windSpeed
+            let yaw = sp > 0.05 ? atan2(wv.x, wv.z) : 0
+            let droop = (1 - clampf(sp / 7, 0, 1)) * 78 * deg + sin(game.env.time * 5) * 0.04 * min(sp, 3)
+            world.append(DrawItem(mesh: mesh, model: M4.translation(game.terrain.windsockBase + V3(0, 4.8, 0)) * M4.rotation(yaw, V3(0, 1, 0)) * M4.rotation(droop, V3(1, 0, 0))))
+        }
+        if let mesh = balloonMesh {
+            for b in game.balloons where b.alive { world.append(DrawItem(mesh: mesh, model: M4.translation(b.pos), tint: b.color, spec: 0.8)) }
+        }
+        for c in vegetation where !Renderer.debugOff.contains("veg") && visible(c, maxDist: 5000) { world.append(DrawItem(mesh: c.mesh, model: .identity, material: 5, wind: wind2)) }
+        let grassItems = Renderer.debugOff.contains("grass") ? [] : grass.filter { visible($0, maxDist: 140) }.map { DrawItem(mesh: $0.mesh, model: .identity, material: 6, wind: wind2) }
+
+        // ---- shadow maps: 0 = tight around the aircraft (every frame), 1 = the airfield (static, redrawn when it changes)
+        func shadowPass(_ index: Int, _ items: [DrawItem]) {
+            let sp = MTLRenderPassDescriptor()
+            sp.depthAttachment.texture = shadowTex[index]
+            sp.depthAttachment.loadAction = .clear; sp.depthAttachment.clearDepth = 1; sp.depthAttachment.storeAction = .store
+            guard let enc = cb.makeRenderCommandEncoder(descriptor: sp) else { return }
+            enc.setRenderPipelineState(shadowPSO)
+            enc.setDepthStencilState(depthShadow)
+            enc.setCullMode(.none)
+            enc.setDepthBias(0, slopeScale: 2.0, clamp: 0)
+            var vp = index == 0 ? fu.shadow0 : fu.shadow1
+            enc.setVertexBytes(&vp, length: 64, index: 1)
+            drawItems(enc, items, fragment: false)
+            enc.endEncoding()
+        }
+        shadowPass(0, acItems)
+        let key = game.siteVersion * 8 + game.timeOfDay
+        if shadow1Key != key {
+            shadow1Key = key
+            var casters: [DrawItem] = []
+            if let mesh = sceneryMesh { casters.append(DrawItem(mesh: mesh, model: .identity)) }
+            for c in vegetation where abs(c.center.x) < 300 + c.radius && abs(c.center.z - game.site.flatCenterZ) < 300 + c.radius {
+                casters.append(DrawItem(mesh: c.mesh, model: .identity))
+            }
+            shadowPass(1, casters)
+        }
+
+        if panoTex == nil { post(cb, skyPSO, to: skyTex, [], &fu) }
+
+        // ---- scene into the multisampled HDR target
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = hdrMS
+        rpd.colorAttachments[0].resolveTexture = hdr
+        rpd.colorAttachments[0].loadAction = .dontCare               // the sky pass covers every pixel
+        rpd.colorAttachments[0].storeAction = .multisampleResolve
+        rpd.depthAttachment.texture = depthMS
+        rpd.depthAttachment.resolveTexture = depth
+        rpd.depthAttachment.loadAction = .clear; rpd.depthAttachment.clearDepth = 0
+        rpd.depthAttachment.storeAction = .multisampleResolve
+        rpd.depthAttachment.depthResolveFilter = .max
+        if let enc = cb.makeRenderCommandEncoder(descriptor: rpd) {
+            enc.setCullMode(.none)
+            enc.setVertexBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+            enc.setFragmentBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+            if let pt = panoTex {
+                enc.setRenderPipelineState(panoPSO)
+                enc.setFragmentTexture(pt, index: 0)
+                enc.setFragmentSamplerState(panoSampler, index: 1)
+            } else {
+                enc.setRenderPipelineState(skyBlitPSO)
+                enc.setFragmentTexture(skyTex, index: 0)
+                enc.setFragmentSamplerState(linearSampler, index: 1)
+            }
+            enc.setDepthStencilState(depthOff)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+
+            enc.setRenderPipelineState(scenePSO)
+            enc.setDepthStencilState(depthMain)
+            enc.setFragmentTexture(shadowTex[0], index: 0)
+            enc.setFragmentTexture(shadowTex[1], index: 1)
+            enc.setFragmentSamplerState(shadowSampler, index: 0)
+            enc.setFragmentSamplerState(pointSampler, index: 1)
+            if let t = terrainMesh, !Renderer.debugOff.contains("terrain") { drawItems(enc, [DrawItem(mesh: t, model: .identity, material: 1)], fragment: true) }
+            if pano, let c = catcherMesh { drawItems(enc, [DrawItem(mesh: c, model: .identity, material: 2)], fragment: true) }
+            drawItems(enc, world, fragment: true)
+            drawItems(enc, grassItems, fragment: true)
+            drawItems(enc, acItems, fragment: true)
+            // translucent things last, depth-tested but not written
+            enc.setDepthStencilState(depthRead)
+            if let ts = treeShadowMesh { drawItems(enc, [DrawItem(mesh: ts, model: .identity, material: 4)], fragment: true) }
+            drawItems(enc, acBlend, fragment: true)
+            if game.showObstacles, !game.site.obstacles.isEmpty {
+                var ob = MeshBuilder()
+                for (i, o) in game.site.obstacles.enumerated() {
+                    let c = Panoramas.position(o, north: game.site.north)
+                    let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
+                    ob.cylinder(from: V3(c.x, 0, c.y), to: V3(c.x, o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
+                }
+                if let om = GPUMesh(device, ob) { drawItems(enc, [DrawItem(mesh: om, model: .identity, material: 4)], fragment: true) }
+            }
+            if let pm = particleMesh() { drawItems(enc, [DrawItem(mesh: pm, model: .identity, material: 3)], fragment: true) }
+            enc.endEncoding()
+        }
+
+        // ---- post-processing
+        var ao: MTLTexture? = white
+        if quality > 0, !Renderer.debugOff.contains("ao"), let aoTex = aoTex, let aoBlur = aoBlur {
+            post(cb, aoPSO, to: aoTex, [depth], &fu)
+            post(cb, aoBlurPSO, to: aoBlur, [aoTex], &fu)
+            ao = aoBlur
+        }
+        post(cb, bloomPrePSO, to: bloom[0], [hdr], &fu)
+        for i in 1..<5 { post(cb, bloomDownPSO, to: bloom[i], [bloom[i - 1]], &fu) }
+
+        // ---- composite to the screen
+        let out = MTLRenderPassDescriptor()
+        out.colorAttachments[0].texture = drawable.texture
+        out.colorAttachments[0].loadAction = .dontCare
+        out.colorAttachments[0].storeAction = .store
+        if let enc = cb.makeRenderCommandEncoder(descriptor: out) {
+            enc.setRenderPipelineState(compositePSO)
+            enc.setFragmentBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+            for (i, t) in [hdr, ao, bloom[1], bloom[2], bloom[3], bloom[4]].enumerated() { enc.setFragmentTexture(t, index: i) }
+            enc.setFragmentSamplerState(linearSampler, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.endEncoding()
+        }
+
+        var capture: MTLTexture?
+        if let _ = shotPath, now - startTime >= shotAfter {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: drawable.texture.pixelFormat, width: dw, height: dh, mipmapped: false)
+            d.storageMode = .shared
+            if let tex = device.makeTexture(descriptor: d), let blit = cb.makeBlitCommandEncoder() {
+                blit.copy(from: drawable.texture, to: tex)
+                blit.endEncoding()
+                capture = tex
+            }
+        }
+        cb.addCompletedHandler { [weak self] b in
+            let ms = Float((b.gpuEndTime - b.gpuStartTime) * 1000)
+            DispatchQueue.main.async { if let s = self, ms > 0 { s.gpuMs += (ms - s.gpuMs) * 0.15; s.game.gpuMs = s.gpuMs } }
+        }
+        cb.present(drawable)
+        cb.commit()
+        if let tex = capture, let path = shotPath {
+            cb.waitUntilCompleted()
+            savePNG(tex, path)
+            exit(0)
+        }
+    }
+
+    /// Studio-style preview of an aircraft on a transparent background, for the selection screens.
+    func thumbnail(for spec: AircraftSpec, width w: Int = 840, height h: Int = 520) -> NSImage? {
+        let cd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm_srgb, width: w, height: h, mipmapped: false)
+        cd.textureType = .type2DMultisample; cd.sampleCount = 4; cd.usage = .renderTarget; cd.storageMode = .private
+        let rd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm_srgb, width: w, height: h, mipmapped: false)
+        rd.usage = [.renderTarget, .shaderRead]; rd.storageMode = .shared
+        let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: w, height: h, mipmapped: false)
+        dd.textureType = .type2DMultisample; dd.sampleCount = 4; dd.usage = .renderTarget; dd.storageMode = .private
+        guard let color = device.makeTexture(descriptor: cd), let resolve = device.makeTexture(descriptor: rd), let depth = device.makeTexture(descriptor: dd),
+              let cb = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = color; rpd.colorAttachments[0].resolveTexture = resolve
+        rpd.colorAttachments[0].loadAction = .clear; rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        rpd.colorAttachments[0].storeAction = .multisampleResolve
+        rpd.depthAttachment.texture = depth; rpd.depthAttachment.loadAction = .clear; rpd.depthAttachment.clearDepth = 0; rpd.depthAttachment.storeAction = .dontCare
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return nil }
+
+        // frame the model from its contact points and span
+        let ys = spec.contacts.map { $0.pos.y }, zs = spec.contacts.map { $0.pos.z }
+        let minY = ys.min() ?? -0.1, maxY = ys.max() ?? 0.1, minZ = zs.min() ?? -0.5, maxZ = zs.max() ?? 0.5
+        let center = V3(0, (minY + maxY) / 2, (minZ + maxZ) / 2)
+        let radius = 0.5 * max(spec.span, maxZ - minZ) * 0.84
+        let fov: Float = 26 * deg
+        let dir = normalize(V3(-0.8, 0.42, -0.95))
+        let eye = center + dir * (radius / tan(fov / 2) * 1.02)
+        var fu = FrameUniforms()
+        fu.viewProj = M4.perspective(fovY: fov, aspect: Float(w) / Float(h), near: 200, far: 0.02) * M4.lookAt(eye: eye, target: center, up: V3(0, 1, 0))
+        fu.invViewProj = fu.viewProj.inverse
+        fu.shadow0 = M4(diagonal: V4(0, 0, 0, 0)); fu.shadow1 = fu.shadow0          // no shadow maps: everything lit
+        fu.camPos = V4(eye.x, eye.y, eye.z, 0)
+        let L = normalize(V3(-0.45, 0.8, -0.35))
+        fu.sunDir = V4(L.x, L.y, L.z, 0)
+        fu.sunColor = V4(3.0, 2.9, 2.75, 0)
+        fu.zenith = V4(0.35, 0.45, 0.65, 0); fu.horizon = V4(0.75, 0.8, 0.86, 0)
+        fu.ambient = V4(0.3, 0.33, 0.38, 0)
+        fu.post = V4(1, 1, 0, 0)                    // tone-map in the scene shader: there is no post chain here
+        enc.setCullMode(.none)
+        enc.setVertexBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+        enc.setFragmentBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+        enc.setRenderPipelineState(sceneLDR)
+        enc.setDepthStencilState(depthMain)
+        enc.setFragmentTexture(shadowTex[0], index: 0); enc.setFragmentTexture(shadowTex[1], index: 1)
+        enc.setFragmentSamplerState(shadowSampler, index: 0)
+        enc.setFragmentSamplerState(pointSampler, index: 1)
+        var items: [DrawItem] = []
+        for part in spec.parts where part.blur != 2 {
+            guard let mesh = GPUMesh(device, part.mesh) else { continue }
+            var local = M4.identity
+            if case .fixed = part.anim {} else { local = M4.translation(part.pivot) }
+            items.append(DrawItem(mesh: mesh, model: local, spec: 1))
+        }
+        drawItems(enc, items, fragment: true)
+        // soft contact shadow on an invisible floor
+        var sm = MeshBuilder()
+        let up = V3(0, 1, 0), n = 28
+        for j in 0..<n {
+            let a0 = Float(j) / Float(n) * 2 * .pi, a1 = Float(j + 1) / Float(n) * 2 * .pi
+            let c = V3(0, minY, center.z)
+            sm.v(c, up, V4(0, 0, 0, 0.5))
+            sm.v(c + V3(cos(a0) * spec.span * 0.55, 0, sin(a0) * (maxZ - minZ) * 0.6), up, V4(0, 0, 0, 0))
+            sm.v(c + V3(cos(a1) * spec.span * 0.55, 0, sin(a1) * (maxZ - minZ) * 0.6), up, V4(0, 0, 0, 0))
+        }
+        if let mesh = GPUMesh(device, sm) {
+            enc.setDepthStencilState(depthRead)
+            drawItems(enc, [DrawItem(mesh: mesh, model: .identity, material: 4)], fragment: true)
+        }
+        enc.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        resolve.getBytes(&bytes, bytesPerRow: w * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+        let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let ctx = CGContext(data: &bytes, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: info), let img = ctx.makeImage() else { return nil }
+        return NSImage(cgImage: img, size: NSSize(width: w, height: h))
     }
 
     /// Camera-facing quads for all smoke and dust particles, oldest first.
@@ -178,175 +603,6 @@ final class Renderer: NSObject, MTKViewDelegate {
             blit.generateMipmaps(for: tex); blit.endEncoding(); cb.commit()
         }
         return tex
-    }
-
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-
-    func draw(in view: MTKView) {
-        let now = CACurrentMediaTime()
-        game.frame(dt: Float(now - lastTime))
-        lastTime = now
-        syncMeshes()
-        guard let rpd = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let cb = queue.makeCommandBuffer() else { return }
-
-        // ---- draw lists
-        let ac = game.aircraft
-        var acItems: [DrawItem] = []
-        var acBlend: [DrawItem] = []       // translucent prop / rotor discs
-        let base = M4.translation(ac.pos) * M4(ac.q)
-        for (i, part) in ac.spec.parts.enumerated() {
-            guard i < partMeshes.count, let mesh = partMeshes[i], !ac.detached.contains(i) else { continue }
-            var local = M4.identity
-            switch part.anim {
-            case .fixed: break
-            case .spin(let k): local = M4.translation(part.pivot) * M4.rotation(ac.spin[k], part.axis)
-            case .hinge(let ch, let maxA): local = M4.translation(part.pivot) * M4.rotation(ac.animValue(ch) * maxA, part.axis)
-            }
-            if part.blur != 0, case .spin(let k) = part.anim {
-                let lv = ac.spec.kind == .helicopter ? ac.levels[0] : ac.levels[min(k, ac.levels.count - 1)]
-                if part.blur == 1 { if lv > 0.3 { continue } }                   // blades vanish into the disc
-                else {
-                    let a = smoothstep(0.12, 0.45, lv)
-                    if a > 0.01 { acBlend.append(DrawItem(mesh: mesh, model: base * local, tint: V4(1, 1, 1, a), material: 4)) }
-                    continue
-                }
-            }
-            acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 1))
-        }
-        for d in game.debris {
-            guard d.part < partMeshes.count, let mesh = partMeshes[d.part] else { continue }
-            acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 1))
-        }
-        var world: [DrawItem] = []
-        let wv = game.env.windVec
-        let wind2 = SIMD2<Float>(wv.x, wv.z) + SIMD2<Float>(0.6, 0.3)
-        if let m = sceneryMesh { world.append(DrawItem(mesh: m, model: .identity, spec: 1)) }
-        if let m = vegetationMesh { world.append(DrawItem(mesh: m, model: .identity, material: 5, wind: wind2)) }
-        if let m = windsockMesh, game.site.panorama == nil {
-            let w = game.env.windVec
-            let sp = game.env.windSpeed
-            let yaw = sp > 0.05 ? atan2(w.x, w.z) : 0
-            let droop = (1 - clampf(sp / 7, 0, 1)) * 78 * deg + sin(game.env.time * 5) * 0.04 * min(sp, 3)
-            world.append(DrawItem(mesh: m, model: M4.translation(game.terrain.windsockBase + V3(0, 4.8, 0)) * M4.rotation(yaw, V3(0, 1, 0)) * M4.rotation(droop, V3(1, 0, 0))))
-        }
-        if let m = balloonMesh {
-            for b in game.balloons where b.alive { world.append(DrawItem(mesh: m, model: M4.translation(b.pos), tint: b.color, spec: 0.8)) }
-        }
-
-        // ---- uniforms
-        let light = game.lighting
-        let L = light.sunDir
-        func lightVP(_ center: V3, _ size: Float) -> M4 {
-            let up: V3 = abs(L.y) > 0.95 ? V3(0, 0, 1) : V3(0, 1, 0)
-            return M4.ortho(halfSize: size, near: 1, far: 1500) * M4.lookAt(eye: center + L * 700, target: center, up: up)
-        }
-        let aspect = Float(view.drawableSize.width / max(view.drawableSize.height, 1))
-        let proj = M4.perspective(fovY: game.fov, aspect: aspect, near: 20000, far: 0.08)   // reverse-Z
-        let viewM = M4.lookAt(eye: game.eye, target: game.target, up: game.upVec)
-        var fu = FrameUniforms()
-        fu.viewProj = proj * viewM
-        fu.invViewProj = fu.viewProj.inverse
-        fu.shadow0 = lightVP(ac.pos, max(ac.spec.span * 0.9, 1.2))
-        fu.shadow1 = lightVP(V3(0, 0, game.site.flatCenterZ), 260)
-        fu.camPos = V4(game.eye.x, game.eye.y, game.eye.z, game.env.time)
-        fu.sunDir = V4(L.x, L.y, L.z, Float(game.site.runwayType))
-        fu.sunColor = V4(light.sun.x, light.sun.y, light.sun.z, game.site.fog)
-        fu.zenith = V4(light.zenith.x, light.zenith.y, light.zenith.z, game.site.north / 360)
-        fu.horizon = V4(light.horizon.x, light.horizon.y, light.horizon.z, game.site.horizon * deg)
-        fu.runway = V4(game.site.runwayLen / 2, game.site.runwayWid / 2, Float(game.site.style), game.site.cloud)
-        fu.ambient = V4(light.ambient.x, light.ambient.y, light.ambient.z, 0)
-
-        func drawItems(_ enc: MTLRenderCommandEncoder, _ items: [DrawItem], fragment: Bool) {
-            for it in items {
-                var du = DrawUniforms(model: it.model, tint: it.tint, params: V4(it.material, it.spec, it.wind.x, it.wind.y))
-                enc.setVertexBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2)
-                if fragment { enc.setFragmentBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2) }
-                enc.setVertexBuffer(it.mesh.buffer, offset: 0, index: 0)
-                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: it.mesh.count)
-            }
-        }
-
-        // ---- shadow passes: 0 = tight around the aircraft, 1 = the airfield
-        for i in 0..<2 {
-            let sp = MTLRenderPassDescriptor()
-            sp.depthAttachment.texture = shadowTex[i]
-            sp.depthAttachment.loadAction = .clear; sp.depthAttachment.clearDepth = 1; sp.depthAttachment.storeAction = .store
-            guard let enc = cb.makeRenderCommandEncoder(descriptor: sp) else { continue }
-            enc.setRenderPipelineState(shadowPSO)
-            enc.setDepthStencilState(depthShadow)
-            enc.setCullMode(.none)
-            enc.setDepthBias(0, slopeScale: 2.0, clamp: 0)
-            var vp = i == 0 ? fu.shadow0 : fu.shadow1
-            enc.setVertexBytes(&vp, length: 64, index: 1)
-            drawItems(enc, i == 0 ? acItems : world, fragment: false)
-            enc.endEncoding()
-        }
-
-        // ---- main pass
-        if let enc = cb.makeRenderCommandEncoder(descriptor: rpd) {
-            enc.setCullMode(.none)
-            enc.setVertexBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-            enc.setFragmentBytes(&fu, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-            if let pt = panoTex {
-                enc.setRenderPipelineState(panoPSO)
-                enc.setFragmentTexture(pt, index: 0)
-                enc.setFragmentSamplerState(panoSampler, index: 1)
-            } else {
-                enc.setRenderPipelineState(skyPSO)
-            }
-            enc.setDepthStencilState(depthOff)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-
-            enc.setRenderPipelineState(scenePSO)
-            enc.setDepthStencilState(depthMain)
-            enc.setFragmentTexture(shadowTex[0], index: 0)
-            enc.setFragmentTexture(shadowTex[1], index: 1)
-            enc.setFragmentSamplerState(sampler, index: 0)
-            if let t = terrainMesh { drawItems(enc, [DrawItem(mesh: t, model: .identity, material: 1)], fragment: true) }
-            if game.site.panorama != nil, let c = catcherMesh { drawItems(enc, [DrawItem(mesh: c, model: .identity, material: 2)], fragment: true) }
-            drawItems(enc, world, fragment: true)
-            if let g = grassMesh { drawItems(enc, [DrawItem(mesh: g, model: .identity, material: 6, wind: wind2)], fragment: true) }
-            drawItems(enc, acItems, fragment: true)
-            enc.setDepthStencilState(depthRead)
-            if let ts = treeShadowMesh { drawItems(enc, [DrawItem(mesh: ts, model: .identity, material: 4)], fragment: true) }
-            drawItems(enc, acBlend, fragment: true)
-            if game.showObstacles, !game.site.obstacles.isEmpty {
-                var ob = MeshBuilder()
-                for (i, o) in game.site.obstacles.enumerated() {
-                    let c = Panoramas.position(o, north: game.site.north)
-                    let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
-                    ob.cylinder(from: V3(c.x, 0, c.y), to: V3(c.x, o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
-                }
-                if let om = GPUMesh(device, ob) {
-                    enc.setDepthStencilState(depthRead)
-                    drawItems(enc, [DrawItem(mesh: om, model: .identity, material: 4)], fragment: true)
-                }
-            }
-            if let pm = particleMesh() {
-                enc.setDepthStencilState(depthRead)
-                drawItems(enc, [DrawItem(mesh: pm, model: .identity, material: 3)], fragment: true)
-            }
-            enc.endEncoding()
-        }
-
-        var capture: MTLTexture?
-        if let _ = shotPath, now - startTime >= shotAfter {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: drawable.texture.pixelFormat, width: drawable.texture.width, height: drawable.texture.height, mipmapped: false)
-            d.storageMode = .shared
-            if let tex = device.makeTexture(descriptor: d), let blit = cb.makeBlitCommandEncoder() {
-                blit.copy(from: drawable.texture, to: tex)
-                blit.endEncoding()
-                capture = tex
-            }
-        }
-        cb.present(drawable)
-        cb.commit()
-        if let tex = capture, let path = shotPath {
-            cb.waitUntilCompleted()
-            savePNG(tex, path)
-            exit(0)
-        }
     }
 
     private func savePNG(_ tex: MTLTexture, _ path: String) {

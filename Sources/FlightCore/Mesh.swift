@@ -129,3 +129,26 @@ final class GPUMesh {
         buffer = buf; count = b.count
     }
 }
+
+/// A piece of a large static mesh with its bounding sphere, so pieces outside the view can be skipped.
+struct MeshChunk { var mesh: MeshBuilder; var center: V3; var radius: Float }
+
+/// Split a triangle soup into square cells on the ground plane.
+func chunked(_ b: MeshBuilder, cell: Float) -> [MeshChunk] {
+    var groups: [SIMD2<Int32>: MeshBuilder] = [:]
+    var i = 0
+    while i + 30 <= b.data.count {
+        let key = SIMD2<Int32>(Int32(floor(b.data[i] / cell)), Int32(floor(b.data[i + 2] / cell)))
+        groups[key, default: MeshBuilder()].data.append(contentsOf: b.data[i..<(i + 30)])
+        i += 30
+    }
+    return groups.values.map { m in
+        var lo = V3(repeating: .greatestFiniteMagnitude), hi = V3(repeating: -.greatestFiniteMagnitude)
+        var j = 0
+        while j < m.data.count {
+            let p = V3(m.data[j], m.data[j + 1], m.data[j + 2])
+            lo = simd_min(lo, p); hi = simd_max(hi, p); j += 10
+        }
+        return MeshChunk(mesh: m, center: (lo + hi) / 2, radius: length(hi - lo) / 2)
+    }
+}

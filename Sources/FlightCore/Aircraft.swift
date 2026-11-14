@@ -73,6 +73,40 @@ struct HeliSpec {
     var maxYaw: Float
 }
 
+extension AircraftSpec {
+    var thrustToWeight: Float {
+        switch kind {
+        case .airplane: return props.reduce(0) { $0 + $1.staticThrust } / (mass * gravity)
+        case .multirotor: return (multi.map { $0.maxThrust * Float($0.motors.count) } ?? 0) / (mass * gravity)
+        case .helicopter: return 4
+        }
+    }
+    /// 1 (easy) to 5 (expert)
+    var difficulty: Int {
+        switch category {
+        case "Trainers & Sport": return name.contains("Racer") ? 3 : 1
+        case "Scale Civil": return 2
+        case "Gliders": return 2
+        case "Aerobatic", "Foam 3D": return 3
+        case "Warbirds", "Jets": return 4
+        case "Helicopters": return name.contains("Sparrow") ? 4 : 5
+        case "Multirotors": return name.contains("Racing") ? 4 : 2
+        default: return 3
+        }
+    }
+    var features: [String] {
+        var f: [String] = []
+        if hasFlaps { f.append("Flaps") }
+        if hasRetracts { f.append("Retractable gear") }
+        if handLaunch { f.append("Hand launch") }
+        if props.count > 1 { f.append("Twin engine") }
+        if kind == .helicopter { f.append("Collective pitch"); f.append("Autorotation") }
+        if modes.count > 1 { f.append(modes.joined(separator: " / ")) }
+        return f
+    }
+    var sizeLabel: String { kind == .airplane ? "Wingspan" : (kind == .helicopter ? "Rotor diameter" : "Motor to motor") }
+}
+
 enum Anim { case fixed, spin(Int), hinge(Int, Float) }
 
 struct Part {

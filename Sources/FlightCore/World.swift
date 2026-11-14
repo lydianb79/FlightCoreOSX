@@ -38,6 +38,25 @@ struct SiteSpec {
     ]
 }
 
+extension SiteSpec {
+    var kindLabel: String { panorama != nil ? "360° photo site" : "3D site" }
+    var surfaceLabel: String {
+        if panorama != nil { return "As photographed" }
+        return ["Asphalt runway", "Mown grass strip", "Dirt strip"][min(max(runwayType, 0), 2)] + String(format: ", %.0f × %.0f m", runwayLen, runwayWid)
+    }
+    var summary: String {
+        if panorama != nil {
+            return "A real location photographed in 360°. You fly over the pictured ground from the spot where the camera stood. Pilot camera only."
+                + (obstacles.isEmpty ? "" : " Trees and buildings near the camera are solid.")
+        }
+        switch style {
+        case 0: return "A club field among rolling green hills: asphalt runway, clubhouse, pits and long grass around the mown strip. Light wind along the runway makes it the easiest place to learn."
+        case 1: return "A wide dirt strip on a desert playa with mesas on the horizon. Plenty of room and nothing to hit, but expect a steady breeze and little to judge distance by."
+        default: return "A grass strip on an alpine ridge. Wind blowing up the slope in front of you gives strong lift for soaring; turbulence and the drop-off make landings demanding."
+        }
+    }
+}
+
 struct Tree { var p: V3; var h: Float }
 
 final class Terrain {

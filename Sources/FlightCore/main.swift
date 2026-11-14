@@ -89,7 +89,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = Panoramas.userDir
         var siteArg = Int(arg("--site") ?? "") ?? 0
         if let p = arg("--pano") { SiteSpec.all.append(Panoramas.site(for: URL(fileURLWithPath: p))); siteArg = SiteSpec.all.count - 1 }
-        game = Game(site: siteArg, aircraft: Int(arg("--aircraft") ?? "") ?? 0)
+        var acArg = Int(arg("--aircraft") ?? "") ?? 0
+        let interactive = CommandLine.arguments.count == 1          // launched normally, not by a test command line
+        if interactive {
+            // restore the last aircraft and site
+            if let n = UserDefaults.standard.string(forKey: "lastAircraft"), let i = AircraftLibrary.all.firstIndex(where: { $0.name == n }) { acArg = i }
+            if let n = UserDefaults.standard.string(forKey: "lastSite"), let i = SiteSpec.all.firstIndex(where: { $0.name == n }) { siteArg = i }
+        }
+        game = Game(site: siteArg, aircraft: acArg)
+        if interactive || CommandLine.arguments.contains("--menu") { game.hud.overlay = .menu }
+        if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu][o] ?? .none }
+        game.hud.addPanorama = { [unowned self] in self.addPanorama() }
+        game.hud.openControllerSetup = { [unowned self] in self.showSetup() }
         if let c = Int(arg("--cam") ?? "") { game.cameraMode = c }
         if let z = Int(arg("--zoom") ?? "") { game.zoomMode = z }
         if let t = Int(arg("--tod") ?? "") { game.timeOfDay = t }
@@ -97,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--balloons") { game.toggleChallenge() }
         let args = CommandLine.arguments
         if args.contains("--smoke") { game.smokeOn = true }
+        if let q = Int(arg("--quality") ?? "") { game.quality = q }
         if args.contains("--obstacles") { game.showObstacles = true }
         if let c = arg("--closeup")?.split(separator: ",").compactMap({ Float($0) }), c.count == 3 { game.closeup = V3(c[0], c[1], c[2]) }
         if args.contains("--gearup") { game.gearUp = true }
@@ -111,6 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
         window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "FlightCore"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = .black
+        window.minSize = NSSize(width: 1000, height: 640)
         window.center()
         window.collectionBehavior = [.fullScreenPrimary]
         let container = NSView(frame: frame)
@@ -134,12 +152,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.addSubview(hud)
         window.contentView = container
         window.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [unowned self] _ in self.game.hud.fullscreen = true }
+        NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [unowned self] _ in self.game.hud.fullscreen = false }
+        // start in full screen (⌃⌘F leaves it); test command lines stay windowed unless asked
+        if interactive || CommandLine.arguments.contains("--fullscreen") { window.toggleFullScreen(nil) }
         NSApp.activate(ignoringOtherApps: true)
         buildMenus()
         if CommandLine.arguments.contains("--setup") { showSetup() }
+        if CommandLine.arguments.contains("--perf") {
+            Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
+                print(String(format: "PERF gpu %.1f ms scale %.2f fps %d", self.game.gpuMs, self.game.renderScale, self.game.hud.s.fps)); fflush(stdout)
+            }
+        }
+        if CommandLine.arguments.contains("--printwin") { print("WINDOW \(window.windowNumber)"); fflush(stdout) }
 
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [unowned self] e in
             guard e.window === self.window else { return e }
+            // while a menu or browser is open the keyboard belongs to it; Esc steps back
+            if self.game.hud.overlay != .none {
+                if e.type == .keyDown && e.keyCode == 53 {
+                    let o = self.game.hud.overlay
+                    self.game.hud.overlay = (o == .aircraft || o == .sites) && self.game.cameFromMenu ? .menu : .none
+                    return nil
+                }
+                if self.game.hud.overlay.pausesSim || self.game.hud.overlay == .help { self.game.input.keys.removeAll(); return e }
+            } else if e.type == .keyDown && !e.modifierFlags.contains(.command) {
+                if e.keyCode == 53 { self.game.cameFromMenu = false; self.game.hud.overlay = .menu; return nil }
+                if e.keyCode == 48 { self.game.cameFromMenu = false; self.game.hud.overlay = .aircraft; return nil }
+            }
             if e.type == .flagsChanged {
                 if e.modifierFlags.contains(.shift) { self.game.input.keys.insert(56) } else { self.game.input.keys.remove(56); self.game.input.keys.remove(60) }
                 return e
@@ -189,6 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = sub
             acItems.append(item)
         }
+        acItems.insert(ClosureMenuItem("Choose Aircraft…", key: "a", mods: [.command, .shift]) { g.cameFromMenu = false; g.hud.overlay = .aircraft }, at: 0)
+        acItems.insert(.separator(), at: 1)
         acItems.append(.separator())
         acItems.append(ClosureMenuItem("Next Aircraft", key: "]") { g.keyDown(30) })
         acItems.append(ClosureMenuItem("Previous Aircraft", key: "[") { g.keyDown(33) })
@@ -196,6 +238,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var siteItems: [NSMenuItem] = SiteSpec.all.enumerated().map { i, s in
             ClosureMenuItem(s.name, key: i < 9 ? "\(i + 1)" : "", mods: [.command, .option]) { g.selectSite(i) }
         }
+        siteItems.insert(ClosureMenuItem("Choose Flying Site…", key: "s", mods: [.command, .shift]) { g.cameFromMenu = false; g.hud.overlay = .sites }, at: 0)
+        siteItems.insert(.separator(), at: 1)
         siteItems.append(.separator())
         siteItems.append(ClosureMenuItem("Add 360° Panorama Photo…", key: "o") { [unowned self] in self.addPanorama() })
         siteItems.append(ClosureMenuItem("Show Panoramas Folder") { NSWorkspace.shared.open(Panoramas.userDir) })
@@ -209,6 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         siteItems.append(ClosureMenuItem("Photo: Show / Hide Obstacles") { g.showObstacles.toggle(); g.say(g.site.obstacles.isEmpty ? "This site has no obstacles defined" : (g.showObstacles ? "Obstacles shown" : "Obstacles hidden")) })
         menu("Flying Site", siteItems)
         menu("Simulation", [
+            ClosureMenuItem("Main Menu") { g.cameFromMenu = false; g.hud.overlay = .menu },
+            ClosureMenuItem("Weather…", key: "e", mods: [.command, .shift]) { g.hud.overlay = .environment },
+            .separator(),
             ClosureMenuItem("Reset Aircraft", key: "r") { g.resetAircraft() },
             ClosureMenuItem("Pause / Resume", key: "p") { g.paused.toggle() },
             ClosureMenuItem("Slow Motion") { g.keyDown(17) },
@@ -234,8 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewItems.append(.separator())
         viewItems += Game.zoomNames.enumerated().map { i, n in ClosureMenuItem("Zoom: " + n) { g.zoomMode = i; g.say("Zoom: " + n) } }
         viewItems.append(.separator())
+        viewItems += Game.qualityNames.enumerated().map { i, n in ClosureMenuItem("Graphics: " + n) { g.quality = i; g.say("Graphics quality: " + n) } }
+        viewItems.append(.separator())
         viewItems.append(ClosureMenuItem("Show / Hide HUD") { g.hud.visible.toggle() })
-        viewItems.append(ClosureMenuItem("Keyboard Help") { g.hud.showHelp.toggle() })
+        viewItems.append(ClosureMenuItem("Keyboard Controls") { g.hud.overlay = g.hud.overlay == .help ? .none : .help })
         viewItems.append(ClosureMenuItem("Toggle Full Screen", key: "f", mods: [.command, .control]) { [unowned self] in self.window.toggleFullScreen(nil) })
         menu("View", viewItems)
         menu("Controller", [
@@ -260,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         SiteSpec.all = SiteSpec.builtIn + Panoramas.discover()
         buildMenus()
-        if let l = last, let i = SiteSpec.all.firstIndex(where: { $0.panorama?.lastPathComponent == l.lastPathComponent }) { game.selectSite(i) }
+        if let l = last, let i = SiteSpec.all.firstIndex(where: { $0.panorama?.lastPathComponent == l.lastPathComponent }) { game.selectSite(i); game.hud.overlay = .none }
     }
 
     private func showSetup() {

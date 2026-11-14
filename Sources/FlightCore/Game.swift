@@ -1,6 +1,7 @@
 import simd
 import Foundation
 import SwiftUI
+import AppKit
 
 struct HUDState {
     var aircraft = "", site = "", blurb = ""
@@ -11,10 +12,68 @@ struct HUDState {
     var fps = 0
 }
 
+enum Overlay {
+    case none, menu, aircraft, sites, environment, help
+    /// The simulation is frozen while these are open.
+    var pausesSim: Bool { self == .menu || self == .aircraft || self == .sites }
+}
+
 final class HUDModel: ObservableObject {
     @Published var s = HUDState()
-    @Published var showHelp = false
     @Published var visible = true
+    @Published var overlay = Overlay.none
+    @Published var fullscreen = false
+    unowned var game: Game!
+    var thumbnailer: ((AircraftSpec) -> NSImage?)?      // provided by the renderer
+    var addPanorama: (() -> Void)?
+    var openControllerSetup: (() -> Void)?
+    private var thumbs: [String: NSImage] = [:]
+    private var sitePreviews: [String: NSImage] = [:]
+
+    func thumbnail(_ spec: AircraftSpec) -> NSImage? {
+        if let t = thumbs[spec.name] { return t }
+        guard let img = thumbnailer?(spec) else { return nil }
+        thumbs[spec.name] = img
+        return img
+    }
+
+    func sitePreview(_ site: SiteSpec) -> NSImage? {
+        if let t = sitePreviews[site.name] { return t }
+        var img: NSImage?
+        if let url = site.panorama {
+            // crop the middle of the panorama (the view straight ahead)
+            if let full = Panoramas.image(url, maxSize: 2048) {
+                let w = full.width, h = full.height
+                let shift = Int(Float(w) * site.north / 360)
+                let cx = ((w / 2 + shift) % w + w) % w
+                let cw = w / 4, ch = Int(Float(cw) * 0.625)
+                let x0 = min(max(cx - cw / 2, 0), w - cw)
+                if let c = full.cropping(to: CGRect(x: x0, y: h / 2 - Int(Float(ch) * 0.62), width: cw, height: ch)) {
+                    img = NSImage(cgImage: c, size: NSSize(width: cw, height: ch))
+                }
+            }
+        } else if let url = resourceURL("Previews/site_\(["meadow", "desert", "alpine"][min(max(site.style, 0), 2)]).jpg") {
+            img = NSImage(contentsOf: url)
+        }
+        if let i = img { sitePreviews[site.name] = i }
+        return img
+    }
+}
+
+/// Locate a bundled resource, both inside the .app and when run from the source folder.
+func resourceURL(_ rel: String) -> URL? {
+    let fm = FileManager.default
+    var roots: [URL] = []
+    if let r = Bundle.main.resourceURL { roots.append(r) }
+    roots.append(URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent("Resources"))
+    roots.append(Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Resources"))
+    var dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+    for _ in 0..<4 { roots.append(dir.appendingPathComponent("Resources")); dir = dir.deletingLastPathComponent() }
+    for r in roots {
+        let u = r.appendingPathComponent(rel)
+        if fm.fileExists(atPath: u.path) { return u }
+    }
+    return nil
 }
 
 struct Balloon { var pos: V3; var color: V4; var alive = true }
@@ -59,6 +118,11 @@ final class Game {
     var debris: [Debris] = []
     var particles: [Particle] = []
     var showObstacles = false
+    /// Graphics quality: 0 low (reduced resolution, no ambient occlusion), 1 medium, 2 high (full resolution)
+    var quality: Int = (UserDefaults.standard.object(forKey: "quality") as? Int) ?? 2 { didSet { UserDefaults.standard.set(quality, forKey: "quality") } }
+    static let qualityNames = ["Low", "Medium", "High"]
+    var renderScale: Float = 1, gpuMs: Float = 0       // reported by the renderer
+    var cameFromMenu = false        // browsers return to the main menu when opened from it
     var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
     var flapSetting: Float = 0
     var gearUp = false, smokeOn = false, hold = false
@@ -80,6 +144,7 @@ final class Game {
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
         resetAircraft()
+        hud.game = self
     }
 
     var lighting: Lighting {
@@ -87,7 +152,7 @@ final class Game {
         switch timeOfDay {
         case 0: return Lighting(sunDir: normalize(V3(0.8, 0.3, 0.5)), sun: V3(1, 0.85, 0.65) * 2.8, ambient: V3(0.36, 0.42, 0.55) * 0.5,
                                 zenith: V3(0.16, 0.3, 0.6), horizon: V3(0.7, 0.66, 0.6))
-        case 2: return Lighting(sunDir: normalize(V3(-0.85, 0.17, 0.45)), sun: V3(1, 0.55, 0.28) * 2.8, ambient: V3(0.36, 0.34, 0.48) * 0.42,
+        case 2: return Lighting(sunDir: normalize(V3(-0.85, 0.2, 0.45)), sun: V3(1, 0.58, 0.3) * 3.4, ambient: V3(0.4, 0.38, 0.5) * 0.7,
                                 zenith: V3(0.1, 0.17, 0.4), horizon: V3(0.8, 0.5, 0.32))
         default: return Lighting(sunDir: normalize(V3(-0.35, 0.8, 0.5)), sun: V3(1, 0.96, 0.88) * 3.2, ambient: V3(0.34, 0.45, 0.62) * 0.62,
                                  zenith: V3(0.09, 0.24, 0.6), horizon: V3(0.5, 0.65, 0.84))
@@ -129,6 +194,7 @@ final class Game {
         flightMode = 0
         aircraftVersion += 1
         resetAircraft()
+        UserDefaults.standard.set(aircraft.spec.name, forKey: "lastAircraft")
         say(aircraft.spec.name + " — " + aircraft.spec.blurb, 4)
     }
 
@@ -143,6 +209,7 @@ final class Game {
         siteVersion += 1
         if challenge { spawnBalloons() }
         resetAircraft()
+        UserDefaults.standard.set(site.name, forKey: "lastSite")
         say(site.name, 3)
     }
 
@@ -181,7 +248,7 @@ final class Game {
             if site.panorama != nil { cameraMode = 0; say("Photo sites use the pilot camera only") }
             else { cameraMode = (cameraMode + 1) % 3; camSnap = true; say("Camera: " + Game.cameraNames[cameraMode]) }
         case 6: zoomMode = (zoomMode + 1) % 3; say("Zoom: " + Game.zoomNames[zoomMode])
-        case 4: hud.showHelp.toggle()
+        case 4: hud.overlay = hud.overlay == .help ? .none : .help
         case 9: hud.visible.toggle()
         case 17: timeScale = timeScale == 1 ? 0.5 : (timeScale == 0.5 ? 0.25 : 1); say(String(format: "Simulation speed %.0f%%", timeScale * 100))
         case 14:
@@ -226,7 +293,7 @@ final class Game {
         }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
 
-        if !paused {
+        if !paused && !hud.overlay.pausesSim {
             let h: Float = 0.001
             acc += dt * timeScale
             while acc >= h {
@@ -409,7 +476,7 @@ final class Game {
             freq = spec.soundBase * (0.3 + 0.7 * lv); amp = lv > 0.01 ? 0.2 + 0.8 * lv : 0
         }
         sound.targetFreq = freq * doppler
-        sound.targetGain = paused ? 0 : amp * (cameraMode == 0 ? min(1, 7 / (d + 2)) : 0.6)
+        sound.targetGain = paused || hud.overlay.pausesSim ? 0 : amp * (cameraMode == 0 ? min(1, 7 / (d + 2)) : 0.6)
     }
 
     private func updateHUD() {
@@ -450,127 +517,3 @@ final class Game {
     }
 }
 
-// MARK: - HUD
-
-private struct Panel<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        content
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Color.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 10))
-            .foregroundColor(.white)
-    }
-}
-
-private struct StickView: View {
-    var x: Float, y: Float, label: String
-    var body: some View {
-        VStack(spacing: 4) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.42))
-                RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.35), lineWidth: 1)
-                Rectangle().fill(Color.white.opacity(0.18)).frame(width: 1)
-                Rectangle().fill(Color.white.opacity(0.18)).frame(height: 1)
-                Circle().fill(Color.orange).frame(width: 13, height: 13)
-                    .offset(x: CGFloat(x) * 38, y: CGFloat(-y) * 38)
-            }
-            .frame(width: 92, height: 92)
-            Text(label).font(.system(size: 10, weight: .medium)).foregroundColor(.white.opacity(0.75))
-        }
-    }
-}
-
-struct HUDView: View {
-    @ObservedObject var m: HUDModel
-
-    private func row(_ k: String, _ v: String) -> some View {
-        HStack(spacing: 10) {
-            Text(k).foregroundColor(.white.opacity(0.65)).frame(width: 70, alignment: .leading)
-            Text(v).monospacedDigit()
-        }.font(.system(size: 13, weight: .medium))
-    }
-
-    var body: some View {
-        let s = m.s
-        ZStack {
-            if m.visible {
-                VStack {
-                    HStack(alignment: .top) {
-                        Panel {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(s.aircraft).font(.system(size: 16, weight: .bold))
-                                Text(s.site + " · " + s.time).font(.system(size: 12)).foregroundColor(.white.opacity(0.75))
-                                Divider().background(Color.white.opacity(0.3)).frame(width: 170)
-                                row("Altitude", String(format: "%.0f m", max(s.alt, 0)))
-                                row("Airspeed", String(format: "%.0f km/h", s.speed * 3.6))
-                                row("Climb", String(format: "%+.1f m/s", s.climb))
-                                row("Distance", String(format: "%.0f m", s.dist))
-                                row("Throttle", String(format: "%.0f %%", s.throttle * 100))
-                                row("Wind", s.wind)
-                                row("Rates", s.rates)
-                                if !s.mode.isEmpty { row("Mode", s.mode) }
-                                if !s.config.isEmpty { Text(s.config).font(.system(size: 12, weight: .semibold)).foregroundColor(.yellow).monospacedDigit() }
-                            }
-                        }
-                        Spacer()
-                        Panel {
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(s.camera).font(.system(size: 12, weight: .semibold))
-                                Text("Input: " + s.input).font(.system(size: 12)).foregroundColor(.white.opacity(0.8))
-                                Text("\(s.fps) fps").font(.system(size: 11)).monospacedDigit().foregroundColor(.white.opacity(0.6))
-                                if !s.score.isEmpty { Text(s.score).font(.system(size: 14, weight: .bold)).foregroundColor(.yellow).monospacedDigit() }
-                                Text("H  help").font(.system(size: 11)).foregroundColor(.white.opacity(0.6))
-                            }
-                        }
-                    }
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        StickView(x: s.lx, y: s.ly, label: s.leftLabel)
-                        Spacer()
-                        StickView(x: s.rx, y: s.ry, label: s.rightLabel)
-                    }
-                }
-                .padding(14)
-            }
-            if !s.message.isEmpty {
-                VStack {
-                    Spacer().frame(height: 90)
-                    Text(s.message)
-                        .font(.system(size: s.message == "CRASHED" || s.message == "PAUSED" ? 34 : 17, weight: .bold))
-                        .foregroundColor(s.message == "CRASHED" ? .red : .white)
-                        .padding(.horizontal, 18).padding(.vertical, 9)
-                        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-                    Spacer()
-                }
-            }
-            if m.showHelp { HelpView() }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-private struct HelpView: View {
-    let keys: [(String, String)] = [
-        ("← →", "Aileron (roll)"), ("↑ ↓", "Elevator: ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective up, down"),
-        ("X", "Throttle cut"), ("Shift", "Full stick deflection"), ("Space / R", "Reset aircraft"), ("[  ]  1 – 9", "Previous / next aircraft, or pick"),
-        ("N", "Next flying site"), ("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom: auto, keep ground, fixed"), ("F", "Flight mode (quadcopter)"), ("L", "High / low rates"), ("E", "Flaps: up, half, full"), ("G", "Landing gear up / down"), ("Y", "Smoke on / off"), ("U", "Helicopter throttle hold"),
-        ("P", "Pause"), ("T", "Slow motion"), (",  .", "Wind less / more"), ("B", "Balloon Burst challenge"),
-        ("K", "Demo pilot on / off"), ("M", "Mute sound"), ("V", "Hide / show HUD"), ("H", "This help"),
-    ]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("FlightCore — Controls").font(.system(size: 18, weight: .bold)).padding(.bottom, 4)
-            ForEach(keys, id: \.0) { k in
-                HStack {
-                    Text(k.0).font(.system(size: 13, weight: .bold, design: .monospaced)).frame(width: 90, alignment: .leading)
-                    Text(k.1).font(.system(size: 13))
-                }
-            }
-            Text("USB RC transmitters and gamepads are picked up automatically. Calibration, stick mode,\nrates and expo are under Controller ▸ Controller Setup (⌘,).")
-                .font(.system(size: 11)).foregroundColor(.white.opacity(0.7)).padding(.top, 6)
-        }
-        .padding(22)
-        .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 14))
-        .foregroundColor(.white)
-    }
-}
