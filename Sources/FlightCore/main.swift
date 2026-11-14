@@ -181,7 +181,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--setup") { showSetup() }
         if CommandLine.arguments.contains("--perf") {
             Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
-                print(String(format: "PERF gpu %.1f ms scale %.2f fps %d", self.game.gpuMs, self.game.renderScale, self.game.hud.s.fps)); fflush(stdout)
+                let iv = self.renderer.statIntervals.sorted(), cpu = self.renderer.statCpu.sorted()
+                let pr = self.renderer.statPresented.sorted(); self.renderer.statPresented = []
+                self.renderer.statIntervals = []; self.renderer.statCpu = []
+                guard iv.count > 4, cpu.count > 4 else { return }
+                let med = iv[iv.count / 2]; _ = med
+                let late = iv.filter { $0 > med * 1.5 }.count
+                let jitter = iv.map { abs($0 - med) }.reduce(0, +) / Float(iv.count)
+                let lateOnScreen = pr.filter { $0 > 25 }.count
+                let adv = self.game.advanceMs.sorted(); self.game.advanceMs = []
+                if adv.count > 10 { print(String(format: "MOTION per-frame advance min %.2f max %.2f ms (spread %.2f ms)", adv[1], adv[adv.count - 2], adv[adv.count - 2] - adv[1])) }
+                print(String(format: "PERF frames %d  on-screen %d late %d max %.1f ms | callback late %d jitter %.2f ms  cpu med %.1f max %.1f ms  gpu %.1f ms  scale %.2f  screen %d Hz",
+                             iv.count, pr.count, lateOnScreen, pr.last ?? 0, late, jitter, cpu[cpu.count / 2], cpu.last!, self.game.gpuMs, self.game.renderScale, NSScreen.main?.maximumFramesPerSecond ?? 0)); fflush(stdout)
             }
         }
         if CommandLine.arguments.contains("--printwin") { print("WINDOW \(window.windowNumber)"); fflush(stdout) }

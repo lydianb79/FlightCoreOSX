@@ -47,6 +47,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var aoTex: MTLTexture?, aoBlur: MTLTexture?, white: MTLTexture?, skyTex: MTLTexture?
     private var dynScale: Float = 1          // automatic resolution scale, lowered when the GPU falls behind
     private var gpuMs: Float = 8, frameMs: Float = 16.7
+    private var timeDebt: Double = 0
+    // pacing statistics for --perf: frame intervals and CPU time per frame over the last second
+    var statIntervals: [Float] = [], statCpu: [Float] = [], statPresented: [Float] = []
+    private var lastPresented: CFTimeInterval = 0
+    private var missed: Float = 0            // recent fraction of frames that reached the screen late
     private var lastScaleChange = CACurrentMediaTime()
     private var bloom: [MTLTexture] = []
     private var targetSize = (0, 0)
@@ -262,7 +267,23 @@ final class Renderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
         let now = CACurrentMediaTime()
         frameMs += (Float(now - lastTime) * 1000 - frameMs) * 0.08
-        game.frame(dt: Float(now - lastTime))
+        statIntervals.append(Float(now - lastTime) * 1000)
+        defer { statCpu.append(Float(CACurrentMediaTime() - now) * 1000) }
+        // Frames reach the screen exactly one refresh apart, but this callback's timing wobbles by up to a
+        // millisecond. Step the simulation by whole refresh periods so motion is even, and keep a running
+        // account of the difference so simulated time never drifts from real time.
+        let raw = now - lastTime
+        let period = 1 / Double(max(view.window?.screen?.maximumFramesPerSecond ?? 60, 30))
+        let k = (raw / period).rounded()
+        var step = raw
+        if k >= 1 && k <= 4 && abs(raw - k * period) < 0.3 * period && !Game.noInterp {
+            step = k * period
+            timeDebt += raw - step
+            if abs(timeDebt) > period { step += timeDebt; timeDebt = 0 }       // long-term correction
+        } else {
+            timeDebt = 0
+        }
+        game.frame(dt: Float(step))
         lastTime = now
         syncMeshes()
         guard let drawable = view.currentDrawable, let cb = queue.makeCommandBuffer() else { return }
@@ -271,9 +292,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         let ceiling: Float = [0.7, 0.85, 1.0][min(max(quality, 0), 2)]
         // drop resolution when frames are being missed; raise it again only with clear GPU headroom
         if now - lastScaleChange > 0.8 && now - startTime > 3 && game.hud.overlay == .none {
-            if frameMs > 18.6 && dynScale > 0.5 { dynScale -= frameMs > 26 ? 0.1 : 0.05; lastScaleChange = now }
+            // judged by frames that actually reached the screen late, not by callback timing
+            if missed > 0.04 && dynScale > 0.5 { dynScale -= missed > 0.25 ? 0.1 : 0.05; lastScaleChange = now; missed *= 0.5 }
             // the GPU timer cannot show headroom under vsync, so after a steady spell just try the next step up
-            else if frameMs < 17.3 && dynScale < 1 && now - lastScaleChange > 8 { dynScale += 0.05; lastScaleChange = now }
+            else if missed < 0.004 && dynScale < 1 && now - lastScaleChange > 8 { dynScale += 0.05; lastScaleChange = now }
         }
         dynScale = min(max(dynScale, 0.5), 1)
         var scale = min(dynScale, ceiling)
@@ -299,7 +321,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         var fu = FrameUniforms()
         fu.viewProj = proj * viewM
         fu.invViewProj = fu.viewProj.inverse
-        fu.shadow0 = lightVP(ac.pos, s0Half)
+        fu.shadow0 = lightVP(ac.renderPos, s0Half)
         fu.shadow1 = lightVP(V3(0, 0, game.site.flatCenterZ), 300)
         fu.camPos = V4(game.eye.x, game.eye.y, game.eye.z, game.env.time)
         fu.sunDir = V4(L.x, L.y, L.z, Float(game.site.runwayType))
@@ -324,7 +346,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // ---- draw lists
         var acItems: [DrawItem] = []
         var acBlend: [DrawItem] = []       // translucent prop / rotor discs
-        let base = M4.translation(ac.pos) * M4(ac.q)
+        let base = M4.translation(ac.renderPos) * M4(ac.renderQ)
         for (i, part) in ac.spec.parts.enumerated() {
             guard i < partMeshes.count, let mesh = partMeshes[i], !ac.detached.contains(i) else { continue }
             var local = M4.identity
@@ -486,6 +508,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         cb.addCompletedHandler { [weak self] b in
             let ms = Float((b.gpuEndTime - b.gpuStartTime) * 1000)
             DispatchQueue.main.async { if let s = self, ms > 0 { s.gpuMs += (ms - s.gpuMs) * 0.15; s.game.gpuMs = s.gpuMs } }
+        }
+        drawable.addPresentedHandler { [weak self] d in
+            let t = d.presentedTime
+            DispatchQueue.main.async {
+                guard let s = self, t > 0 else { return }
+                if s.lastPresented > 0 {
+                    let ms = Float(t - s.lastPresented) * 1000
+                    s.statPresented.append(ms)
+                    let period = 1000 / Float(max(NSScreen.main?.maximumFramesPerSecond ?? 60, 30))
+                    s.missed += ((ms > period * 1.5 ? 1 : 0) - s.missed) * 0.03
+                }
+                s.lastPresented = t
+            }
         }
         cb.present(drawable)
         cb.commit()

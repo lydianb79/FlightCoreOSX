@@ -122,6 +122,8 @@ final class Game {
     var quality: Int = (UserDefaults.standard.object(forKey: "quality") as? Int) ?? 2 { didSet { UserDefaults.standard.set(quality, forKey: "quality") } }
     static let qualityNames = ["Low", "Medium", "High"]
     var renderScale: Float = 1, gpuMs: Float = 0       // reported by the renderer
+    var advanceMs: [Float] = []
+    static let noInterp = CommandLine.arguments.contains("--no-interp")
     var cameFromMenu = false        // browsers return to the main menu when opened from it
     var fixedView: (eye: V3, target: V3)? = nil     // debug: absolute camera, heights above the pilot's ground
     var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
@@ -307,6 +309,11 @@ final class Game {
             if sdt > 0 { climb += ((aircraft.pos.y - lastY) / sdt - climb) * min(1, dt * 4); lastY = aircraft.pos.y }
             postStep(sdt)
         }
+        let before = aircraft.renderPos
+        aircraft.updateRenderPose(ahead: paused || hud.overlay.pausesSim || aircraft.crashed || Game.noInterp ? 0 : acc)
+        // --perf: how much simulated time this frame's picture advanced by
+        let sp = length(aircraft.vel)
+        if sp > 3 { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
         updateCamera(dt)
         updateSound()
         messageTimer -= dt
@@ -431,7 +438,8 @@ final class Game {
     }
 
     private func updateCamera(_ dt: Float) {
-        let p = aircraft.pos, spec = aircraft.spec
+        let p = aircraft.renderPos, spec = aircraft.spec
+        let rq = aircraft.renderQ
         switch cameraMode {
         case 0:
             eye = terrain.pilotPos + V3(0, site.panorama != nil ? site.eyeHeight : 1.7, 0)
@@ -450,15 +458,15 @@ final class Game {
             fov = camSnap ? want : fov + (want - fov) * min(1, dt * 3.5)
             target = camTarget; upVec = V3(0, 1, 0)
         case 1:
-            var back = aircraft.q.act(V3(0, 0, 1)); back.y = 0
+            var back = rq.act(V3(0, 0, 1)); back.y = 0
             back = length(back) > 0.05 ? normalize(back) : V3(0, 0, 1)
             var want = p + back * (spec.span * 2.2 + 1.5) + V3(0, spec.span * 0.5 + 0.4, 0)
             want.y = max(want.y, terrain.height(want.x, want.z) + 0.4)
             eye = camSnap ? want : eye + (want - eye) * min(1, dt * 5)
             target = p; upVec = V3(0, 1, 0); fov = 60 * deg
         default:
-            eye = p + aircraft.q.act(spec.eyeOffset)
-            target = eye + aircraft.forward; upVec = aircraft.up; fov = 85 * deg
+            eye = p + rq.act(spec.eyeOffset)
+            target = eye + rq.act(V3(0, 0, -1)); upVec = rq.act(V3(0, 1, 0)); fov = 85 * deg
         }
         if let c = closeup {
             eye = p + c * max(spec.span, 0.6); target = p; upVec = V3(0, 1, 0); fov = 32 * deg

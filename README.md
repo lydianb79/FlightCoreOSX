@@ -161,6 +161,7 @@ Press **H** in the app for this list.
   - ambient occlusion is computed from the resolved depth buffer;
   - bloom, filmic tone mapping, a light colour grade, vignette and dithering are applied in a final pass.
   The sky and clouds are procedural and rendered at half resolution; grass and trees are frustum-culled in chunks. Render resolution adjusts automatically to hold the frame rate, up to a ceiling set by the Graphics quality level (Low, Medium, High). Shaders are compiled from source at launch.
+- **Frame pacing:** the simulation advances by exact display refresh periods, and the aircraft is drawn at its physics state carried forward by the fraction of a step not yet simulated, so motion is even from frame to frame. `FlightCore --perf` prints frame-pacing and motion statistics once a second.
 - **The app starts in full screen.** Press ⌃⌘F to switch to a window.
 - **Sound** is synthesized in stereo, with nothing sampled:
   - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle), ducted fans, turboprops, helicopter rotor with blade slap and tail rotor, and four separate multirotor motors;

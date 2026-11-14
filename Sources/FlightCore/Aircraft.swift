@@ -160,6 +160,14 @@ final class Aircraft {
     var crashed = false
     var onGround = false
     var airspeed: Float = 0
+    // pose used for drawing and the camera: the physics state carried forward by the part of a step not yet simulated
+    var renderPos = V3.zero
+    var renderQ = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    func updateRenderPose(ahead t: Float) {
+        renderPos = pos + vel * t
+        let w = length(omega)
+        renderQ = w > 1e-6 ? simd_normalize(q * simd_quatf(angle: w * t, axis: omega / w)) : q
+    }
     var flap: Float = 0             // actual flap position 0...1
     var gear: Float = 0             // 0 down, 1 retracted
     var crashImpact: Float = 0      // speed of the impact that caused the crash
