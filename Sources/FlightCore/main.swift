@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let args = CommandLine.arguments
         if args.contains("--smoke") { game.smokeOn = true }
         if args.contains("--obstacles") { game.showObstacles = true }
+        if let c = arg("--closeup")?.split(separator: ",").compactMap({ Float($0) }), c.count == 3 { game.closeup = V3(c[0], c[1], c[2]) }
         if args.contains("--gearup") { game.gearUp = true }
         if args.contains("--flaps") { game.flapSetting = 1 }
         if let ff = Float(arg("--ff") ?? "") { for _ in 0..<Int(ff * 60) { game.frame(dt: 1 / 60) } }

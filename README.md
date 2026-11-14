@@ -133,6 +133,8 @@ Press **H** in the app for this list.
 
 - **Physics** runs at 1 kHz. Airplanes are built from individual lifting panels, each with its own local airflow, so stalls, spins, knife-edge flight and prop-wash hovering come from the geometry. Helicopters use a rotor inflow model with a rate-command flight controller; multirotors use per-motor thrust with a mixer.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
+- **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, and six trim schemes (sport, aerobatic, warbird, glider, jet, vintage). Surfaces are shaded as glossy film covering with sky reflections.
+- **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, a farm, long grass that sways in the wind, wild flowers, bushes, hedges, and rocks or cacti depending on the site.
 - **Rendering** uses Metal with procedural terrain, sky and clouds, two shadow maps (one tight around the aircraft, one for the airfield) and 4× MSAA. Shaders are compiled from source at launch.
 - **Sound** is synthesized, with distance attenuation and Doppler shift.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
@@ -143,7 +145,9 @@ Press **H** in the app for this list.
 | File | Contents |
 |---|---|
 | `Aircraft.swift` | Rigid-body physics for airplanes, helicopters and multirotors; ground contact |
-| `AircraftLibrary.swift` | Aircraft definitions and procedural models |
+| `AircraftLibrary.swift` | Aircraft definitions |
+| `Models.swift` | Procedural 3D models and trim schemes |
+| `Scenery.swift` | Buildings, vehicles, people, trees, bushes, grass |
 | `World.swift` | Sites, terrain, scenery, wind, and the demo autopilot |
 | `Panorama.swift` | Photo sites |
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and shader source |

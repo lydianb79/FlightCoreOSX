@@ -8,7 +8,7 @@ struct FrameUniforms {
 }
 struct DrawUniforms { var model = M4.identity; var tint = V4(1, 1, 1, 1); var params = V4.zero }
 
-struct DrawItem { var mesh: GPUMesh; var model: M4; var tint = V4(1, 1, 1, 1); var material: Float = 0; var spec: Float = 0 }
+struct DrawItem { var mesh: GPUMesh; var model: M4; var tint = V4(1, 1, 1, 1); var material: Float = 0; var spec: Float = 0; var wind = SIMD2<Float>(0, 0) }
 
 final class Renderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
@@ -30,6 +30,9 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private var terrainMesh: GPUMesh?
     private var sceneryMesh: GPUMesh?
+    private var vegetationMesh: GPUMesh?
+    private var grassMesh: GPUMesh?
+    private var treeShadowMesh: GPUMesh?
     private var windsockMesh: GPUMesh?
     private var balloonMesh: GPUMesh?
     private var partMeshes: [GPUMesh?] = []
@@ -125,12 +128,15 @@ final class Renderer: NSObject, MTKViewDelegate {
             siteVersion = game.siteVersion
             panoTex = nil
             if let url = game.site.panorama {
-                terrainMesh = nil; sceneryMesh = nil
+                terrainMesh = nil; sceneryMesh = nil; vegetationMesh = nil; grassMesh = nil; treeShadowMesh = nil
                 if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img) }
                 if panoTex == nil { game.say("Could not load panorama image", 6) }
             } else {
                 terrainMesh = GPUMesh(device, game.terrain.buildMesh())
                 sceneryMesh = GPUMesh(device, game.terrain.buildScenery())
+                vegetationMesh = GPUMesh(device, game.terrain.buildVegetation())
+                grassMesh = GPUMesh(device, game.terrain.buildGrass())
+                treeShadowMesh = GPUMesh(device, game.terrain.buildTreeShadows())
             }
         }
         if aircraftVersion != game.aircraftVersion {
@@ -187,6 +193,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         // ---- draw lists
         let ac = game.aircraft
         var acItems: [DrawItem] = []
+        var acBlend: [DrawItem] = []       // translucent prop / rotor discs
         let base = M4.translation(ac.pos) * M4(ac.q)
         for (i, part) in ac.spec.parts.enumerated() {
             guard i < partMeshes.count, let mesh = partMeshes[i], !ac.detached.contains(i) else { continue }
@@ -196,14 +203,26 @@ final class Renderer: NSObject, MTKViewDelegate {
             case .spin(let k): local = M4.translation(part.pivot) * M4.rotation(ac.spin[k], part.axis)
             case .hinge(let ch, let maxA): local = M4.translation(part.pivot) * M4.rotation(ac.animValue(ch) * maxA, part.axis)
             }
-            acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 0.5))
+            if part.blur != 0, case .spin(let k) = part.anim {
+                let lv = ac.spec.kind == .helicopter ? ac.levels[0] : ac.levels[min(k, ac.levels.count - 1)]
+                if part.blur == 1 { if lv > 0.3 { continue } }                   // blades vanish into the disc
+                else {
+                    let a = smoothstep(0.12, 0.45, lv)
+                    if a > 0.01 { acBlend.append(DrawItem(mesh: mesh, model: base * local, tint: V4(1, 1, 1, a), material: 4)) }
+                    continue
+                }
+            }
+            acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 1))
         }
         for d in game.debris {
             guard d.part < partMeshes.count, let mesh = partMeshes[d.part] else { continue }
-            acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 0.5))
+            acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 1))
         }
         var world: [DrawItem] = []
-        if let m = sceneryMesh { world.append(DrawItem(mesh: m, model: .identity)) }
+        let wv = game.env.windVec
+        let wind2 = SIMD2<Float>(wv.x, wv.z) + SIMD2<Float>(0.6, 0.3)
+        if let m = sceneryMesh { world.append(DrawItem(mesh: m, model: .identity, spec: 1)) }
+        if let m = vegetationMesh { world.append(DrawItem(mesh: m, model: .identity, material: 5, wind: wind2)) }
         if let m = windsockMesh, game.site.panorama == nil {
             let w = game.env.windVec
             let sp = game.env.windSpeed
@@ -240,7 +259,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         func drawItems(_ enc: MTLRenderCommandEncoder, _ items: [DrawItem], fragment: Bool) {
             for it in items {
-                var du = DrawUniforms(model: it.model, tint: it.tint, params: V4(it.material, it.spec, 0, 0))
+                var du = DrawUniforms(model: it.model, tint: it.tint, params: V4(it.material, it.spec, it.wind.x, it.wind.y))
                 enc.setVertexBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                 if fragment { enc.setFragmentBytes(&du, length: MemoryLayout<DrawUniforms>.stride, index: 2) }
                 enc.setVertexBuffer(it.mesh.buffer, offset: 0, index: 0)
@@ -287,7 +306,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             if let t = terrainMesh { drawItems(enc, [DrawItem(mesh: t, model: .identity, material: 1)], fragment: true) }
             if game.site.panorama != nil, let c = catcherMesh { drawItems(enc, [DrawItem(mesh: c, model: .identity, material: 2)], fragment: true) }
             drawItems(enc, world, fragment: true)
+            if let g = grassMesh { drawItems(enc, [DrawItem(mesh: g, model: .identity, material: 6, wind: wind2)], fragment: true) }
             drawItems(enc, acItems, fragment: true)
+            enc.setDepthStencilState(depthRead)
+            if let ts = treeShadowMesh { drawItems(enc, [DrawItem(mesh: ts, model: .identity, material: 4)], fragment: true) }
+            drawItems(enc, acBlend, fragment: true)
             if game.showObstacles, !game.site.obstacles.isEmpty {
                 var ob = MeshBuilder()
                 for (i, o) in game.site.obstacles.enumerated() {

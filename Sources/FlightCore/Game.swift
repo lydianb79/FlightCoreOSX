@@ -59,6 +59,7 @@ final class Game {
     var debris: [Debris] = []
     var particles: [Particle] = []
     var showObstacles = false
+    var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
     var flapSetting: Float = 0
     var gearUp = false, smokeOn = false, hold = false
     private var wasCrashed = false, smokeAcc: Float = 0
@@ -297,7 +298,7 @@ final class Game {
         for (i, part) in ac.spec.parts.enumerated() where i > 0 {
             var animated = true
             if case .fixed = part.anim { animated = false }
-            guard animated || part.detach else { continue }
+            guard (animated || part.detach) && part.blur != 2 else { continue }
             if rng.next() > 0.3 + 0.7 * sev { continue }
             let origin = animated ? part.pivot : part.center
             let v = ac.vel * 0.6 + ac.q.act(cross(ac.omega, origin)) + V3(rng.range(-2.5, 2.5), rng.range(1, 4.5), rng.range(-2.5, 2.5)) * sev
@@ -381,6 +382,9 @@ final class Game {
         default:
             eye = p + aircraft.q.act(spec.eyeOffset)
             target = eye + aircraft.forward; upVec = aircraft.up; fov = 85 * deg
+        }
+        if let c = closeup {
+            eye = p + c * max(spec.span, 0.6); target = p; upVec = V3(0, 1, 0); fov = 32 * deg
         }
         camSnap = false
     }

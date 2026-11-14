@@ -43,6 +43,12 @@ static float band(float d, float halfw, float aa) { return 1.0 - smoothstep(half
 vertex VOut sceneVS(VIn in [[stage_in]], constant Frame& f [[buffer(1)]], constant Draw& d [[buffer(2)]]) {
     VOut o;
     float4 w = d.model * float4(in.pos, 1.0);
+    if (int(d.params.x) >= 5) {
+        // vegetation sways in the wind; vertex alpha is the sway weight (0 at the root)
+        float ph = w.x * 0.35 + w.z * 0.27, t = f.camPos.w;
+        float g = sin(t * 1.7 + ph) * 0.6 + sin(t * 3.1 + ph * 1.7) * 0.4;
+        w.xz += (d.params.zw * (0.55 + 0.45 * g) * 0.035 + float2(g, cos(t * 2.3 + ph)) * 0.012) * in.col.a;
+    }
     o.wp = w.xyz;
     o.pos = f.viewProj * w;
     o.nrm = (d.model * float4(in.nrm, 0.0)).xyz;
@@ -77,7 +83,9 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     int material = int(d.params.x);
     float spec = d.params.y;
 
-    if (material == 4) { return float4(albedo, in.col.a); }      // flat translucent helper geometry
+    if (material == 4) {     // translucent helpers: prop discs, soft shadows, obstacle overlay
+        return float4(tonemap(albedo * (f.ambient.rgb + f.sunColor.rgb * 0.4)), in.col.a);
+    }
     if (material == 3) {
         // smoke / dust puff: the normal attribute carries the position inside the quad
         float a = in.col.a * smoothstep(1.0, 0.25, length(in.nrm.xy));
@@ -86,14 +94,30 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         return float4(tonemap(c), a);
     }
 
+    if (material == 6) {
+        // grass card: cut individual blades out of the quad
+        float2 uv = in.nrm.xy;
+        float bx = uv.x * 11.0, id = floor(bx), fx = fract(bx) - 0.5;
+        float hsh = hash21(float2(id, 3.7));
+        float t = uv.y / (0.4 + 0.6 * hsh);
+        float lean = (hash21(float2(id, 9.1)) - 0.5) * 0.8;
+        if (t > 1.0 || abs(fx - lean * t * t) > 0.46 * (1.0 - t * t)) discard_fragment();
+        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.3) * 0.62;
+        albedo *= (0.8 + 0.4 * hsh) * (0.45 + 0.55 * t);
+        N = float3(0.0, 1.0, 0.0);
+        material = 5;
+    }
     if (material == 1) {
         float2 p = in.wp.xz;
         float fade = exp(-dist * 0.006);
         float macro = fbm(p * 0.021);
         float detail = fbm(p * 1.3);
         float fine = vnoise(p * 9.0);
-        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.25) * 0.62;
+        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.34) * 0.55;
         albedo *= (0.72 + 0.56 * macro) * mix(1.0, 0.62 + 0.5 * detail + 0.26 * fine, fade);
+        // close-up: streaky blade-like variation
+        float blades = vnoise(p * float2(41.0, 13.0) + 3.0) * 0.6 + vnoise(p.yx * float2(37.0, 11.0)) * 0.4;
+        albedo *= mix(1.0, 0.72 + 0.56 * blades, exp(-dist * 0.07));
         float hl = f.runway.x, hw = f.runway.y;
         int type = int(f.sunDir.w);
         float ax = abs(p.x), az = abs(p.y);
@@ -126,6 +150,7 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     }
 
     float ndl = max(dot(N, L), 0.0);
+    if (material == 5) ndl = saturate((dot(N, L) + 0.45) / 1.45);     // soft wrap lighting for foliage
     float2 s0 = shadowLookup(sh0, ss, f.shadow0, in.wp, 0.00003);
     float2 s1 = shadowLookup(sh1, ss, f.shadow1, in.wp, 0.0006);
     float shadow = s0.y > 0.5 ? s0.x : (s1.y > 0.5 ? s1.x : 1.0);
@@ -142,9 +167,16 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     float3 gndAmb = skyAmb * float3(0.45, 0.42, 0.36);
     float3 amb = mix(gndAmb, skyAmb, N.y * 0.5 + 0.5);
     float3 col = albedo * (amb + f.sunColor.rgb * ndl * shadow);
-    if (spec > 0.0) {
+    float gloss = material == 0 ? in.col.a * spec : 0.0;
+    if (gloss > 0.0) {
+        // glossy paint / film covering: sky reflection with Fresnel, plus a tight sun highlight
         float3 H = normalize(L + V);
-        col += f.sunColor.rgb * pow(max(dot(N, H), 0.0), 60.0) * spec * shadow;
+        float ndh = max(dot(N, H), 0.0);
+        float fres = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+        float3 R = reflect(-V, N);
+        float3 env = R.y > 0.0 ? mix(f.horizon.rgb, f.zenith.rgb, pow(R.y, 0.5)) : mix(f.horizon.rgb, gndAmb * 1.2, saturate(-R.y * 4.0));
+        col = mix(col, env, fres * gloss * 0.7);
+        col += f.sunColor.rgb * (pow(ndh, 400.0) * 3.0 + pow(ndh, 50.0) * 0.22) * gloss * shadow * step(0.0, dot(N, L));
     }
     float fog = 1.0 - exp(-dist * f.sunColor.w);
     float sunAmt = pow(max(dot(-V, L), 0.0), 8.0);

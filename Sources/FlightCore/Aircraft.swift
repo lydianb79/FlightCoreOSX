@@ -81,6 +81,7 @@ struct Part {
     var axis: V3 = V3(0, 1, 0)
     var anim: Anim = .fixed
     var detach = false          // fixed part that can break off in a crash
+    var blur = 0                // spinning parts: 1 = blades (hidden at speed), 2 = translucent disc shown at speed
     var center = V3.zero        // its centre, for tumbling
 }
 
