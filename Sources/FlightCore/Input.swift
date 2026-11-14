@@ -205,6 +205,7 @@ final class InputManager {
             dev = V3(shape(a, 0), shape(e, 1), shape(r, 2))
             // sprung throttle stick: airplanes use the upper half (or the right trigger), rotorcraft the full travel
             thr = kind == .airplane ? max(max(t, 0), gp.rightTrigger.value) : (t + 1) / 2
+            c.brake = gp.leftTrigger.value
         } else {
             source = "Keyboard"
         }
@@ -212,6 +213,7 @@ final class InputManager {
         c.elevator = clampf(dev.y + kb.y, -1, 1)
         c.rudder = clampf(dev.z + kb.z, -1, 1)
         c.throttle = clampf(thr, 0, 1)
+        c.brake = max(c.brake, down(12))          // Q
         return c
     }
 }

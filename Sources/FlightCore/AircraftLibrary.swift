@@ -1,7 +1,7 @@
 import simd
 import Foundation
 
-enum GearType { case tricycle, taildragger, none }
+enum GearType { case tricycle, taildragger, none, floats }
 
 /// Wing section families. Each sets the zero-lift offset, where and how sharply the section stalls,
 /// how far below the stall the flow reattaches, how much lift survives the stall, and the profile drag.
@@ -101,7 +101,7 @@ let realData: [String: RealData] = [
 
 /// Reshape a model to the proportions of the full-size aircraft and give it scale wing and power loading.
 func applyRealData(_ g: inout PlaneGeom) {
-    guard let r = realData[g.name] else { return }
+    guard let r = realData[g.dataKey ?? g.name] else { return }
     let nW: Float = g.upperWingY != nil ? 2 : 1
     let ar = r.span * r.span / (r.area / nW)
     let cbar = g.span / ar
@@ -143,6 +143,7 @@ struct PlaneGeom {
     var flaps = false
     var retracts = false
     var airfoil: Airfoil? = nil     // nil = chosen by category
+    var dataKey: String? = nil      // full-size aircraft to take figures from, when the name differs
     var washout: Float = 1.5        // degrees of twist reducing the tip's incidence
     var margin: Float? = nil        // static margin as a fraction of mean chord; nil = by category
     var endurance: Float? = nil     // seconds at full throttle
@@ -286,6 +287,11 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
         contacts.append(Contact(pos: wheels[0], wheel: true, crashSpeed: 4.5))
         contacts.append(Contact(pos: wheels[1], wheel: true, crashSpeed: 4.5))
         contacts.append(Contact(pos: wheels[2], wheel: true, steer: 1, crashSpeed: 4.5))
+    case .floats:
+        // two floats, each resting on its bow and stern
+        for x in [g.track, -g.track] { for z in [-0.3 * L, 0.3 * L] {
+            contacts.append(Contact(pos: V3(x, -g.gearH, z), crashSpeed: 4.5, mu: 0.35, float: true))
+        } }
     case .none:
         contacts.append(Contact(pos: V3(0, -h, nz * 0.5), crashSpeed: 3.5, mu: 0.4))
         contacts.append(Contact(pos: V3(0, -h * 0.8, 0.25), crashSpeed: 3.5, mu: 0.4))
@@ -342,7 +348,9 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     spec.category = g.category
     spec.stallSpeed = sqrt(2 * g.mass * gravity / (rho * area * nWings * wingEff * max(slope * (g.stall + g.camber * deg) * 0.92, 0.5)))
     spec.hasFlaps = g.flaps && g.ailStart > 0.4
-    spec.hasRetracts = g.retracts && g.gear != .none
+    spec.hasRetracts = g.retracts && g.gear != .none && g.gear != .floats
+    spec.hasFloats = g.gear == .floats
+    if g.gear == .floats { spec.cdA += 0.006 }
     spec.smokePos = V3(0, -h * 0.4, nz + 0.55 * L)
     spec.parts = parts
     spec.soundBase = g.sound
@@ -824,6 +832,19 @@ enum AircraftLibrary {
             mk(flatty, 1.3, "Foam Extra XL", "Foam 3D", "A 1.3-metre profile giant: big, slow, visible and still fully 3D", fuse: white, top: white, bottom: white, tail: red, accent: black) { $0.mass = 0.95; $0.thrust = 22; $0.pitchSpeed = 15; $0.sound = 170 },
             mk(flatty, 0.9, "Katana Foamy", "Foam 3D", "Lightly loaded profile with extra power for vertical work", fuse: white, top: white, bottom: white, tail: rgb(0.6, 0.15, 0.8), accent: rgb(0.1, 0.8, 0.5)) { $0.thrust *= 1.35 },
         ]
+        // floatplanes: start on the water at sites that have it
+        let seaplanes: [PlaneGeom] = [
+            mk(bush, 1.8, "Beaver Floatplane", "Scale Civil", "The classic bush seaplane: takes off from and lands on water", scheme: 6,
+               fuse: rgb(0.95, 0.75, 0.1), top: rgb(0.95, 0.75, 0.1), bottom: rgb(0.95, 0.75, 0.1), tail: rgb(0.95, 0.75, 0.1), accent: navy) {
+                $0.dataKey = "DHC-2 Beaver"; $0.gear = .floats; $0.fuseExp = 2.3; $0.spinnerScale = 0.18; $0.spinnerColor = grey; $0.sound = 95; $0.thrust *= 1.15 },
+            mk(bush, 1.8, "Super Cub Floatplane", "Scale Civil", "A Super Cub on floats: light enough to leap off a small lake", scheme: 6,
+               fuse: white, top: white, bottom: white, tail: red, accent: red) {
+                $0.dataKey = "Piper PA-18 Super Cub"; $0.gear = .floats; $0.thrust *= 1.15 },
+            mk(twin, 2.0, "Twin Otter Floatplane", "Scale Civil", "Twin-turboprop island hopper on floats", scheme: 6,
+               fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.05, 0.5, 0.6)) {
+                $0.dataKey = "DHC-6 Twin Otter"; $0.gear = .floats; $0.wingY = 0.1; $0.struts = true; $0.retracts = false; $0.blades = 3; $0.fuseExp = 3
+                $0.camber = 4; $0.canopyLen = 0.06; $0.gearH = 0.26; $0.track = 0.26; $0.thrust *= 1.1 },
+        ]
 
         var trainerHeli = rescale(makeHeli(body: rgb(0.95, 0.95, 0.95), canopy: rgb(0.85, 0.1, 0.1)), 0.6)
         trainerHeli.name = "Sparrow 450"; trainerHeli.blurb = "Small, docile helicopter for learning to hover"
@@ -845,6 +866,6 @@ enum AircraftLibrary {
         var quad = makeQuad(); quad.category = "Multirotors"
         return [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane)
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane)
     }()
 }

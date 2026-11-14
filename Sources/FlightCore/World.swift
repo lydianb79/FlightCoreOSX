@@ -281,6 +281,56 @@ final class Terrain {
         return normalize(V3(height(x - e, z) - height(x + e, z), 2 * e, height(x, z - e) - height(x, z + e)))
     }
 
+    /// What the wheels are on: rolling resistance, sideways grip, and bump height.
+    func surface(_ x: Float, _ z: Float) -> (roll: Float, grip: Float, rough: Float) {
+        if site.panorama != nil { return (0.05, 0.7, 0.004) }
+        if abs(x) < site.runwayLen / 2 && abs(z) < site.runwayWid / 2 {
+            switch site.runwayType {
+            case 0: return (0.02, 0.9, 0)            // asphalt
+            case 1: return (0.05, 0.65, 0.006)       // mown grass
+            case 3: return (0.07, 0.3, 0.005)        // packed snow
+            case 4: return (0.09, 0.5, 0.008)        // sand
+            default: return (0.045, 0.6, 0.006)      // dirt
+            }
+        }
+        let pal = site.palette >= 0 ? site.palette : site.style
+        if pal == 4 { return (0.14, 0.3, 0.02) }                 // soft snow
+        if pal == 1 || pal == 5 { return (0.07, 0.55, 0.012) }   // desert
+        return (0.09, 0.6, 0.02)                                 // long grass
+    }
+
+    /// A place to start a floatplane: the nearest open water with room to take off into the wind.
+    func waterStart(windFrom: Float) -> V3? {
+        guard let wl = site.waterLevel else { return nil }
+        let a = windFrom * deg
+        let dir = V3(sin(a), 0, -cos(a))                // take-off direction: into the wind
+        func wet(_ p: V3) -> Bool { wl - height(p.x, p.z) > 0.8 }
+        var r: Float = 50
+        while r <= 520 {
+            for k in 0..<24 {
+                // search outward, starting in front of the pilot
+                let ang = Float(k % 2 == 0 ? k / 2 : -(k + 1) / 2) * (Float.pi / 12)
+                let p = V3(sin(ang) * r, wl, pilotPos.z - cos(ang) * r)
+                if wet(p) && wet(p + dir * 60) && wet(p + dir * 130) && wet(p - dir * 15) { return p }
+            }
+            r += 25
+        }
+        return nil
+    }
+
+    /// Things that leave a wake in the wind: trees near the field and buildings.
+    var windObstacles: [WindObstacle] {
+        var o = trees.filter { abs($0.p.x) < 500 && abs($0.p.z) < 500 }.map { WindObstacle(p: $0.p, h: $0.h, r: $0.h * 0.3) }
+        guard site.panorama == nil else { return [] }
+        let hw = site.runwayWid / 2
+        o.append(WindObstacle(p: V3(-48, height(-48, hw + 34), hw + 34), h: 4.5, r: 6))
+        if site.facility == 1 {
+            for x in [Float(62), 118, 174] { o.append(WindObstacle(p: V3(x, 0, hw + 106), h: 11.5, r: 20)) }
+            o.append(WindObstacle(p: V3(18, 0, hw + 96), h: 22, r: 5))
+        }
+        return o
+    }
+
     func contains(_ p: V3) -> Bool { abs(p.x) < half - 50 && abs(p.z) < half - 50 }
 
     private func placeTrees() {
@@ -399,45 +449,108 @@ func buildWindsock() -> MeshBuilder {
     return b
 }
 
-struct Thermal { var c: SIMD2<Float>; var r: Float; var s: Float }
+struct Thermal { var c: SIMD2<Float>; var r: Float; var s: Float; var age: Float; var life: Float }
+struct WindObstacle { var p: V3; var h: Float; var r: Float }
 
+/// The air: mean wind with a boundary-layer profile, turbulence, wakes behind obstacles,
+/// slope lift, and thermals that drift with the wind and come and go.
 final class Environment {
-    var windSpeed: Float = 2
+    var windSpeed: Float = 2            // at 10 m above the ground
     var windFrom: Float = 90
     var turbulence: Float = 0.3
     var thermalsOn = true
     var time: Float = 0
     var thermals: [Thermal] = []
+    var obstacles: [WindObstacle] = []
+    private var rng = LCG(4242)
+    private var gust = V3.zero          // along-wind, cross-wind, vertical
+    private var wakeDeficit: Float = 0, wakeTurb: Float = 0, wakeTimer: Float = 0
 
     func configure(_ site: SiteSpec) {
         windSpeed = site.windSpeed; windFrom = site.windFrom; turbulence = site.turbulence
-        var rng = LCG(UInt64(site.seed) + 5)
-        thermals = (0..<5).map { _ in Thermal(c: SIMD2(rng.range(-350, 350), rng.range(-420, -60)), r: rng.range(35, 65), s: rng.range(1.5, 3.2)) }
+        rng = LCG(UInt64(site.seed) + 5)
+        thermals = (0..<6).map { _ in newThermal(aged: true) }
+        gust = .zero; wakeDeficit = 0; wakeTurb = 0
+    }
+
+    private func newThermal(aged: Bool) -> Thermal {
+        let life = rng.range(120, 300)
+        return Thermal(c: SIMD2(rng.range(-420, 420), rng.range(-460, 80)), r: rng.range(30, 70), s: rng.range(1.4, 3.6),
+                       age: aged ? rng.range(0, life) : 0, life: life)
     }
 
     var windVec: V3 { let t = windFrom * deg; return V3(-sin(t), 0, cos(t)) * windSpeed }
 
+    /// Advance the weather by one step around an aircraft at `p` flying at `airspeed`.
+    func advance(dt: Float, at p: V3, airspeed: Float, terrain: Terrain) {
+        time += dt
+        let base = windVec
+        let agl = max(p.y - terrain.height(p.x, p.z), 0)
+        // thermals drift downwind, build, fade and are replaced
+        for i in thermals.indices {
+            thermals[i].age += dt
+            thermals[i].c += SIMD2(base.x, base.z) * (0.6 * dt)
+            if thermals[i].age > thermals[i].life || abs(thermals[i].c.x) > 650 || abs(thermals[i].c.y) > 650 { thermals[i] = newThermal(aged: false) }
+        }
+        // wake behind trees and buildings: slower, rougher air downwind of them (refreshed 50 times a second)
+        wakeTimer -= dt
+        if wakeTimer <= 0 {
+            wakeTimer = 0.02
+            var deficit: Float = 0, turb: Float = 0
+            if windSpeed > 0.3 {
+                let dir = base / windSpeed
+                for o in obstacles {
+                    let rx = p.x - o.p.x, rz = p.z - o.p.z
+                    let along = rx * dir.x + rz * dir.z
+                    if along < 0 || along > 12 * o.h || p.y - o.p.y > 1.4 * o.h { continue }
+                    let lat = abs(rx * dir.z - rz * dir.x), width = o.r + 0.15 * along
+                    if lat > width { continue }
+                    let k = (1 - along / (12 * o.h)) * (1 - lat / width)
+                    deficit = max(deficit, 0.7 * k); turb = max(turb, k)
+                }
+                // rotor in the lee of a slope
+                let n = terrain.normal(p.x, p.z)
+                let lee = -(base.x * -n.x + base.z * -n.z) / n.y / windSpeed
+                if lee > 0.05 { turb = max(turb, min(lee * 2.5, 1) * exp(-agl / 40)) }
+            }
+            wakeDeficit += (deficit - wakeDeficit) * 0.2; wakeTurb += (turb - wakeTurb) * 0.2
+        }
+        // turbulence: random gusts with a length scale that grows with height, so the air is choppy near
+        // the ground and has long slow swells higher up
+        if turbulence > 0 {
+            let sigma = turbulence * (0.25 + 0.18 * windSpeed) + wakeTurb * windSpeed * 0.35
+            let a = max(airspeed, 3) / clampf(agl, 8, 120)
+            let k = sqrt(2 * a * dt)
+            func noise() -> Float { (rng.next() + rng.next() + rng.next() - 1.5) * 2 }        // roughly unit variance
+            gust.x += -gust.x * a * dt + sigma * k * noise()
+            gust.y += -gust.y * a * dt + sigma * 0.8 * k * noise()
+            gust.z += -gust.z * a * dt + sigma * 0.6 * min(1, agl / 10 + 0.3) * k * noise()
+        } else {
+            gust = .zero
+        }
+    }
+
     func wind(at p: V3, terrain: Terrain) -> V3 {
         let agl = max(p.y - terrain.height(p.x, p.z), 0)
         let base = windVec
-        var w = base * (0.45 + 0.55 * min(1, agl / 25))
-        let t = time
-        if turbulence > 0 {
-            let g1 = sin(t * 0.61 + p.x * 0.013) + 0.6 * sin(t * 1.37 + p.z * 0.021 + 1.3) + 0.35 * sin(t * 3.1 + p.x * 0.05 + p.z * 0.04)
-            let g2 = sin(t * 0.83 + p.z * 0.017 + 2.1) + 0.5 * sin(t * 2.3 + p.x * 0.03)
-            let g3 = sin(t * 1.1 + p.x * 0.02 + p.z * 0.015 + 0.7) + 0.5 * sin(t * 2.9 + p.y * 0.06)
-            let amp = turbulence * (0.3 + 0.25 * windSpeed) * min(1, agl / 4 + 0.2)
-            let dir = windSpeed > 0.01 ? normalize(base) : V3(1, 0, 0)
-            w += dir * (g1 * amp * 0.5) + V3(-dir.z, 0, dir.x) * (g2 * amp * 0.35) + V3(0, g3 * amp * 0.3, 0)
-        }
+        // boundary layer: the wind speed is given at 10 m and falls off logarithmically toward the ground
+        let shear = clampf(log((agl + 0.1 + 0.05) / 0.05) / log(10.05 / 0.05), 0, 1.6)
+        var w = base * (shear * (1 - wakeDeficit))
+        let dir = windSpeed > 0.01 ? base / windSpeed : V3(1, 0, 0)
+        w += dir * gust.x + V3(-dir.z, 0, dir.x) * gust.y + V3(0, gust.z, 0)
         if windSpeed > 0.1 {
             let n = terrain.normal(p.x, p.z)
             w.y += (base.x * -n.x + base.z * -n.z) / n.y * exp(-agl / 60) * 0.9
         }
         if thermalsOn {
+            let top = (1 - smoothstep(350, 500, agl)) * min(1, agl / 40)
             for th in thermals {
-                let dx = p.x - th.c.x - base.x * 4, dz = p.z - th.c.y - base.z * 4
-                w.y += th.s * exp(-(dx * dx + dz * dz) / (th.r * th.r)) * min(1, agl / 40)
+                // the column leans downwind as it rises; a ring of sinking air surrounds the core
+                let dx = p.x - th.c.x - base.x * agl / 3, dz = p.z - th.c.y - base.z * agl / 3
+                let d2 = dx * dx + dz * dz, r = th.r * (1 + agl / 400)
+                if d2 > 9 * 6.25 * r * r { continue }
+                let env = pow(max(sin(.pi * th.age / th.life), 0), 0.6)
+                w.y += th.s * env * top * (exp(-d2 / (r * r)) - 0.22 * exp(-d2 / (6.25 * r * r)))
             }
         }
         return w

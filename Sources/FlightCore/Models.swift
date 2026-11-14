@@ -429,6 +429,22 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
             b.append(gm)
         }
     }
+    if g.gear == .floats {
+        // twin floats with a stepped planing bottom, held by struts and spreader bars
+        let fl = 0.78 * L, fw = g.track * 0.36, fh = g.gearH * 0.42
+        let top = -g.gearH + 2 * fh
+        for side in [Float(-1), 1] {
+            let x = side * g.track
+            b.fuselage([(-0.52, 0.1, 0.25, 0.55), (-0.44, 0.7, 0.8, 0.2), (-0.25, 1, 1, 0), (0.05, 1, 1, 0), (0.06, 0.95, 0.72, 0.28), (0.3, 0.7, 0.55, 0.42), (0.48, 0.15, 0.25, 0.7)]
+                        .map { (z: Float($0.0) * fl, w: fw * Float($0.1), h: fh * Float($0.2), y: -g.gearH + fh + fh * Float($0.3)) },
+                       x: x, exp: 3, seg: 12) { _, _, sy in sy < -0.2 ? V4(0.08, 0.1, 0.16, film) : white }
+            for z in [-0.2 * fl, 0.18 * fl] {
+                b.cylinder(from: V3(x, top, z), to: V3(side * w * 0.8, -h * 0.7, z * 0.6), r0: 0.006, r1: 0.006, seg: 6, color: alu)
+            }
+            b.cylinder(from: V3(x, top, -0.2 * fl), to: V3(side * w * 0.8, -h * 0.7, 0.18 * fl * 0.6), r0: 0.004, r1: 0.004, seg: 5, color: alu)
+        }
+        for z in [-0.2 * fl, 0.18 * fl] { b.cylinder(from: V3(-g.track, top - 0.01, z), to: V3(g.track, top - 0.01, z), r0: 0.005, r1: 0.005, seg: 6, color: alu) }
+    }
     if g.gear == .none {
         // belly skid
         b.box(center: V3(0, -h * 0.98, nz + L * 0.3), size: V3(0.012, 0.01, L * 0.3), color: black)

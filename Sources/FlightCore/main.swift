@@ -8,6 +8,7 @@ func runSelfTest() {
     let terrain = Terrain(site: site)
     let env = Environment()
     env.configure(site)
+    env.obstacles = terrain.windObstacles
     for spec in AircraftLibrary.all {
         let ac = Aircraft(spec)
         var ap = Autopilot()
@@ -21,7 +22,7 @@ func runSelfTest() {
         var minAgl: Float = 1e9, maxSpeed: Float = 0
         for i in 0..<60_000 {
             if i % 10 == 0 { c = ap.update(ac, terrain: terrain, dt: 0.01) }
-            env.time += 0.001
+            env.advance(dt: 0.001, at: ac.pos, airspeed: ac.airspeed, terrain: terrain)
             ac.step(dt: 0.001, c: c, terrain: terrain, wind: env.wind(at: ac.pos, terrain: terrain), rollMu: site.rollMu)
             let agl = ac.pos.y - terrain.height(ac.pos.x, ac.pos.z)
             if i > 15_000 { minAgl = min(minAgl, agl); maxSpeed = max(maxSpeed, ac.airspeed) }
@@ -141,6 +142,134 @@ func runPhysicsTest() {
         t50 = ac2.battery
         print(String(format: "   battery after 40 s at full throttle in flight: %.0f%%  (shaft speed %.0f%% of static)", t50 * 100, ac2.levels[0] * 100))
     }
+}
+
+/// Tests of the ground, water, helicopter and weather models.
+func runEnvTest() {
+    func site(_ key: String) -> (SiteSpec, Terrain, Environment) {
+        let s = SiteSpec.all.first { $0.key == key }!
+        let t = Terrain(site: s); let e = Environment(); e.configure(s); e.obstacles = t.windObstacles
+        return (s, t, e)
+    }
+    func plane(_ name: String) -> Aircraft { let a = Aircraft(AircraftLibrary.all.first { $0.name == name }!); a.unlimitedBattery = true; return a }
+    // 1. water take-off
+    do {
+        let (_, terrain, env) = site("lake")
+        for name in ["Beaver Floatplane", "Super Cub Floatplane", "Twin Otter Floatplane"] {
+            let ac = plane(name)
+            guard let p = terrain.waterStart(windFrom: env.windFrom) else { print("no water start found"); break }
+            ac.reset(pos: p + V3(0, ac.restHeight - 0.05, 0), heading: -env.windFrom * deg)
+            var rest: Float = 0, liftOff: Float = -1, run: Float = 0, hump: Float = 0
+            for i in 0..<14000 {
+                var c = Controls(); let t = Float(i) / 1000
+                c.throttle = t > 2 ? 1 : 0
+                c.elevator = t > 2 ? clampf(0.25 + 2 * (0.1 - ac.pitch), -0.3, 0.8) : 0
+                c.aileron = clampf(-2 * ac.roll, -0.5, 0.5)
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+                if i == 1999 { rest = ac.pos.y - (terrain.site.waterLevel ?? 0) }
+                if t > 2 && liftOff < 0 { hump = max(hump, ac.pitch); if !ac.onGround && ac.airspeed > 5 { liftOff = t - 2; run = distance(ac.pos, p) } }
+            }
+            print(String(format: "WATER %@: floats %.2f m above the surface at rest, %@, afterwards %.0f m up at %.0f km/h%@", name, rest,
+                         liftOff < 0 ? "did not lift off in 12 s" : String(format: "airborne after %.1f s and %.0f m", liftOff, run),
+                         ac.pos.y - (terrain.site.waterLevel ?? 0), ac.airspeed * 3.6, ac.crashed ? "  CRASHED" : ""))
+        }
+    }
+    // 2. landing roll: touch down at 1.3 x stall speed and coast, then the same with brakes, on three surfaces
+    for key in ["meadow", "lake", "snow"] {
+        let (s, terrain, _) = site(key)
+        var out = "ROLL \(s.displayName):"
+        for brake in [Float(0), 1] {
+            let ac = plane("Skylark Trainer")
+            ac.reset(pos: V3(-60, ac.restHeight + 0.02, 0), heading: -.pi / 2, speed: ac.spec.stallSpeed * 1.2)
+            var c = Controls(); c.brake = brake; c.elevator = -0.1
+            var i = 0
+            while i < 40000 && (length(ac.vel) > 0.3 || i < 500) { ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0); i += 1 }
+            out += String(format: "  %@ %.0f m", brake > 0 ? "braked" : "coasting", ac.pos.x + 60)
+        }
+        print(out)
+    }
+    // 3. crosswind ground loop tendency: taildragger rolling at speed, kicked sideways
+    for name in ["Skylark Trainer", "Piper J-3 Cub"] {
+        let (_, terrain, _) = site("meadow")
+        let ac = plane(name)
+        ac.reset(pos: V3(-60, ac.restHeight + 0.02, 0), heading: -.pi / 2, speed: 9)
+        ac.omega.y = 0.6
+        for _ in 0..<4000 { ac.step(dt: 0.001, c: Controls(), terrain: terrain, wind: .zero, rollMu: 0) }
+        let hd = atan2(-ac.forward.x, -ac.forward.z) / deg + 90
+        print(String(format: "SWERVE %@: after a 35°/s yaw disturbance at 32 km/h, heading ends %.0f° off%@", name, abs(hd), ac.crashed ? " (tipped over)" : ""))
+    }
+    // 4. ground effect: fly level at a fixed height and attitude for 3 s; less drag near the ground keeps more speed
+    do {
+        let (_, terrain, _) = site("meadow")
+        var res: [(Float, Float)] = []
+        for h in [Float(40), 0.03] {
+            let ac = plane("Stick 40")
+            let y = h + ac.restHeight
+            ac.reset(pos: V3(0, y, 0), heading: -.pi / 2, speed: ac.spec.stallSpeed * 1.5)
+            ac.q = ac.q * simd_quatf(angle: 5 * deg, axis: V3(1, 0, 0))
+            let q0 = ac.q
+            var lift: Float = 0
+            for i in 0..<3000 {
+                let v0 = ac.vel.y
+                ac.step(dt: 0.001, c: Controls(), terrain: terrain, wind: .zero, rollMu: 0)
+                if i == 200 { lift = (ac.vel.y - v0) / 0.001 + gravity }
+                ac.pos.y = y; ac.vel.y = 0; ac.q = q0; ac.omega = .zero       // hold height and attitude
+            }
+            res.append((ac.airspeed, lift))
+        }
+        print(String(format: "GROUND EFFECT low-wing Stick 40, held level at 5° nose-up for 3 s: speed left %.1f km/h at 40 m, %.1f km/h with the wheels just off the runway; lift %.2f g vs %.2f g",
+                     res[0].0 * 3.6, res[1].0 * 3.6, res[0].1 / gravity, res[1].1 / gravity))
+    }
+    // 5. helicopter: vertical descent into vortex ring, then fly forward out of it
+    do {
+        let (_, terrain, _) = site("meadow")
+        let ac = Aircraft(AircraftLibrary.all[4])
+        ac.reset(pos: V3(0, 150, 0), heading: 0)
+        var maxV: Float = 0, sinkIn: Float = 0, sinkOut: Float = 0
+        for i in 0..<16000 {
+            let t = Float(i) / 1000
+            var c = Controls()
+            let eb = simd_float3x3(ac.q).transpose * cross(ac.up, t < 9 ? V3(0, 1, 0) : normalize(V3(0, 1, -0.45)))
+            c.elevator = clampf(eb.x * 6 / 5, -1, 1); c.aileron = clampf(-eb.z * 6 / 5, -1, 1)
+            c.throttle = t < 3 ? 0.52 : (t < 9 ? 0.66 : 0.8)          // settle into a descent, then pull collective
+            ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+            maxV = max(maxV, ac.vortexRing)
+            if i == 8900 { sinkIn = -ac.vel.y }
+            if i == 15900 { sinkOut = -ac.vel.y }
+        }
+        print(String(format: "VORTEX RING %@: depth %.0f%%; sinking %.1f m/s with hover collective held; %.1f m/s after flying forward out of it", ac.spec.name, maxV * 100, sinkIn, sinkOut))
+    }
+    // 6. weather: wind profile, turbulence strength, wake behind the clubhouse, thermals
+    do {
+        let (s, terrain, env) = site("meadow")
+        env.windSpeed = 5; env.turbulence = 0
+        let prof = [Float(0.3), 1, 2, 5, 10, 30, 100].map { String(format: "%.0f m: %.1f", $0, length(env.wind(at: V3(0, $0, -80), terrain: terrain))) }.joined(separator: ", ")
+        print("WIND PROFILE (5 m/s at 10 m): " + prof)
+        env.turbulence = 0.3
+        func rms(_ p: V3) -> Float {
+            var s2: Float = 0; var mean = V3.zero; var n: Float = 0
+            var samples: [V3] = []
+            for _ in 0..<20000 { env.advance(dt: 0.001, at: p, airspeed: 14, terrain: terrain); samples.append(env.wind(at: p, terrain: terrain)) }
+            for v in samples { mean += v; n += 1 }; mean /= n
+            for v in samples { s2 += length_squared(v - mean) }
+            return sqrt(s2 / n)
+        }
+        let hw = s.runwayWid / 2
+        let d = env.windVec / env.windSpeed
+        let club = V3(-48, 2, hw + 34)
+        print(String(format: "TURBULENCE (setting 30%%, wind 5 m/s): gust strength %.2f m/s in open air at 30 m, %.2f m/s at 3 m, %.2f m/s 15 m downwind of the clubhouse",
+                     rms(V3(0, 30, -150)), rms(V3(0, 3, -150)), rms(club + d * 15)))
+        env.thermalsOn = true; env.windSpeed = 0; env.turbulence = 0
+        env.advance(dt: 0.001, at: .zero, airspeed: 10, terrain: terrain)
+        var up: Float = -9, down: Float = 9
+        for i in 0..<400 { let p = V3(Float(i % 20) * 40 - 400, 120, Float(i / 20) * 28 - 460); let w = env.wind(at: p, terrain: terrain).y; up = max(up, w); down = min(down, w) }
+        print(String(format: "THERMALS at 120 m: strongest lift %.1f m/s, strongest sink %.1f m/s, %d active", up, down, env.thermals.count))
+    }
+}
+
+if CommandLine.arguments.contains("--envtest") {
+    runEnvTest()
+    exit(0)
 }
 
 if CommandLine.arguments.contains("--physicstest") {

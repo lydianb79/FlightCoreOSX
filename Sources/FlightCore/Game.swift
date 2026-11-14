@@ -147,6 +147,7 @@ final class Game {
         site = SiteSpec.all[siteIndex]
         terrain = Terrain(site: site)
         env.configure(site)
+        env.obstacles = terrain.windObstacles
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
         timeOfDay = site.defaultTime
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
@@ -172,7 +173,10 @@ final class Game {
 
     func resetAircraft() {
         let spec = aircraft.spec
-        if site.panorama != nil {
+        if spec.hasFloats, let p = terrain.waterStart(windFrom: env.windFrom) {
+            // floatplanes start on the water, pointing into the wind
+            aircraft.reset(pos: p + V3(0, aircraft.restHeight - 0.05, 0), heading: -env.windFrom * deg)
+        } else if site.panorama != nil {
             // photo sites: each has its own start point and take-off direction
             let k: Float = spec.kind == .airplane ? 1 : 0.6
             let hd = -site.startHeading * deg
@@ -211,6 +215,7 @@ final class Game {
         site = SiteSpec.all[i]
         terrain = Terrain(site: site)
         env.configure(site)
+        env.obstacles = terrain.windObstacles
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
         if site.panorama != nil { cameraMode = 0 } else { timeOfDay = site.defaultTime }
         siteVersion += 1
@@ -306,7 +311,7 @@ final class Game {
             let h: Float = 0.001
             acc += dt * timeScale
             while acc >= h {
-                env.time += h
+                env.advance(dt: h, at: aircraft.pos, airspeed: aircraft.airspeed, terrain: terrain)
                 aircraft.step(dt: h, c: controls, terrain: terrain, wind: env.wind(at: aircraft.pos, terrain: terrain), rollMu: site.rollMu)
                 acc -= h
             }
@@ -564,6 +569,8 @@ final class Game {
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
         if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: "Battery %.0f%%", aircraft.battery * 100)) }
         if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround { cfg.append("STALL") }
+        if spec.kind == .helicopter && aircraft.vortexRing > 0.3 { cfg.append("VORTEX RING") }
+        if controls.brake > 0.5 && aircraft.onGround { cfg.append("Brakes") }
         if spec.kind == .helicopter { cfg.append(String(format: "Rotor %.0f%%%@", aircraft.levels[0] * 100, hold ? " HOLD" : "")) }
         if smokeOn { cfg.append("Smoke") }
         s.config = cfg.joined(separator: " · ")

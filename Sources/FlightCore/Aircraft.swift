@@ -15,6 +15,7 @@ struct Controls {
     var flaps: Float = 0        // 0...1
     var gearUp = false
     var hold = false            // helicopter throttle hold (engine disengaged)
+    var brake: Float = 0        // wheel brakes 0...1
 }
 
 /// One lifting panel. Forces are computed from its own local airflow, so stall,
@@ -61,6 +62,7 @@ struct Contact {
     var steer: Float = 0
     var crashSpeed: Float = 3
     var mu: Float = 0.5
+    var float = false           // part of a float: buoyant on water
 }
 
 struct MultiSpec {
@@ -110,6 +112,7 @@ extension AircraftSpec {
         var f: [String] = []
         if hasFlaps { f.append("Flaps") }
         if hasRetracts { f.append("Retractable gear") }
+        if hasFloats { f.append("Floats") }
         if handLaunch { f.append("Hand launch") }
         if props.count > 1 { f.append("Twin engine") }
         if kind == .helicopter { f.append("Collective pitch"); f.append("Autorotation") }
@@ -149,6 +152,7 @@ struct AircraftSpec {
     var stallSpeed: Float = 9
     var hasFlaps = false
     var hasRetracts = false
+    var hasFloats = false
     var wingArea: Float = 0.4
     var downwashK: Float = 0        // downwash angle at the tail per unit wing lift coefficient
     var endurance: Float = 240      // seconds of full-throttle running on a fresh battery
@@ -189,6 +193,9 @@ final class Aircraft {
     var stallT: [Float]             // per surface: 0 attached flow ... 1 fully stalled
     var stalled: [Bool]
     private var eps: Float = 0      // downwash angle at the tail
+    private var groundPhi: Float = 1   // 1 in free air, falling toward 0 as the wing nears the ground
+    private var buffet: Float = 0
+    var vortexRing: Float = 0       // helicopter: 0...1 how deep in vortex ring state
     private var motorLoad: Float = 0
     /// Fraction of the main wing that is stalled (for the display and tests).
     var wingStall: Float {
@@ -201,6 +208,7 @@ final class Aircraft {
     var detached = Set<Int>()       // parts that have broken off
     let kSpring: Float, cDamp: Float
     let restHeight: Float
+    private let wingY: Float
     private var want: [Float]
 
     init(_ spec: AircraftSpec) {
@@ -214,6 +222,7 @@ final class Aircraft {
         kSpring = spec.mass * gravity / 0.03
         cDamp = 0.5 * sqrt(kSpring * spec.mass)
         restHeight = -(spec.contacts.map { $0.pos.y }.min() ?? 0)
+        wingY = spec.surfaces.first { $0.isWing }?.pos.y ?? 0
     }
 
     var power: Float {
@@ -232,7 +241,7 @@ final class Aircraft {
         for i in levels.indices { levels[i] = 0 }
         vi = 0; yawI = 0; crashed = false; onGround = false
         flap = 0; gear = 0; crashImpact = 0; detached = []
-        battery = 1; eps = 0; motorLoad = 0
+        battery = 1; eps = 0; motorLoad = 0; vortexRing = 0; groundPhi = 1
         for i in stallT.indices { stallT[i] = 0; stalled[i] = false }
         if spec.kind == .helicopter { levels[0] = 1 }    // rotor already at speed
     }
@@ -253,8 +262,10 @@ final class Aircraft {
         let tau = clampf(3 * s.chord / max(speed, 1), 0.008, 0.15)
         stallT[i] += (target - stallT[i]) * min(1, dt / tau)
         let t = stallT[i]
-        let clLin = s.liftSlope * a * s.load
-        let cdLin = s.cd0 + clLin * clLin / (.pi * s.ar * 0.8)
+        // close to the ground the wingtip vortices are cut off: more lift, much less induced drag
+        let ge: Float = s.isWing ? groundPhi : 1
+        let clLin = s.liftSlope * a * s.load * (1 + 0.1 * (1 - ge))
+        let cdLin = s.cd0 + clLin * clLin / (.pi * s.ar * 0.8) * ge
         let sa = sin(a)
         let clP = 1.1 * s.postStall * sin(2 * a)
         let cdP = s.cd0 + 1.5 * sa * sa
@@ -314,6 +325,14 @@ final class Aircraft {
             motorLoad += (loadSum / np - motorLoad) * min(1, dt / 0.05)
             if !unlimitedBattery { battery = max(0, battery - draw / np * dt / spec.endurance) }
 
+            do {
+                // height of the wing itself, not the fuselage, above the surface (or the water)
+                let wingOff = R * V3(0, wingY, 0)
+                let surfaceY = max(terrain.height(pos.x, pos.z), terrain.site.waterLevel ?? -1e9)
+                let hg = max(pos.y + wingOff.y - surfaceY, 0.03)
+                let r = 16 * hg / spec.span
+                groundPhi = r * r / (1 + r * r)
+            }
             var wingCl: Float = 0, wingArea: Float = 0
             for (i, s) in spec.surfaces.enumerated() {
                 var v = va + cross(omega, s.pos)
@@ -328,16 +347,16 @@ final class Aircraft {
                 if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.6 * stallT[i]) }
                 alpha += s.flapsGain * flap
                 var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
-                if s.flapsGain != 0 { cd += 0.07 * flap }
-                if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
                 let qS = 0.5 * rho * sp2 * s.area
+                if s.flapsGain != 0 { cd += 0.07 * flap; tb.x -= qS * s.chord * 0.18 * flap }      // flaps drag, and pitch the nose down
+                if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
                 let f = (l * cl - u * cd) * qS
                 fb += f; tb += cross(s.pos, f)
             }
             // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
-            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea - eps) * min(1, dt / 0.04) }
+            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea * groundPhi - eps) * min(1, dt / 0.04) }
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:
@@ -395,10 +414,28 @@ final class Aircraft {
             var T = 0.5 * rho * 5.7 * h.sigma * A * tip * tip * (theta / 3 - lam / 2)
             let agl = pos.y - terrain.height(pos.x, pos.z)
             if agl < h.rotorR * 1.5 { T *= 1 + 0.12 * (1 - max(agl, 0) / (h.rotorR * 1.5)) }
+            // Vortex ring state: descending into its own downwash at low airspeed, the rotor loses lift and
+            // shakes. More collective makes it worse; flying forward out of the column cures it.
+            let vHover = sqrt(spec.mass * gravity / (2 * rho * A))
+            let vrs = smoothstep(0.45 * vHover, 0.8 * vHover, -vc) * (1 - smoothstep(1.5 * vHover, 2.1 * vHover, -vc)) * (1 - smoothstep(0.5 * vHover, 1.1 * vHover, vin)) * lv
+            vortexRing += (vrs - vortexRing) * min(1, dt / 0.3)
+            buffet += dt
+            let shake = sin(buffet * 17) * 0.5 + sin(buffet * 29 + 1) * 0.3 + sin(buffet * 43 + 2) * 0.2
+            T *= 1 - vortexRing * (0.42 + 0.2 * shake)
+            // Retreating blade stall at high forward speed: lift is lost on the side where the blade moves backward
+            let mu = vin / tip
+            let rbs = smoothstep(0.3, 0.45, mu)
+            T *= 1 - 0.3 * rbs
             let viT = T / (2 * rho * A * max(sqrt(vin * vin + (vc + vi) * (vc + vi)), 1.5))
             vi += (viT - vi) * min(1, dt / 0.08)
             let f = V3(-0.25 * va.x, T, -0.25 * va.z)
             fb += f; tb += cross(h.hub, f)
+            // Blade flapping: the disc tilts away from the oncoming air, so the nose rises with forward speed
+            // and the machine rolls away from a sideways slide. The flight controller has to hold against it.
+            let kFlap = 30 * spec.mass / 3.2 * lv * lv
+            tb.x += kFlap * (-va.z) / tip + rbs * 0.6 * h.maxMoment + vortexRing * shake * 0.35 * h.maxMoment
+            tb.z += kFlap * va.x / tip - rbs * 0.3 * h.maxMoment
+            tb.y -= 0.002 * spec.mass * va.x * max(airspeed, 1)                  // fin weathervanes into the airflow
             let pScale = spec.mass / 3.2
             let qMax = 600 * pScale / om0
             let qEng: Float = (crashed || c.hold) ? 0 : clampf(40 * (1 - lv), 0, 1) * qMax
@@ -414,7 +451,10 @@ final class Aircraft {
                 tb.z += clampf(spec.inertia.z * 40 * ez, -h.maxMoment * auth, h.maxMoment * auth)
                 let ey = -c.rudder * h.maxYaw - omega.y
                 yawI = clampf(yawI + spec.inertia.y * 160 * ey * dt, -h.tailMax, h.tailMax)
-                tb.y += clampf(spec.inertia.y * 35 * ey + yawI, -h.tailMax * auth, h.tailMax * auth)
+                // the tail rotor loses bite when it slides sideways into its own wake
+                let tailLoss = smoothstep(2, 5, va.x) * (1 - smoothstep(9, 13, va.x))
+                let tAuth = auth * (1 - 0.55 * tailLoss)
+                tb.y += clampf(spec.inertia.y * 35 * ey + yawI, -h.tailMax * tAuth, h.tailMax * tAuth)
             }
             fb -= va * (0.5 * rho * spec.cdA * airspeed)
             spin[0] += 32 * levels[0] * dt
@@ -424,17 +464,49 @@ final class Aircraft {
         // Ground contact
         var fw = V3(0, -spec.mass * gravity, 0)
         var touching = false
+        let waterLevel = terrain.site.waterLevel
+        let kFloat = spec.mass * gravity / (4 * 0.05), cFloat = 0.7 * sqrt(kFloat * spec.mass)
         for cp in spec.contacts {
             let rw = R * cp.pos
             let pw = pos + rw
             if cp.wheel && gear > 0.5 { continue }
-            let d = terrain.height(pw.x, pw.z) - pw.y
+            var ground = terrain.height(pw.x, pw.z)
+            var water = false
+            if let wl = waterLevel, wl > ground { ground = wl; water = true }
+            let surf = terrain.surface(pw.x, pw.z)
+            // wheels feel the small bumps of grass and dirt
+            if !water && cp.wheel { ground += surf.rough * (vnoise(pw.x * 2.3, pw.z * 2.3, 91) - 0.5) }
+            let d = ground - pw.y
             if d <= 0 { continue }
+            let vp = vel + R * cross(omega, cp.pos)
+            if water {
+                guard cp.float else {
+                    // anything but a float digging into the water trips a floatplane over
+                    if spec.hasFloats && !crashed && d > 0.05 { crashed = true; crashImpact = max(length(vel) * 0.5, 3) }
+                    continue
+                }
+                touching = true
+                if !crashed && -vp.y > cp.crashSpeed { crashed = true; crashImpact = -vp.y }
+                let N = max(0, kFloat * min(d, 0.3) - cFloat * vp.y)
+                var f = V3(0, N, 0)
+                var fwd = R * V3(0, 0, -1); fwd.y = 0
+                if length(fwd) > 0.05 {
+                    fwd = normalize(fwd)
+                    let side = V3(-fwd.z, 0, fwd.x)
+                    let vr = dot(vp, fwd), vs = dot(vp, side)
+                    // hull drag peaks at the "hump" before the float climbs onto its step and planes
+                    let hull = 0.07 + 0.22 * exp(-pow((abs(vr) - 3) / 2.2, 2))
+                    f -= fwd * (N * hull * clampf(vr / 0.3, -1, 1)) + side * (N * 0.9 * clampf(vs / 0.5, -1, 1))
+                    tb.y -= servo.z * N * 0.04 * clampf(vr, 0, 3)          // water rudders
+                }
+                fw += f
+                tb += Rt * cross(rw, f)
+                continue
+            }
             touching = true
             let n = terrain.normal(pw.x, pw.z)
-            let vp = vel + R * cross(omega, cp.pos)
             let vn = dot(vp, n)
-            if !crashed && (-vn > cp.crashSpeed || (!cp.wheel && cp.crashSpeed < 3.2 && length(vp) > 13)) { crashed = true; crashImpact = max(-vn, length(vp) * 0.6) }
+            if !crashed && (-vn > cp.crashSpeed || (!cp.wheel && !cp.float && cp.crashSpeed < 3.2 && length(vp) > 13)) { crashed = true; crashImpact = max(-vn, length(vp) * 0.6) }
             let N = max(0, kSpring * min(d, 0.25) - cDamp * vn)
             var f = n * N
             let vt = vp - n * vn
@@ -446,11 +518,18 @@ final class Aircraft {
                 if lf > 0.05 {
                     fwd /= lf
                     let side = cross(n, fwd)
-                    f -= (fwd * (rollMu * clampf(dot(vt, fwd) / 0.2, -1, 1)) + side * (0.8 * clampf(dot(vt, side) / 0.3, -1, 1))) * N
+                    let vr = dot(vt, fwd), vs = dot(vt, side)
+                    // rolling resistance of the surface, plus brakes on the main wheels
+                    let roll = surf.roll + (cp.steer == 0 ? c.brake * 0.55 * surf.grip : 0)
+                    // tyre: side force builds with the slip angle, peaks, then falls away once the tyre slides
+                    let x = atan2(vs, abs(vr) + 0.6) / 0.16
+                    let ax = abs(x)
+                    let lat = surf.grip * (ax < 1 ? ax * (1.5 - 0.5 * ax * ax) : 0.72 + 0.28 * exp(-(ax - 1) * 1.5)) * (x < 0 ? -1 : 1)
+                    f -= (fwd * (roll * clampf(vr / 0.2, -1, 1)) + side * lat) * N
                 }
             } else {
-                let s = length(vt)
-                if s > 1e-4 { f -= vt * (N * (crashed ? 0.7 : cp.mu) * min(1, s / 0.2) / s) }
+                let sp = length(vt)
+                if sp > 1e-4 { f -= vt * (N * (crashed ? 0.7 : cp.mu) * min(1, sp / 0.2) / sp) }
             }
             fw += f
             tb += Rt * cross(rw, f)

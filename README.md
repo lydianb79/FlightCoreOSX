@@ -6,7 +6,7 @@ A radio-control line-of-sight flight simulator for macOS, written in Swift and r
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 90 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 93 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Download
 
@@ -51,12 +51,12 @@ The last aircraft and site are remembered between launches. The interface uses t
 
 ## Aircraft
 
-Ninety aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
+Ninety-three aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
 | Category | Count | Examples |
 |---|---|---|
 | Trainers & Sport | 9 | Skylark Trainer, Cadet 1200, Stick 40, Tundra Trainer, Stiletto Racer |
-| Scale Civil | 22 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth |
+| Scale Civil | 25 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth, and three floatplanes |
 | Warbirds | 17 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel |
 | Aerobatic | 11 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7 |
 | Foam 3D | 9 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty |
@@ -127,6 +127,7 @@ Press **H** in the app for this list.
 | A / D | Rudder (yaw) |
 | W / S | Throttle or collective up / down |
 | X | Throttle cut |
+| Q | Wheel brakes |
 | Shift | Full stick deflection |
 | Space or R | Reset aircraft |
 | `[` `]`, 1–9 | Previous / next aircraft, or pick one |
@@ -169,8 +170,13 @@ Press **H** in the app for this list.
   - **Wings** have six panels per side, each with its own chord, twist (washout) and share of the load, so a tapered wing stalls at the tips and a rectangular one at the root. The stall has a lag and hysteresis, the sharpness depends on the wing section, and ailerons lose effect in separated flow. Wing drops, spins and their recovery follow from this.
   - **Tail:** the wing's downwash reduces the tail's angle of attack and collapses when the wing stalls, which gives the nose-drop at the stall.
   - **Propulsion:** an electric motor whose torque falls with speed, a propeller that unloads in flight, and a battery that sags under load and drains with use (Simulation ▸ Unlimited Battery turns that off). Propeller effects are modelled: torque reaction, P-factor, spiral slipstream on the fin, and gyroscopic precession, so single-engine aircraft swing on take-off and need rudder.
+  - **Near the ground:** ground effect adds lift and cuts induced drag within about half a wingspan of the surface, so aircraft float in the flare. Flaps add drag and pitch the nose down.
   - **Balance and inertia:** the centre of gravity is placed a set static margin ahead of the computed neutral point, and the moments of inertia are computed from where the wing, fuselage, tail, motor and battery sit.
-- **Scale data:** the 57 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample.
+- **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
+- **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
+- **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.
+- **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m). Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
+- **Scale data:** the 57 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, flat-foam profile airframes, and ten trim schemes including camouflage. Surfaces are shaded as glossy film covering with sky reflections.
 - **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, long grass that sways in the wind, wild flowers and bushes. Each site has its own terrain shape, ground colours and trees (deciduous, conifers, palms, acacias, cypresses, cacti), and some have water, a farm, or an airport with hangars and a tower.
@@ -223,7 +229,6 @@ swift run -c release FlightCore --selftest
 - Aircraft and airport editors
 - Flight recording and playback
 - Flight-instructor lessons
-- Float planes and taking off from water
 - Sloping ground and occlusion by photographed objects on photo sites
 
 ## Credits
