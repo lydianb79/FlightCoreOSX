@@ -59,6 +59,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var vegetation: [GPUChunk] = []
     private var grass: [GPUChunk] = []
     private var treeShadowMesh: GPUMesh?
+    private var waterMesh: GPUMesh?
     private var windsockMesh: GPUMesh?
     private var balloonMesh: GPUMesh?
     private var partMeshes: [GPUMesh?] = []
@@ -210,7 +211,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             shadow1Key = -1
             panoTex = nil
             if let url = game.site.panorama {
-                terrainMesh = nil; sceneryMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil
+                terrainMesh = nil; sceneryMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil; waterMesh = nil
                 if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img) }
                 if panoTex == nil { game.say("Could not load panorama image", 6) }
             } else {
@@ -222,6 +223,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                 vegetation = upload(game.terrain.buildVegetation(), 150)
                 grass = upload(game.terrain.buildGrass(), 30)
                 treeShadowMesh = GPUMesh(device, game.terrain.buildTreeShadows())
+                waterMesh = GPUMesh(device, game.terrain.buildWater())
             }
         }
         if aircraftVersion != game.aircraftVersion {
@@ -431,6 +433,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             drawItems(enc, acItems, fragment: true)
             // translucent things last, depth-tested but not written
             enc.setDepthStencilState(depthRead)
+            if let wm = waterMesh { drawItems(enc, [DrawItem(mesh: wm, model: .identity, material: 7)], fragment: true) }
             if let ts = treeShadowMesh { drawItems(enc, [DrawItem(mesh: ts, model: .identity, material: 4)], fragment: true) }
             drawItems(enc, acBlend, fragment: true)
             if game.showObstacles, !game.site.obstacles.isEmpty {

@@ -112,7 +112,7 @@ extension Terrain {
         }
     }
 
-    private func conifer(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool) {
+    private func conifer(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool, snow: Bool = false) {
         let h = t.h, g = rng.next()
         b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.3, 0), r0: h * 0.025, r1: h * 0.016, seg: 5, color: leaf(0.25, 0.18, 0.12))
         let green = leaf(0.06 + 0.06 * g, 0.2 + 0.1 * g, 0.1 + 0.04 * g)
@@ -127,7 +127,8 @@ extension Terrain {
                 return t.p + V3(cos(a) * rr, y0 - th * 0.12, sin(a) * rr)
             }
             let top = t.p + V3(0, y0 + th, 0)
-            let cRim = V4(green.x * 0.75, green.y * 0.75, green.z * 0.75, 1 + 2 * f), cTop = V4(green.x * 1.15, green.y * 1.15, green.z * 1.15, 1.5 + 2 * f)
+            let cRim = V4(green.x * 0.75, green.y * 0.75, green.z * 0.75, 1 + 2 * f)
+            let cTop = snow ? V4(0.9, 0.93, 0.97, 1.5 + 2 * f) : V4(green.x * 1.15, green.y * 1.15, green.z * 1.15, 1.5 + 2 * f)
             for j in 0..<seg {
                 let a = rim[j], c = rim[(j + 1) % seg]
                 let n = normalize(V3(a.x - t.p.x, r * 0.6, a.z - t.p.z))
@@ -135,6 +136,55 @@ extension Terrain {
                 b.v(a, n, cRim); b.v(c, n2, cRim); b.v(top, normalize(n + n2), cTop)
             }
         }
+    }
+
+    private func palm(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG) {
+        let h = t.h, lean = V3(rng.range(-0.25, 0.25), 0, rng.range(-0.25, 0.25))
+        let bark = leaf(0.42, 0.35, 0.26)
+        func trunk(_ f: Float) -> V3 { t.p + V3(0, h * f, 0) + lean * (h * f * f) }
+        for k in 0..<5 {
+            let f0 = Float(k) / 5, f1 = Float(k + 1) / 5
+            b.cylinder(from: trunk(f0) - (k == 0 ? V3(0, 0.2, 0) : .zero), to: trunk(f1), r0: 0.2 - 0.02 * Float(k), r1: 0.18 - 0.02 * Float(k), seg: 6, color: bark)
+        }
+        let top = trunk(1), up = V3(0, 1, 0)
+        let green = leaf(0.12 + 0.08 * rng.next(), 0.36 + 0.1 * rng.next(), 0.1)
+        let fronds = 9
+        for k in 0..<fronds {
+            let a = Float(k) / Float(fronds) * 2 * .pi + rng.range(-0.2, 0.2)
+            let dir = V3(cos(a), 0, sin(a)), side = V3(-dir.z, 0, dir.x)
+            let len = h * rng.range(0.3, 0.42)
+            var prev = top, prevW: Float = 0.12
+            for j in 1...5 {
+                let f = Float(j) / 5
+                let p = top + dir * (len * f) + V3(0, len * (0.35 * f - 0.75 * f * f), 0)
+                let w = len * 0.16 * (1 - f * 0.85)
+                let c0 = V4(green.x * 0.8, green.y * 0.8, green.z * 0.8, 1 + 3 * (f - 0.2)), c1 = V4(green.x, green.y, green.z, 1 + 3 * f)
+                b.v(prev - side * prevW, up, c0); b.v(prev + side * prevW, up, c0); b.v(p + side * w, up, c1)
+                b.v(prev - side * prevW, up, c0); b.v(p + side * w, up, c1); b.v(p - side * w, up, c1)
+                prev = p; prevW = w
+            }
+        }
+    }
+
+    private func acacia(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool) {
+        let h = t.h, g = rng.next()
+        let bark = leaf(0.3, 0.24, 0.17)
+        let seed = Int32(truncatingIfNeeded: Int(t.p.x * 13 + t.p.z * 7))
+        b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.5, 0), r0: h * 0.04, r1: h * 0.028, seg: 6, color: bark)
+        for k in 0..<3 {
+            let a = Float(k) * 2.1 + g * 6
+            b.cylinder(from: t.p + V3(0, h * 0.45, 0), to: t.p + V3(cos(a) * h * 0.4, h * 0.85, sin(a) * h * 0.4), r0: h * 0.022, r1: h * 0.01, seg: 5, color: bark)
+        }
+        let green = leaf(0.24 + 0.08 * g, 0.36 + 0.06 * g, 0.12)
+        b.blob(center: t.p + V3(0, h * 0.92, 0), radii: V3(h * 0.75, h * 0.16, h * 0.75), color: green, seg: detail ? 10 : 7, rings: detail ? 5 : 3, seed: seed, lump: 0.22, sway: 1.5, under: 0.4)
+    }
+
+    private func cypress(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool) {
+        let h = t.h
+        let seed = Int32(truncatingIfNeeded: Int(t.p.x * 13 + t.p.z * 7))
+        b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.15, 0), r0: h * 0.02, r1: h * 0.018, seg: 5, color: leaf(0.28, 0.2, 0.13))
+        let g = rng.next()
+        b.blob(center: t.p + V3(0, h * 0.54, 0), radii: V3(h * 0.1, h * 0.48, h * 0.1), color: leaf(0.07 + 0.04 * g, 0.2 + 0.06 * g, 0.09), seg: detail ? 8 : 6, rings: detail ? 7 : 4, seed: seed, lump: 0.12, sway: 1.5, under: 0.6)
     }
 
     private func bush(_ b: inout MeshBuilder, at p: V3, size s: Float, color: V4, rng: inout LCG) {
@@ -151,10 +201,18 @@ extension Terrain {
         var b = MeshBuilder()
         var rng = LCG(UInt64(site.seed) + 99)
         for t in trees {
-            let near = t.p.x * t.p.x + t.p.z * t.p.z < 420 * 420
-            switch site.style {
+            let near = t.p.x * t.p.x + t.p.z * t.p.z < 300 * 300
+            switch site.trees {
             case 0: deciduous(&b, t, &rng, detail: near)
             case 2: conifer(&b, t, &rng, detail: near)
+            case 3: palm(&b, t, &rng)
+            case 4: acacia(&b, t, &rng, detail: near)
+            case 5:
+                if rng.next() < 0.55 { cypress(&b, t, &rng, detail: near) }
+                else { deciduous(&b, Tree(p: t.p, h: t.h * 0.55), &rng, detail: near) }       // olive
+            case 6: conifer(&b, t, &rng, detail: near, snow: true)
+            case 7:
+                if rng.next() < 0.68 { deciduous(&b, t, &rng, detail: near) } else { conifer(&b, t, &rng, detail: near) }
             default:
                 // desert: scrub and the odd cactus
                 if rng.next() > 0.3 {
@@ -172,17 +230,19 @@ extension Terrain {
             }
         }
         // bushes and hedges near the field
-        let bushCol: V4 = site.style == 1 ? leaf(0.42, 0.42, 0.25) : (site.style == 2 ? leaf(0.16, 0.3, 0.14) : leaf(0.2, 0.36, 0.12))
+        let pal = site.pal
+        let bushCol = leaf(pal.bush.x, pal.bush.y, pal.bush.z)
         var placed = 0, tries = 0
-        while placed < (site.style == 1 ? 90 : 160) && tries < 4000 {
+        while placed < pal.bushCount && tries < 5000 {
             tries += 1
             let x = rng.range(-260, 260), z = rng.range(-230, 260)
             if mown(x, z) || (z < 0 && abs(x) < 150 && z > -120) { continue }
             if fbm(x / 70, z / 70, site.seed + 51) < 0.52 { continue }
+            if let wl = site.waterLevel, height(x, z) < wl + 0.4 { continue }
             bush(&b, at: gy(x, z), size: rng.range(0.7, 2.2), color: bushCol, rng: &rng)
             placed += 1
         }
-        if site.style != 1 {
+        if site.style != 1 && site.surroundings != 3 && site.facility == 0 && site.palette != 4 {
             // hedge behind the pits and along the access road
             var x: Float = -hl - 10
             while x < hl + 10 {
@@ -198,7 +258,7 @@ extension Terrain {
         var b = MeshBuilder()
         let up = V3(0, 1, 0)
         for t in trees where abs(t.p.x) > 235 || abs(t.p.z - site.flatCenterZ) > 235 {
-            let r = t.h * (site.style == 2 ? 0.3 : 0.45), n = 8
+            let r = t.h * ([2, 5, 6].contains(site.trees) ? 0.3 : (site.trees == 4 ? 0.7 : 0.45)), n = 8
             let c = t.p + V3(r * 0.35, 0.12, -r * 0.3)
             for j in 0..<n {
                 let a0 = Float(j) / Float(n) * 2 * .pi, a1 = Float(j + 1) / Float(n) * 2 * .pi
@@ -216,9 +276,9 @@ extension Terrain {
         var b = MeshBuilder()
         var rng = LCG(UInt64(site.seed) + 500)
         let pilot = pilotPos
-        let (base, tip): (V4, V4) = site.style == 1 ? (leaf(0.5, 0.42, 0.26), leaf(0.74, 0.66, 0.44))
-            : (site.style == 2 ? (leaf(0.15, 0.27, 0.1), leaf(0.36, 0.48, 0.2)) : (leaf(0.15, 0.28, 0.09), leaf(0.36, 0.5, 0.18)))
-        let target = site.style == 1 ? 6000 : 36000
+        let pal = site.pal
+        let base = leaf(pal.grassBase.x, pal.grassBase.y, pal.grassBase.z), tip = leaf(pal.grassTip.x, pal.grassTip.y, pal.grassTip.z)
+        let target = pal.grassCount
         var n = 0, tries = 0
         while n < target && tries < target * 12 {
             tries += 1
@@ -226,7 +286,8 @@ extension Terrain {
             let x = pilot.x + cos(a) * r, z = pilot.z + sin(a) * r
             if mown(x, z) { continue }
             let patch = fbm(x / 26, z / 26, site.seed + 77)
-            if patch < (site.style == 1 ? 0.55 : 0.3) { continue }
+            if patch < (pal.grassCount < 10000 ? 0.55 : 0.3) { continue }
+            if let wl = site.waterLevel, height(x, z) < wl + 0.5 { continue }
             let h = rng.range(0.25, 0.55) * (0.55 + patch)
             b.grassClump(at: gy(x, z), height: h, width: rng.range(0.55, 1.0), base: base, tip: tip, rng: &rng)
             n += 1
@@ -247,7 +308,7 @@ extension Terrain {
     /// Wild flowers scattered through the long grass (small coloured triangles, vegetation material).
     func buildFlowers() -> MeshBuilder {
         var b = MeshBuilder()
-        guard site.style != 1 else { return b }
+        guard site.pal.flowers else { return b }
         var rng = LCG(UInt64(site.seed) + 900)
         let pilot = pilotPos
         let cols = [leaf(0.98, 0.95, 0.9), leaf(0.98, 0.85, 0.15), leaf(0.72, 0.42, 0.85), leaf(0.95, 0.4, 0.3)]
@@ -257,6 +318,7 @@ extension Terrain {
             let r = 6 + 110 * pow(rng.next(), 1.5), a = rng.range(0, 2 * .pi)
             let x = pilot.x + cos(a) * r, z = pilot.z + sin(a) * r
             if mown(x, z) || fbm(x / 14, z / 14, site.seed + 91) < 0.55 { continue }
+            if let wl = site.waterLevel, height(x, z) < wl + 0.5 { continue }
             b.flower(at: gy(x, z), height: rng.range(0.25, 0.5), color: cols[Int(rng.next() * 3.99)], rng: &rng)
             n += 1
         }
@@ -374,7 +436,7 @@ extension Terrain {
         }
         for y in [Float(0.5), 0.92] { b.box(center: gy(0, fz) + V3(0, y, 0), size: V3(52, 0.07, 0.04), color: white) }
         for px in [Float(-12), -6, 6, 12] {
-            b.box(center: gy(px, hw + 6.4) + V3(0, 0.012, 0), size: V3(1.4, 0.03, 1.4), color: cg(0.5, 0.5, 0.48))
+            b.box(center: gy(px, hw + 6.4) + V3(0, 0.012, 0), size: V3(1.2, 0.03, 1.2), color: cg(0.42, 0.42, 0.4))
         }
         let board = gy(-22, fz + 1.5)
         for s in [Float(-0.7), 0.7] { b.box(center: board + V3(s, 0.9, 0), size: V3(0.08, 1.8, 0.08), color: wood) }
@@ -452,7 +514,7 @@ extension Terrain {
         b.box(center: wp + V3(0, 0.06, 0), size: V3(0.5, 0.12, 0.5), color: cg(0.55, 0.55, 0.55))
 
         // --- wider surroundings
-        if site.style != 2 {
+        if site.style != 2 && site.surroundings != 3 {
             // power line along the access road
             var px: Float = -260
             while px <= 260 {
@@ -474,7 +536,7 @@ extension Terrain {
             }
         }
         // field fence on the far side of the runway (post and wire)
-        var fx: Float = -hl - 60
+        var fx: Float = site.waterLevel == nil && site.surroundings != 3 && site.facility == 0 ? -hl - 60 : 1e9
         let farZ = -hw - 95
         while fx <= hl + 60 {
             let p = gy(fx, farZ)
@@ -485,7 +547,35 @@ extension Terrain {
             }
             fx += 4
         }
-        switch site.style {
+        if site.facility == 1 {
+            // airport: apron, taxiway, hangars with arched roofs, control tower, fuel bowser
+            let tarmac = cg(0.2, 0.2, 0.22, 0.1)
+            b.box(center: gy(120, hw + 62) + V3(0, 0.025, 0), size: V3(170, 0.05, 56), color: tarmac)
+            b.box(center: gy(120, hw + 18) + V3(0, 0.025, 0), size: V3(14, 0.05, 34), color: tarmac)
+            for (i, hx) in [Float(62), 118, 174].enumerated() {
+                let c = gy(hx, hw + 106)
+                let wallCol = [cg(0.72, 0.74, 0.76, 0.3), cg(0.62, 0.68, 0.72, 0.3), cg(0.75, 0.72, 0.66, 0.3)][i]
+                var rings: [[V3]] = []
+                for z in [Float(-14), 14] {
+                    rings.append((0...10).map { k in
+                        let a = Float(k) / 10 * .pi
+                        return c + V3(-cos(a) * 20, 5 + sin(a) * 6.5, z)
+                    } + [c + V3(20, 0, z), c + V3(-20, 0, z)])
+                }
+                b.loft(rings, color: wallCol)
+                b.box(center: c + V3(0, 3.6, -14.05), size: V3(30, 7.2, 0.2), color: cg(0.35, 0.37, 0.4, 0.4))       // doors
+            }
+            let tw = gy(18, hw + 96)
+            b.box(center: tw + V3(0, 9, 0), size: V3(6, 18, 6), color: cg(0.82, 0.82, 0.8))
+            b.box(center: tw + V3(0, 19.6, 0), size: V3(9, 3.2, 9), color: cg(0.12, 0.2, 0.26, 1))
+            b.box(center: tw + V3(0, 21.4, 0), size: V3(10, 0.5, 10), color: cg(0.85, 0.85, 0.85))
+            b.cylinder(from: tw + V3(0, 21.6, 0), to: tw + V3(0, 26, 0), r0: 0.08, r1: 0.04, seg: 6, color: steel)
+            car(&b, at: gy(84, hw + 70), facing: 1.57, paint: cg(0.9, 0.75, 0.1, 0.8), van: true)
+        }
+        let farmOK = site.waterLevel.map { height(210, -260) > $0 + 1.5 } ?? true
+        switch site.surroundings {
+        case 3: break
+        case 0 where !farmOK: break
         case 0:
             // farm: barn, silo, shed; hay bales in the fields
             let farm = gy(210, -260)
@@ -497,6 +587,7 @@ extension Terrain {
             for _ in 0..<22 {
                 let bx = rng.range(-320, 320), bz = rng.range(-330, -110)
                 if abs(bx) < 60 && bz > -140 { continue }
+                if let wl = site.waterLevel, height(bx, bz) < wl + 1 { continue }
                 let p = gy(bx, bz), a = rng.range(0, 3.14)
                 let ax = V3(cos(a), 0, sin(a)) * 0.6
                 b.cylinder(from: p + V3(0, 0.62, 0) - ax, to: p + V3(0, 0.62, 0) + ax, r0: 0.62, r1: 0.62, seg: 12, color: cg(0.78, 0.66, 0.36))

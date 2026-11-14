@@ -40,31 +40,45 @@ The last aircraft and site are remembered between launches.
 
 ## Aircraft
 
-Forty aircraft, grouped by category in the Aircraft menu. Step through them with `[` and `]`; keys 1–9 pick the first nine.
+Ninety aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
-| Category | Aircraft |
-|---|---|
-| Trainers & Sport | Skylark Trainer, Feather Park Flyer, Stiletto Racer |
-| Scale Civil | Piper J-3 Cub, Cessna 182 Skylane, Pilatus PC-6 Porter, DHC-2 Beaver, Fieseler Storch, Douglas DC-3, Boeing Stearman, DH Tiger Moth, Bushmaster STOL, Twin Courier |
-| Warbirds | P-51D Mustang, Supermarine Spitfire, Messerschmitt Bf 109, Mitsubishi A6M Zero, Grumman F6F Hellcat, DH Mosquito, Falcon Warbird |
-| Aerobatic | Extra 300, Pitts Special, Pilatus PC-7, Vortex 3D, Jester Biplane |
-| Foam 3D | Flatty 3D, F3P Indoor Aerobat, Profile Edge XL, Foam Bipe 3D |
-| Jets | F-16 Fighting Falcon, F-86 Sabre, Arrow EDF |
-| Gliders | ASK 21, Thermal 2M, Zephyr 3.6 Sailplane |
-| Helicopters | Kestrel 550, Sparrow 450, Condor 700 |
-| Multirotors | Quad X450, Wasp Racing Quad |
+| Category | Count | Examples |
+|---|---|---|
+| Trainers & Sport | 9 | Skylark Trainer, Cadet 1200, Stick 40, Tundra Trainer, Stiletto Racer |
+| Scale Civil | 22 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth |
+| Warbirds | 17 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel |
+| Aerobatic | 11 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7 |
+| Foam 3D | 9 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty |
+| Jets | 9 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros |
+| Gliders | 8 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M |
+| Helicopters | 3 | Kestrel 550, Sparrow 450, Condor 700 |
+| Multirotors | 2 | Quad X450, Wasp Racing Quad |
 
-The scale models are approximations built by the same parametric generator as the rest: proportions, engine layout, gear and colours follow the real aircraft, but shapes such as elliptical or gull wings are simplified and there are no national markings. The Foam 3D planes are flat-plate "profile" airframes with oversized control surfaces and more thrust than weight, for hovering and other 3D flying.
+Every aircraft has its own flight model: the physics and the 3D shape are both generated from the same set of numbers (span, chords, mass, thrust, tail sizes, control throws, gear). The scale models are approximations: proportions, engine layout, gear and colours follow the real aircraft, but shapes such as elliptical or gull wings are simplified and there are no national markings. Most were derived by scaling a handful of tested base designs, so aircraft of the same family handle more alike than the real ones would. The Foam 3D planes are flat-plate "profile" airframes with oversized control surfaces and more thrust than weight.
 
 ## Flying sites
 
-Three built-in 3D sites:
+The site browser filters by type (3D or photo) and by landscape (Fields, Airfields, Mountains, Water, Desert, Winter), with search, previews, a difficulty rating and a description for each site.
 
-- **Meadow Field** — asphalt runway among rolling hills
-- **Dry Lake** — wide dirt strip on a desert playa
-- **Alpine Ridge** — grass strip on a ridge with slope lift
+### 3D sites
 
-Wind speed and direction, turbulence, thermals and time of day are set from the Environment menu.
+| Site | Landscape | Notes |
+|---|---|---|
+| Meadow Field | Fields | Asphalt runway among green hills; the easiest place to learn |
+| Tuscan Hills | Fields | Grass strip among golden hills with cypress and olive trees |
+| Forest Clearing | Fields | Short strip hemmed in by tall forest |
+| Regional Airport | Airfields | 520 m runway, hangars, apron and control tower |
+| Alpine Ridge | Mountains | Ridge-top strip with strong slope lift |
+| Highland Moor | Mountains | Treeless, windy and overcast, with dark lochs |
+| Coastal Strip | Water | Runway behind the dunes, sea in front |
+| Lakeside | Water | Grass strip beside a wooded lake |
+| Tropical Island | Water | Sand strip among palms, lagoon all round |
+| Dry Lake | Desert | Wide dirt strip on a playa |
+| Red Canyon | Desert | Mesa-top strip beside a deep canyon |
+| Savanna | Desert | Golden grassland with acacias and strong thermals |
+| Winter Field | Winter | Packed-snow strip under high peaks |
+
+Wind, turbulence, thermals and time of day are set from the Weather panel. An aircraft that comes down in water is lost.
 
 ### Photo sites
 
@@ -76,7 +90,7 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Five Poly Haven panoramas have built-in presets (rotation, start point, take-off direction and obstacles) that apply automatically when the file keeps its original name: `alps_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02` and `dry_cracked_lake`.
+Fifteen Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dry_hay_field`, `farm_field`, `hochsal_field`, `limpopo_golf_course`, `snow_field`, `straw_rolls_field_01`, `suburban_football_field`, `wildflower_field` and `yellow_field`.
 
 For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
 

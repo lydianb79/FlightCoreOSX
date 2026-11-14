@@ -52,7 +52,7 @@ final class HUDModel: ObservableObject {
                     img = NSImage(cgImage: c, size: NSSize(width: cw, height: ch))
                 }
             }
-        } else if let url = resourceURL("Previews/site_\(["meadow", "desert", "alpine"][min(max(site.style, 0), 2)]).jpg") {
+        } else if let url = resourceURL("Previews/site_\(site.key).jpg") {
             img = NSImage(contentsOf: url)
         }
         if let i = img { sitePreviews[site.name] = i }
@@ -123,6 +123,7 @@ final class Game {
     static let qualityNames = ["Low", "Medium", "High"]
     var renderScale: Float = 1, gpuMs: Float = 0       // reported by the renderer
     var cameFromMenu = false        // browsers return to the main menu when opened from it
+    var fixedView: (eye: V3, target: V3)? = nil     // debug: absolute camera, heights above the pilot's ground
     var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
     var flapSetting: Float = 0
     var gearUp = false, smokeOn = false, hold = false
@@ -142,6 +143,7 @@ final class Game {
         terrain = Terrain(site: site)
         env.configure(site)
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
+        timeOfDay = site.defaultTime
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
         resetAircraft()
         hud.game = self
@@ -205,7 +207,7 @@ final class Game {
         terrain = Terrain(site: site)
         env.configure(site)
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
-        if site.panorama != nil { cameraMode = 0 }
+        if site.panorama != nil { cameraMode = 0 } else { timeOfDay = site.defaultTime }
         siteVersion += 1
         if challenge { spawnBalloons() }
         resetAircraft()
@@ -336,6 +338,13 @@ final class Game {
                 }
             }
         }
+        if terrain.overWater(aircraft.pos) {
+            // ditched: the model stops and floats
+            if !aircraft.crashed { aircraft.crashed = true; aircraft.crashImpact = max(length(aircraft.vel) * 0.6, 4); say("Splash!") }
+            aircraft.pos.y = max(aircraft.pos.y, (site.waterLevel ?? 0) - 0.06)
+            aircraft.vel = V3(aircraft.vel.x * 0.92, max(aircraft.vel.y, 0), aircraft.vel.z * 0.92)
+            aircraft.omega *= 0.9
+        }
         if aircraft.crashed && !wasCrashed { breakUp() }
         wasCrashed = aircraft.crashed
         updateEffects(dt)
@@ -373,8 +382,9 @@ final class Game {
                                  omega: V3(rng.range(-9, 9), rng.range(-9, 9), rng.range(-9, 9)), offset: animated ? .zero : -part.center))
             ac.detached.insert(i)
         }
-        let ground = V3(ac.pos.x, terrain.height(ac.pos.x, ac.pos.z) + 0.1, ac.pos.z)
-        let dust: V4 = site.style == 1 ? rgb(0.75, 0.62, 0.45) : rgb(0.5, 0.42, 0.32)
+        let ground = V3(ac.pos.x, max(terrain.height(ac.pos.x, ac.pos.z), site.waterLevel ?? -1e9) + 0.1, ac.pos.z)
+        let wet = site.waterLevel.map { terrain.height(ac.pos.x, ac.pos.z) < $0 } ?? false
+        let dust: V4 = wet ? rgb(0.9, 0.95, 1.0) : site.pal.dust
         for _ in 0..<Int(10 + 22 * sev) {
             particles.append(Particle(pos: ground + V3(rng.range(-0.3, 0.3), 0, rng.range(-0.3, 0.3)),
                                       vel: V3(rng.range(-2.5, 2.5), rng.range(0.5, 3), rng.range(-2.5, 2.5)) * sev + ac.vel * 0.15,
@@ -389,7 +399,7 @@ final class Game {
             d.vel.y -= gravity * dt
             d.vel *= 1 - min(0.6 * dt, 1)
             d.pos += d.vel * dt
-            let g = terrain.height(d.pos.x, d.pos.z) + 0.03
+            let g = max(terrain.height(d.pos.x, d.pos.z), site.waterLevel ?? -1e9) + 0.03
             if d.pos.y < g {
                 d.pos.y = g
                 d.vel = V3(d.vel.x * 0.55, abs(d.vel.y) * 0.3, d.vel.z * 0.55)
@@ -452,6 +462,10 @@ final class Game {
         }
         if let c = closeup {
             eye = p + c * max(spec.span, 0.6); target = p; upVec = V3(0, 1, 0); fov = 32 * deg
+        }
+        if let v = fixedView {
+            let g = terrain.pilotPos.y
+            eye = v.eye + V3(0, g, 0); target = v.target + V3(0, g, 0); upVec = V3(0, 1, 0); fov = 58 * deg
         }
         camSnap = false
     }

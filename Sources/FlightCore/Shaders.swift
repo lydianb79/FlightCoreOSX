@@ -87,6 +87,10 @@ static float3 skyBase(float3 d, Frame f) {
     return c;
 }
 
+static float waveH(float2 q, float t) {
+    return fbm2(q * 0.22 + float2(t * 0.35, t * 0.2)) + 0.45 * vnoise(q * 0.9 - float2(t * 0.6, t * 0.35));
+}
+
 vertex VOut sceneVS(VIn in [[stage_in]], constant Frame& f [[buffer(1)]], constant Draw& d [[buffer(2)]]) {
     VOut o;
     float4 w = d.model * float4(in.pos, 1.0);
@@ -185,17 +189,20 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         float macro = fbm2(p * 0.021);
         float detail = fbm(p * 1.3);
         float fine = vnoise(p * 9.0);
-        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.34) * 0.55;
-        albedo *= (0.72 + 0.56 * macro) * mix(1.0, 0.62 + 0.5 * detail + 0.26 * fine, fade);
+        // bright ground (snow, sand) keeps its brightness and shows less mottling than turf
+        float bright = smoothstep(0.35, 0.75, dot(albedo, float3(0.3, 0.6, 0.1)));
+        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.34 * (1.0 - bright)) * mix(0.55, 0.9, bright);
+        float mott = 1.0 - 0.75 * bright;
+        albedo *= (1.0 + (0.56 * macro - 0.28) * mott) * mix(1.0, 1.0 + (0.5 * detail + 0.26 * fine - 0.38) * mott, fade);
         float nearFade = exp(-dist * 0.07);
         float blades = vnoise(p * float2(41.0, 13.0) + 3.0) * 0.6 + vnoise(p.yx * float2(37.0, 11.0)) * 0.4;
-        albedo *= mix(1.0, 0.72 + 0.56 * blades, nearFade);
+        albedo *= mix(1.0, 1.0 + (0.56 * blades - 0.28) * mott, nearFade);
         // small-scale relief so the ground catches the light unevenly
         float bumpFade = exp(-dist * 0.025);
         float e = 0.07, bf = 6.0;
         float h0 = vnoise(p * bf), hx = vnoise((p + float2(e, 0.0)) * bf), hz = vnoise((p + float2(0.0, e)) * bf);
         float3 bump = float3(h0 - hx, 0.0, h0 - hz);
-        float bumpAmt = 0.6;
+        float bumpAmt = 0.6 * mott;
 
         float hl = f.runway.x, hw = f.runway.y;
         int type = int(f.sunDir.w);
@@ -229,7 +236,7 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
             } else {
                 float3 dirt = albedo * 0.82 + float3(0.01);
                 float mk = max(band(az - (hw - 0.4), 0.15, aa), band(az, 0.12, aa) * step(0.5, fract(ax / 12.0)));
-                dirt = mix(dirt, float3(0.85, 0.82, 0.75), mk * lineFade * 0.8);
+                dirt = mix(dirt, type == 3 ? float3(0.7, 0.16, 0.04) : float3(0.85, 0.82, 0.75), mk * lineFade * 0.8);
                 albedo = mix(albedo, dirt, inside);
             }
         }
@@ -244,6 +251,21 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     if (material == 2) {
         // photo-site shadow catcher: only darkens the panorama behind it
         return float4(0.0, 0.0, 0.0, (1.0 - shadow) * 0.6 * exp(-dist * 0.004));
+    }
+    if (material == 7) {
+        // water: rippled surface reflecting the sky, clearer and paler in the shallows (vertex colour and alpha)
+        float2 p = in.wp.xz;
+        float t = f.camPos.w, e = 0.35;
+        float h0 = waveH(p, t), hx = waveH(p + float2(e, 0.0), t), hz = waveH(p + float2(0.0, e), t);
+        float calm = exp(-dist * 0.004);
+        float3 Nw = normalize(float3((h0 - hx) * 1.3 * calm, 1.0, (h0 - hz) * 1.3 * calm));
+        float fres = 0.02 + 0.98 * pow(1.0 - max(dot(Nw, V), 0.0), 5.0);
+        float3 R = reflect(-V, Nw);
+        R.y = abs(R.y);
+        float3 body = albedo * (f.ambient.rgb * 0.9 + f.sunColor.rgb * 0.35 * max(dot(Nw, L), 0.0));
+        float ndh = max(dot(Nw, normalize(L + V)), 0.0);
+        float3 c = mix(body, skyBase(R, f), fres) + f.sunColor.rgb * (pow(ndh, 700.0) * 6.0 + pow(ndh, 60.0) * 0.25) * shadow;
+        return shade(mix(c, haze, fog), mix(in.col.a, 1.0, fres), f);
     }
     if (material == 1) {
         // cloud shadows drifting over the landscape

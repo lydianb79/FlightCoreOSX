@@ -25,35 +25,167 @@ struct SiteSpec {
     var startX: Float = -30
     var startHeading: Float = 90        // compass degrees: 0 = away from the pilot, 90 = to the right
     var obstacles: [PanoObstacle] = []
+    // presentation
+    var key = ""                        // preview image name
+    var category = "Fields"             // Fields, Mountains, Desert, Water, Winter, Airfields
+    var info = ""
+    var difficulty = 2                  // 1 easy ... 5 demanding
+    // landscape
+    var terrain = -1                    // height function; -1 = the one belonging to `style`
+    var palette = -1                    // ground colours; -1 = by style
+    var treeKind = -1                   // -1 by style, 0 deciduous, 1 scrub and cactus, 2 conifer, 3 palm, 4 acacia, 5 cypress and olive, 6 snowy conifer, 7 mixed forest
+    var treeThreshold: Float = 0.5      // lower = denser tree cover
+    var treeClear = SIMD2<Float>(55, 35)   // tree-free margin beyond the runway ends and the field sides
+    var keepFrontClear = true           // keep the area in front of the pilot free of trees
+    var waterLevel: Float? = nil
+    var waterColor = V3(0.05, 0.16, 0.2)
+    var facility = 0                    // 0 club field, 1 airport with hangars and tower
+    var extras = -1                     // surroundings: -1 by style, 0 farm, 1 desert camp, 2 alpine, 3 none
+    var defaultTime = 1                 // 0 morning, 1 midday, 2 evening
 
     static var all: [SiteSpec] = builtIn + Panoramas.discover()
 
+    private static func make(_ name: String, key: String, style: Int, seed: Int32, runway: (len: Float, wid: Float, type: Int), flat: (center: Float, half: Float),
+                             trees: Int, wind: (from: Float, speed: Float, turb: Float), mu: Float, cloud: Float, fog: Float,
+                             category: String, difficulty: Int, info: String, _ edit: (inout SiteSpec) -> Void = { _ in }) -> SiteSpec {
+        var s = SiteSpec(name: name, style: style, seed: seed, runwayLen: runway.len, runwayWid: runway.wid, runwayType: runway.type,
+                         flatCenterZ: flat.center, flatHalfZ: flat.half, treeCount: trees, windFrom: wind.from, windSpeed: wind.speed, turbulence: wind.turb,
+                         rollMu: mu, cloud: cloud, fog: fog)
+        s.key = key; s.category = category; s.difficulty = difficulty; s.info = info
+        edit(&s)
+        return s
+    }
+
     static let builtIn: [SiteSpec] = [
-        SiteSpec(name: "Meadow Field", style: 0, seed: 11, runwayLen: 180, runwayWid: 12, runwayType: 0, flatCenterZ: 12, flatHalfZ: 45,
-                 treeCount: 800, windFrom: 90, windSpeed: 2, turbulence: 0.3, rollMu: 0.035, cloud: 0.45, fog: 0.00011),
-        SiteSpec(name: "Dry Lake", style: 1, seed: 29, runwayLen: 300, runwayWid: 24, runwayType: 2, flatCenterZ: 0, flatHalfZ: 120,
-                 treeCount: 260, windFrom: 110, windSpeed: 4, turbulence: 0.2, rollMu: 0.05, cloud: 0.15, fog: 0.00007),
-        SiteSpec(name: "Alpine Ridge", style: 2, seed: 47, runwayLen: 110, runwayWid: 10, runwayType: 1, flatCenterZ: 15, flatHalfZ: 25,
-                 treeCount: 700, windFrom: 0, windSpeed: 6, turbulence: 0.35, rollMu: 0.07, cloud: 0.55, fog: 0.00009),
+        make("Meadow Field", key: "meadow", style: 0, seed: 11, runway: (180, 12, 0), flat: (12, 45), trees: 800, wind: (90, 2, 0.3), mu: 0.035, cloud: 0.45, fog: 0.00011,
+             category: "Fields", difficulty: 1,
+             info: "A club field among rolling green hills: asphalt runway, clubhouse, pits and long grass around the mown strip. Light wind along the runway makes it the easiest place to learn."),
+        make("Dry Lake", key: "desert", style: 1, seed: 29, runway: (300, 24, 2), flat: (0, 120), trees: 260, wind: (110, 4, 0.2), mu: 0.05, cloud: 0.15, fog: 0.00007,
+             category: "Desert", difficulty: 2,
+             info: "A wide dirt strip on a desert playa with mesas on the horizon. Plenty of room and nothing to hit, but expect a steady breeze and little to judge distance by."),
+        make("Alpine Ridge", key: "alpine", style: 2, seed: 47, runway: (110, 10, 1), flat: (15, 25), trees: 700, wind: (0, 6, 0.35), mu: 0.07, cloud: 0.55, fog: 0.00009,
+             category: "Mountains", difficulty: 4,
+             info: "A grass strip on an alpine ridge. Wind blowing up the slope in front of you gives strong lift for soaring; turbulence and the drop-off make landings demanding."),
+        make("Coastal Strip", key: "coast", style: 0, seed: 61, runway: (200, 14, 0), flat: (20, 40), trees: 420, wind: (0, 5, 0.25), mu: 0.035, cloud: 0.35, fog: 0.00012,
+             category: "Water", difficulty: 2,
+             info: "An asphalt strip behind the dunes. The beach and open sea start about a hundred metres in front of you, with a steady onshore breeze. Anything that comes down past the shoreline is lost.") {
+            $0.terrain = 3; $0.palette = 3; $0.waterLevel = -1.6; $0.flatHalfZ = 34; $0.flatCenterZ = 24; $0.waterColor = V3(0.03, 0.17, 0.24); $0.treeThreshold = 0.56
+        },
+        make("Lakeside", key: "lake", style: 0, seed: 73, runway: (150, 12, 1), flat: (12, 42), trees: 900, wind: (250, 2, 0.2), mu: 0.06, cloud: 0.3, fog: 0.0001,
+             category: "Water", difficulty: 2,
+             info: "A mown grass strip beside a wooded lake. Calm air most days and a clear approach from both ends; the lake to the front right is the only real hazard.") {
+            $0.terrain = 4; $0.waterLevel = -2.5; $0.flatHalfZ = 30; $0.waterColor = V3(0.04, 0.13, 0.12); $0.treeKind = 7
+        },
+        make("Winter Field", key: "snow", style: 2, seed: 83, runway: (160, 14, 3), flat: (12, 45), trees: 650, wind: (40, 3, 0.2), mu: 0.09, cloud: 0.5, fog: 0.00016,
+             category: "Winter", difficulty: 3,
+             info: "A packed-snow strip in a white valley under high peaks. Soft snow slows the take-off run, and the flat light makes it hard to judge height over the ground.") {
+            $0.terrain = 5; $0.palette = 4; $0.treeKind = 6; $0.defaultTime = 0
+        },
+        make("Red Canyon", key: "canyon", style: 1, seed: 97, runway: (220, 18, 2), flat: (20, 40), trees: 200, wind: (200, 5, 0.45), mu: 0.05, cloud: 0.1, fog: 0.00006,
+             category: "Desert", difficulty: 4,
+             info: "A dirt strip on a mesa top. A canyon a hundred and forty metres deep opens a short way in front of the pilot line: spectacular to fly through, with rotor and gusts off the rim.") {
+            $0.terrain = 6; $0.palette = 5
+        },
+        make("Savanna", key: "savanna", style: 1, seed: 113, runway: (260, 20, 2), flat: (0, 90), trees: 240, wind: (70, 3, 0.3), mu: 0.055, cloud: 0.25, fog: 0.00009,
+             category: "Desert", difficulty: 2,
+             info: "Golden grassland dotted with flat-topped acacias. A long, wide dirt strip, warm light and strong afternoon thermals: ideal for gliders.") {
+            $0.terrain = 7; $0.palette = 6; $0.treeKind = 4; $0.treeThreshold = 0.58; $0.defaultTime = 2
+        },
+        make("Tropical Island", key: "island", style: 0, seed: 131, runway: (170, 14, 4), flat: (30, 40), trees: 520, wind: (320, 4, 0.2), mu: 0.06, cloud: 0.3, fog: 0.00008,
+             category: "Water", difficulty: 3,
+             info: "A sand strip on a small palm-fringed island. Turquoise shallows surround you on three sides, so keep some height in hand whenever you are out over the lagoon.") {
+            $0.terrain = 8; $0.palette = 7; $0.treeKind = 3; $0.waterLevel = -0.9; $0.flatHalfZ = 26; $0.flatCenterZ = 16; $0.treeClear = SIMD2(30, 12); $0.keepFrontClear = false; $0.waterColor = V3(0.02, 0.3, 0.33); $0.extras = 3; $0.treeThreshold = 0.45
+        },
+        make("Highland Moor", key: "moor", style: 2, seed: 149, runway: (130, 12, 1), flat: (12, 40), trees: 60, wind: (280, 8, 0.5), mu: 0.07, cloud: 0.85, fog: 0.00022,
+             category: "Mountains", difficulty: 4,
+             info: "Open, treeless moorland with dark lochs in the hollows. It is almost always windy and overcast here: good practice for crosswind landings and for flying in poor contrast.") {
+            $0.terrain = 9; $0.palette = 8; $0.waterLevel = -7; $0.waterColor = V3(0.03, 0.06, 0.08); $0.treeKind = 1
+        },
+        make("Regional Airport", key: "airport", style: 0, seed: 163, runway: (520, 26, 0), flat: (30, 130), trees: 500, wind: (95, 4, 0.2), mu: 0.03, cloud: 0.4, fog: 0.00012,
+             category: "Airfields", difficulty: 2,
+             info: "A full-size 520-metre asphalt runway with hangars, apron and control tower. Room for the fastest jets and the longest landing rolls.") {
+            $0.terrain = 10; $0.facility = 1; $0.treeClear = SIMD2(80, 60)
+        },
+        make("Tuscan Hills", key: "tuscany", style: 0, seed: 181, runway: (150, 12, 1), flat: (12, 42), trees: 700, wind: (180, 2, 0.25), mu: 0.06, cloud: 0.25, fog: 0.00013,
+             category: "Fields", difficulty: 2,
+             info: "A grass strip among dry golden hills lined with cypress and olive trees. Evening light and gentle slope lift over the ridges on either side.") {
+            $0.terrain = 11; $0.palette = 9; $0.treeKind = 5; $0.defaultTime = 2
+        },
+        make("Forest Clearing", key: "forest", style: 0, seed: 199, runway: (120, 10, 1), flat: (12, 40), trees: 2400, wind: (60, 1, 0.3), mu: 0.06, cloud: 0.4, fog: 0.00012,
+             category: "Fields", difficulty: 5,
+             info: "A short grass strip cut into tall forest. Sheltered from the wind, but the trees stand close on every side: steep approaches and no room for a wide circuit.") {
+            $0.terrain = 12; $0.palette = 10; $0.treeKind = 7; $0.treeThreshold = 0.22; $0.treeClear = SIMD2(22, 2); $0.keepFrontClear = false; $0.extras = 3
+        },
+    ]
+}
+
+/// Ground, grass and bush colours for a landscape.
+struct Palette {
+    var a: V4, b: V4                    // ground, mixed by a noise pattern
+    var rock: V4
+    var high: V4                        // colour at altitude (forest, bare rock, snow)
+    var highFrom: Float, highTo: Float
+    var snowCaps = false                // `high` is snow: lies on top of rock, less on steep faces
+    var rockFrom: Float = 1e6, rockTo: Float = 2e6
+    var shore = rgb(0.76, 0.7, 0.55)
+    var grassBase: V4, grassTip: V4
+    var grassCount = 36000
+    var bush: V4
+    var bushCount = 160
+    var flowers = true
+    var dust = rgb(0.5, 0.42, 0.32)
+
+    static let all: [Palette] = [
+        // 0 meadow
+        Palette(a: rgb(0.24, 0.40, 0.13), b: rgb(0.38, 0.50, 0.17), rock: rgb(0.42, 0.40, 0.37), high: rgb(0.15, 0.27, 0.13), highFrom: 120, highTo: 260,
+                grassBase: rgb(0.15, 0.28, 0.09), grassTip: rgb(0.36, 0.5, 0.18), bush: rgb(0.2, 0.36, 0.12)),
+        // 1 desert
+        Palette(a: rgb(0.80, 0.70, 0.52), b: rgb(0.72, 0.60, 0.42), rock: rgb(0.45, 0.28, 0.2), high: rgb(0.62, 0.36, 0.24), highFrom: 15, highTo: 60,
+                grassBase: rgb(0.5, 0.42, 0.26), grassTip: rgb(0.74, 0.66, 0.44), grassCount: 6000, bush: rgb(0.42, 0.42, 0.25), bushCount: 90, flowers: false, dust: rgb(0.75, 0.62, 0.45)),
+        // 2 alpine
+        Palette(a: rgb(0.27, 0.43, 0.16), b: rgb(0.40, 0.50, 0.20), rock: rgb(0.45, 0.44, 0.43), high: rgb(0.93, 0.95, 0.98), highFrom: 560, highTo: 760, snowCaps: true, rockFrom: 260, rockTo: 520,
+                grassBase: rgb(0.15, 0.27, 0.1), grassTip: rgb(0.36, 0.48, 0.2), bush: rgb(0.16, 0.3, 0.14)),
+        // 3 coast
+        Palette(a: rgb(0.30, 0.42, 0.16), b: rgb(0.46, 0.50, 0.22), rock: rgb(0.5, 0.47, 0.42), high: rgb(0.2, 0.32, 0.15), highFrom: 40, highTo: 120, shore: rgb(0.82, 0.76, 0.6),
+                grassBase: rgb(0.2, 0.3, 0.1), grassTip: rgb(0.5, 0.55, 0.26), grassCount: 30000, bush: rgb(0.22, 0.34, 0.14), dust: rgb(0.7, 0.64, 0.5)),
+        // 4 snow
+        Palette(a: rgb(0.93, 0.95, 0.98), b: rgb(0.86, 0.89, 0.95), rock: rgb(0.4, 0.41, 0.43), high: rgb(0.97, 0.98, 1.0), highFrom: 100, highTo: 400, snowCaps: true,
+                grassBase: rgb(0.45, 0.38, 0.22), grassTip: rgb(0.7, 0.62, 0.4), grassCount: 2500, bush: rgb(0.3, 0.3, 0.26), bushCount: 40, flowers: false, dust: rgb(0.95, 0.96, 0.98)),
+        // 5 red canyon
+        Palette(a: rgb(0.72, 0.45, 0.3), b: rgb(0.62, 0.36, 0.24), rock: rgb(0.5, 0.24, 0.16), high: rgb(0.66, 0.34, 0.2), highFrom: 30, highTo: 120,
+                grassBase: rgb(0.5, 0.4, 0.24), grassTip: rgb(0.72, 0.62, 0.4), grassCount: 4000, bush: rgb(0.4, 0.42, 0.26), bushCount: 110, flowers: false, dust: rgb(0.75, 0.48, 0.33)),
+        // 6 savanna
+        Palette(a: rgb(0.70, 0.60, 0.30), b: rgb(0.58, 0.52, 0.26), rock: rgb(0.5, 0.42, 0.34), high: rgb(0.45, 0.42, 0.24), highFrom: 60, highTo: 160,
+                grassBase: rgb(0.45, 0.38, 0.16), grassTip: rgb(0.82, 0.72, 0.4), grassCount: 34000, bush: rgb(0.38, 0.4, 0.2), bushCount: 120, flowers: false, dust: rgb(0.72, 0.6, 0.4)),
+        // 7 tropical
+        Palette(a: rgb(0.20, 0.44, 0.14), b: rgb(0.32, 0.54, 0.18), rock: rgb(0.45, 0.42, 0.38), high: rgb(0.12, 0.32, 0.12), highFrom: 25, highTo: 60, shore: rgb(0.92, 0.88, 0.74),
+                grassBase: rgb(0.12, 0.3, 0.08), grassTip: rgb(0.34, 0.56, 0.18), grassCount: 26000, bush: rgb(0.14, 0.38, 0.12), bushCount: 220, dust: rgb(0.85, 0.8, 0.65)),
+        // 8 moor
+        Palette(a: rgb(0.34, 0.36, 0.18), b: rgb(0.42, 0.33, 0.24), rock: rgb(0.36, 0.35, 0.34), high: rgb(0.4, 0.3, 0.3), highFrom: 30, highTo: 90, shore: rgb(0.3, 0.27, 0.2),
+                grassBase: rgb(0.24, 0.24, 0.1), grassTip: rgb(0.52, 0.46, 0.24), grassCount: 34000, bush: rgb(0.36, 0.26, 0.3), bushCount: 200, flowers: false),
+        // 9 tuscan
+        Palette(a: rgb(0.62, 0.56, 0.28), b: rgb(0.46, 0.50, 0.22), rock: rgb(0.55, 0.48, 0.38), high: rgb(0.36, 0.42, 0.2), highFrom: 60, highTo: 160,
+                grassBase: rgb(0.34, 0.34, 0.12), grassTip: rgb(0.72, 0.66, 0.34), grassCount: 32000, bush: rgb(0.3, 0.36, 0.18)),
+        // 10 forest
+        Palette(a: rgb(0.18, 0.34, 0.11), b: rgb(0.28, 0.42, 0.14), rock: rgb(0.38, 0.37, 0.34), high: rgb(0.1, 0.22, 0.1), highFrom: 60, highTo: 200,
+                grassBase: rgb(0.12, 0.25, 0.08), grassTip: rgb(0.3, 0.46, 0.16), bush: rgb(0.14, 0.3, 0.1), bushCount: 240),
     ]
 }
 
 extension SiteSpec {
+    var pal: Palette { Palette.all[min(max(palette >= 0 ? palette : style, 0), Palette.all.count - 1)] }
+    var trees: Int { treeKind >= 0 ? treeKind : [0, 1, 2][min(max(style, 0), 2)] }
+    var surroundings: Int { extras >= 0 ? extras : min(max(style, 0), 2) }
     var kindLabel: String { panorama != nil ? "360° photo site" : "3D site" }
+    var displayName: String { name.replacingOccurrences(of: "📷 ", with: "") }
     var surfaceLabel: String {
         if panorama != nil { return "As photographed" }
-        return ["Asphalt runway", "Mown grass strip", "Dirt strip"][min(max(runwayType, 0), 2)] + String(format: ", %.0f × %.0f m", runwayLen, runwayWid)
+        return ["Asphalt runway", "Mown grass strip", "Dirt strip", "Packed snow strip", "Sand strip"][min(max(runwayType, 0), 4)] + String(format: ", %.0f × %.0f m", runwayLen, runwayWid)
     }
     var summary: String {
-        if panorama != nil {
-            return "A real location photographed in 360°. You fly over the pictured ground from the spot where the camera stood. Pilot camera only."
-                + (obstacles.isEmpty ? "" : " Trees and buildings near the camera are solid.")
-        }
-        switch style {
-        case 0: return "A club field among rolling green hills: asphalt runway, clubhouse, pits and long grass around the mown strip. Light wind along the runway makes it the easiest place to learn."
-        case 1: return "A wide dirt strip on a desert playa with mesas on the horizon. Plenty of room and nothing to hit, but expect a steady breeze and little to judge distance by."
-        default: return "A grass strip on an alpine ridge. Wind blowing up the slope in front of you gives strong lift for soaring; turbulence and the drop-off make landings demanding."
-        }
+        if !info.isEmpty { return info }
+        return "A real location photographed in 360°. You fly over the pictured ground from the spot where the camera stood. Pilot camera only."
+            + (obstacles.isEmpty ? "" : " Trees and buildings near the camera are solid.")
     }
 }
 
@@ -81,7 +213,7 @@ final class Terrain {
         if site.panorama != nil { return 0 }
         let r = sqrt(x * x + z * z), s = site.seed
         var y: Float
-        switch site.style {
+        switch site.terrain >= 0 ? site.terrain : site.style {
         case 0:
             y = 45 * (fbm(x / 800, z / 800, s) - 0.45) + 6 * (fbm(x / 150, z / 150, s + 7) - 0.5)
             y += smoothstep(1300, 2900, r) * 420 * fbm(x / 1400, z / 1400, s + 3)
@@ -89,11 +221,47 @@ final class Terrain {
             y = 1.5 * (fbm(x / 300, z / 300, s) - 0.5)
             y += smoothstep(1200, 2200, r) * 260 * smoothstep(0.5, 0.62, fbm(x / 1100, z / 1100, s + 5))
             y += smoothstep(1500, 3000, r) * 120 * fbm(x / 600, z / 600, s + 9)
-        default:
+        case 2:
             y = -260 * smoothstep(40, 650, -z) + 60 * smoothstep(80, 600, z)
             y += 25 * (fbm(x / 300, z / 300, s) - 0.5) * smoothstep(60, 300, r)
             let rd = 1 - abs(2 * fbm(x / 1600, z / 1600, s + 11) - 1)
             y += smoothstep(900, 2600, r) * 900 * rd * rd
+        case 3:     // coast: dunes, then beach and sea to the north; hills inland
+            y = 5 * (fbm(x / 240, z / 240, s) - 0.5) + 70 * smoothstep(150, 1100, z) * fbm(x / 700, z / 700, s + 3)
+            y -= 2.5 * smoothstep(40, 75, -z) + 40 * smoothstep(75, 420, -z + 40 * (fbm(x / 400, 0.3, s + 5) - 0.5))
+        case 4:     // rolling meadow with a lake basin to the front right
+            y = 34 * (fbm(x / 700, z / 700, s) - 0.42) + 5 * (fbm(x / 140, z / 140, s + 7) - 0.5)
+            y += smoothstep(1300, 2900, r) * 380 * fbm(x / 1400, z / 1400, s + 3)
+            let dl = sqrt((x - 120) * (x - 120) + (z + 250) * (z + 250)) + 60 * (fbm(x / 260, z / 260, s + 9) - 0.5)
+            y = lerp(y, -16, smoothstep(230, 120, dl))
+        case 5:     // snowy valley floor under high peaks
+            y = 22 * (fbm(x / 600, z / 600, s) - 0.45) + 4 * (fbm(x / 130, z / 130, s + 7) - 0.5)
+            let rd = 1 - abs(2 * fbm(x / 1500, z / 1500, s + 11) - 1)
+            y += smoothstep(650, 2400, r) * 820 * rd * rd
+        case 6:     // mesa cut by a winding canyon
+            y = 4 * (fbm(x / 250, z / 250, s) - 0.5)
+            let c = abs(z + 215 + 70 * sin(x / 240) + 50 * (fbm(x / 300, 1.7, s + 4) - 0.5))
+            y -= 145 * smoothstep(150, 40, c) * (0.85 + 0.3 * fbm(x / 90, z / 90, s + 6))
+            y += smoothstep(1000, 2100, r) * 240 * smoothstep(0.5, 0.62, fbm(x / 1100, z / 1100, s + 5))
+        case 7:     // savanna plain with distant kopjes
+            y = 9 * (fbm(x / 500, z / 500, s) - 0.5)
+            y += smoothstep(900, 2300, r) * 170 * smoothstep(0.52, 0.7, fbm(x / 700, z / 700, s + 5))
+        case 8:     // island: low hills falling to a lagoon
+            let c = sqrt(x * x * 0.6 + (z - 150) * (z - 150)) + 90 * (fbm(x / 450, z / 450, s + 9) - 0.5)
+            let isl = smoothstep(400, 235, c)
+            y = (4 + 42 * fbm(x / 330, z / 330, s) * smoothstep(120, 500, z)) * isl - 26 * (1 - isl)
+        case 9:     // moor: broad hills, hollows hold water
+            y = 78 * (fbm(x / 650, z / 650, s) - 0.5) + 12 * (fbm(x / 150, z / 150, s + 7) - 0.5)
+            y += smoothstep(1400, 2800, r) * 260 * fbm(x / 1200, z / 1200, s + 3)
+        case 10:    // broad plain around the airport
+            y = 8 * (fbm(x / 900, z / 900, s) - 0.5)
+            y += smoothstep(1500, 2900, r) * 300 * fbm(x / 1400, z / 1400, s + 3)
+        case 11:    // close-set rolling hills
+            y = 62 * (fbm(x / 420, z / 420, s) - 0.46) + 7 * (fbm(x / 120, z / 120, s + 7) - 0.5)
+            y += smoothstep(1400, 2900, r) * 300 * fbm(x / 1300, z / 1300, s + 3)
+        default:    // forest floor
+            y = 24 * (fbm(x / 600, z / 600, s) - 0.45) + 4 * (fbm(x / 120, z / 120, s + 7) - 0.5)
+            y += smoothstep(1300, 2900, r) * 300 * fbm(x / 1400, z / 1400, s + 3)
         }
         let dx = max(abs(x) - (site.runwayLen / 2 + 25), 0), dz = max(abs(z - site.flatCenterZ) - site.flatHalfZ, 0)
         return y * smoothstep(34, site.style == 2 ? 110 : 190, sqrt(dx * dx + dz * dz))
@@ -118,16 +286,27 @@ final class Terrain {
     private func placeTrees() {
         var rng = LCG(UInt64(site.seed))
         var tries = 0
+        let kind = site.trees
         while trees.count < site.treeCount && tries < site.treeCount * 40 {
             tries += 1
             let x = rng.range(-1300, 1300), z = rng.range(-1300, 1300)
-            let dx = max(abs(x) - (site.runwayLen / 2 + 55), 0), dz = max(abs(z - site.flatCenterZ) - (site.flatHalfZ + 35), 0)
+            let dx = max(abs(x) - (site.runwayLen / 2 + site.treeClear.x), 0), dz = max(abs(z - site.flatCenterZ) - (site.flatHalfZ + site.treeClear.y), 0)
             if dx * dx + dz * dz < 100 { continue }
-            if z < 0 && z > -230 && abs(x) < 320 { continue }         // keep the flying area in front of the pilot open
-            if fbm(x / 260, z / 260, site.seed + 21) < (site.style == 1 ? 0.56 : 0.5) { continue }
+            if site.keepFrontClear && z < 0 && z > -230 && abs(x) < 320 { continue }         // keep the flying area in front of the pilot open
+            if fbm(x / 260, z / 260, site.seed + 21) < (kind == 1 ? max(site.treeThreshold, 0.56) : site.treeThreshold) { continue }
             let y = height(x, z)
             if normal(x, z).y < 0.85 || (site.style == 2 && y > 180) { continue }
-            trees.append(Tree(p: V3(x, y, z), h: site.style == 1 ? rng.range(1.2, 3) : rng.range(7, 15)))
+            if let wl = site.waterLevel, y < wl + 0.8 { continue }
+            let h: Float
+            switch kind {
+            case 1: h = rng.range(1.2, 3)
+            case 3: h = rng.range(7, 12)
+            case 4: h = rng.range(5, 8)
+            case 5: h = rng.range(5, 14)
+            case 7: h = rng.range(11, 20)
+            default: h = rng.range(7, 15)
+            }
+            trees.append(Tree(p: V3(x, y, z), h: h))
         }
     }
 
@@ -139,6 +318,7 @@ final class Terrain {
         var cols = [V4](repeating: .zero, count: n * n)
         var nrms = [V3](repeating: .zero, count: n * n)
         let s = site.seed
+        let pal = site.pal
         for j in 0..<n { for i in 0..<n {
             let x = Float(i) * cell - half, z = Float(j) * cell - half
             let y = h[j * n + i]
@@ -148,20 +328,18 @@ final class Terrain {
             nrms[j * n + i] = nr
             let v = fbm(x / 110, z / 110, s + 31)
             let steep = smoothstep(0.86, 0.7, nr.y)
-            var c: V4
-            switch site.style {
-            case 0:
-                c = mix(rgb(0.24, 0.40, 0.13), rgb(0.38, 0.50, 0.17), v)
-                c = mix(c, rgb(0.15, 0.27, 0.13), smoothstep(120, 260, y))
-                c = mix(c, rgb(0.42, 0.40, 0.37), steep)
-            case 1:
-                c = mix(rgb(0.80, 0.70, 0.52), rgb(0.72, 0.60, 0.42), v)
-                c = mix(c, rgb(0.62, 0.36, 0.24), smoothstep(15, 60, y))
-                c = mix(c, rgb(0.45, 0.28, 0.2), steep)
-            default:
-                c = mix(rgb(0.27, 0.43, 0.16), rgb(0.40, 0.50, 0.20), v)
-                c = mix(c, rgb(0.45, 0.44, 0.43), max(steep, smoothstep(260, 520, y)))
-                c = mix(c, rgb(0.93, 0.95, 0.98), smoothstep(560, 760, y + 160 * v) * (1 - steep * 0.6))
+            var c = mix(pal.a, pal.b, v)
+            if pal.snowCaps {
+                c = mix(c, pal.rock, max(steep, smoothstep(pal.rockFrom, pal.rockTo, y)))
+                c = mix(c, pal.high, smoothstep(pal.highFrom, pal.highTo, y + 160 * v) * (1 - steep * 0.6))
+            } else {
+                c = mix(c, pal.high, smoothstep(pal.highFrom, pal.highTo, y))
+                c = mix(c, pal.rock, steep)
+            }
+            if let wl = site.waterLevel {
+                // beach at the waterline, darker bed below it
+                c = mix(pal.shore, c, smoothstep(0.4, 2.2, y - wl))
+                if y < wl { c = mix(pal.shore, V4(pal.shore.x * 0.45, pal.shore.y * 0.5, pal.shore.z * 0.5, 1), smoothstep(0, 7, wl - y)) }
             }
             cols[j * n + i] = c
         } }
@@ -174,6 +352,35 @@ final class Terrain {
             emit(i + 1, j); emit(i, j + 1); emit(i + 1, j + 1)
         } }
         return b
+    }
+
+    /// Water surface: one quad per terrain cell that dips below the water level. Vertex colour and
+    /// opacity deepen with depth, so shallows look pale and clear.
+    func buildWater() -> MeshBuilder {
+        var b = MeshBuilder()
+        guard let wl = site.waterLevel else { return b }
+        let up = V3(0, 1, 0)
+        let deep = V4(site.waterColor.x, site.waterColor.y, site.waterColor.z, 1)
+        let shallow = V4(min(deep.x * 1.5 + 0.12, 1), min(deep.y * 1.3 + 0.2, 1), min(deep.z * 1.2 + 0.18, 1), 1)
+        func vert(_ i: Int, _ j: Int) {
+            let d = wl - h[j * n + i]
+            let t = smoothstep(0, 5, d)
+            var c = mix(shallow, deep, t)
+            c.w = clampf(0.3 + d * 0.22, 0.25, 0.95)
+            b.v(V3(Float(i) * cell - half, wl, Float(j) * cell - half), up, c)
+        }
+        for j in 0..<(n - 1) { for i in 0..<(n - 1) {
+            let lo = min(min(h[j * n + i], h[j * n + i + 1]), min(h[(j + 1) * n + i], h[(j + 1) * n + i + 1]))
+            if lo > wl + 0.2 { continue }
+            vert(i, j); vert(i, j + 1); vert(i + 1, j)
+            vert(i + 1, j); vert(i, j + 1); vert(i + 1, j + 1)
+        } }
+        return b
+    }
+
+    func overWater(_ p: V3) -> Bool {
+        guard let wl = site.waterLevel else { return false }
+        return p.y < wl + 0.05 && height(p.x, p.z) < wl
     }
 
     var windsockBase: V3 { V3(32, height(32, -site.runwayWid / 2 - 9), -site.runwayWid / 2 - 9) }

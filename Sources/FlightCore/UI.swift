@@ -395,48 +395,113 @@ struct AircraftBrowser: View {
 struct SiteBrowser: View {
     @ObservedObject var m: HUDModel
     @State private var selected = 0
+    @State private var filter = "All"
+    @State private var search = ""
+    private static let categories = ["Fields", "Airfields", "Mountains", "Water", "Desert", "Winter"]
     private var all: [SiteSpec] { SiteSpec.all }
+    private func matches(_ s: SiteSpec, _ f: String) -> Bool {
+        switch f {
+        case "All": return true
+        case "3D Sites": return s.panorama == nil
+        case "Photo Sites": return s.panorama != nil
+        default: return s.category == f
+        }
+    }
+    private var shown: [Int] {
+        all.indices.filter { i in
+            matches(all[i], filter) && (search.isEmpty || all[i].displayName.localizedCaseInsensitiveContains(search) || all[i].summary.localizedCaseInsensitiveContains(search))
+        }
+    }
     private func fly(_ i: Int) { m.game.selectSite(i); m.overlay = .none }
 
+    private func filterRow(_ f: String, icon: String) -> some View {
+        Button { filter = f } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon).font(.system(size: 11.5)).frame(width: 16).foregroundColor(filter == f ? .white : Theme.faint)
+                Text(f).font(.system(size: 13, weight: filter == f ? .semibold : .regular))
+                Spacer()
+                Text("\(all.filter { matches($0, f) }.count)").font(.system(size: 11)).monospacedDigit().foregroundColor(Theme.faint)
+            }
+            .foregroundColor(filter == f ? .white : Theme.dim)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 7).fill(filter == f ? Theme.accent.opacity(0.28) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).focusable(false)
+    }
+    private func heading(_ t: String) -> some View {
+        Text(t).font(.system(size: 9.5, weight: .semibold)).tracking(1).foregroundColor(Theme.faint).padding(.leading, 10).padding(.top, 12).padding(.bottom, 3)
+    }
+    private func badge(_ site: SiteSpec) -> some View {
+        Text(site.panorama != nil ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .bold)).tracking(0.5).foregroundColor(.white)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(Capsule().fill(site.panorama != nil ? Color(red: 0.55, green: 0.35, blue: 0.9).opacity(0.9) : Theme.accent.opacity(0.9)))
+    }
+
     var body: some View {
-        Sheet(m: m, title: "Choose Flying Site", subtitle: "\(all.count) sites", back: m.game.cameFromMenu ? .menu : .none, width: 1060) {
+        Sheet(m: m, title: "Choose Flying Site", subtitle: "\(all.count) sites", back: m.game.cameFromMenu ? .menu : .none) {
             HStack(spacing: 0) {
+                // filters
+                VStack(alignment: .leading, spacing: 2) {
+                    filterRow("All", icon: "square.grid.2x2")
+                    heading("TYPE")
+                    filterRow("3D Sites", icon: "cube")
+                    filterRow("Photo Sites", icon: "camera")
+                    heading("LANDSCAPE")
+                    filterRow("Fields", icon: "leaf")
+                    filterRow("Airfields", icon: "airplane.departure")
+                    filterRow("Mountains", icon: "mountain.2")
+                    filterRow("Water", icon: "water.waves")
+                    filterRow("Desert", icon: "sun.max")
+                    filterRow("Winter", icon: "snowflake")
+                    Spacer()
+                    Button { m.addPanorama?() } label: { Label("Add Photo…", systemImage: "plus").frame(maxWidth: .infinity) }.buttonStyle(QuietButton())
+                    Text("Any 360° equirectangular photo becomes a site.").font(.system(size: 10.5)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                }
+                .frame(width: 176).padding(12)
+                Rectangle().fill(Theme.stroke).frame(width: 1)
+
+                // grid
                 VStack(spacing: 0) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundColor(Theme.faint)
+                        TextField("Search sites", text: $search).textFieldStyle(.plain).font(.system(size: 13))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 12)], spacing: 12) {
-                            ForEach(all.indices, id: \.self) { i in
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 172, maximum: 230), spacing: 10)], spacing: 10) {
+                            ForEach(shown, id: \.self) { i in
                                 let site = all[i]
                                 VStack(alignment: .leading, spacing: 0) {
-                                    ZStack {
+                                    ZStack(alignment: .topLeading) {
                                         LinearGradient(colors: [Color(red: 0.25, green: 0.4, blue: 0.6), Color(red: 0.2, green: 0.32, blue: 0.2)], startPoint: .top, endPoint: .bottom)
-                                        if let img = m.sitePreview(site) { Image(nsImage: img).resizable().scaledToFill() }
+                                        if let img = m.sitePreview(site) { Image(nsImage: img).resizable().scaledToFill().frame(minWidth: 0, maxWidth: .infinity, minHeight: 104, maxHeight: 104).clipped() }
+                                        badge(site).padding(7)
                                     }
-                                    .frame(height: 128).clipped()
+                                    .frame(height: 104).clipped()
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(site.name.replacingOccurrences(of: "📷 ", with: "")).font(.system(size: 13, weight: .semibold)).foregroundColor(.white).lineLimit(1)
-                                        Text(site.kindLabel).font(.system(size: 10.5)).foregroundColor(Theme.dim)
+                                        Text(site.displayName).font(.system(size: 12.5, weight: .semibold)).foregroundColor(.white).lineLimit(1)
+                                        Text(site.category).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
                                     }
-                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .padding(.horizontal, 9).padding(.vertical, 7)
                                 }
                                 .background(Theme.card)
-                                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(selected == i ? Theme.accent : Theme.stroke, lineWidth: selected == i ? 2 : 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.accent : Theme.stroke, lineWidth: selected == i ? 2 : 1))
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) { fly(i) }
                                 .onTapGesture { selected = i }
                             }
                         }
-                        .padding(16)
+                        .padding(.horizontal, 14).padding(.bottom, 14)
+                        if shown.isEmpty { Text("No sites match.").font(.system(size: 13)).foregroundColor(Theme.dim).padding(30) }
                     }
-                    Rectangle().fill(Theme.stroke).frame(height: 1)
-                    HStack {
-                        Button { m.addPanorama?() } label: { Label("Add 360° Panorama Photo…", systemImage: "plus") }.buttonStyle(QuietButton())
-                        Text("Any equirectangular photo (2:1) becomes a flying site.").font(.system(size: 11.5)).foregroundColor(Theme.dim)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
                 }
                 Rectangle().fill(Theme.stroke).frame(width: 1)
+
+                // details
                 let site = all[min(selected, all.count - 1)]
                 VStack(alignment: .leading, spacing: 0) {
                     ZStack {
@@ -444,8 +509,8 @@ struct SiteBrowser: View {
                         if let img = m.sitePreview(site) { Image(nsImage: img).resizable().scaledToFill() }
                     }
                     .frame(width: 300, height: 188).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    Text(site.name.replacingOccurrences(of: "📷 ", with: "")).font(.system(size: 20, weight: .bold)).foregroundColor(.white).padding(.top, 14)
-                    HStack(spacing: 6) { Tag(text: site.kindLabel) }.padding(.top, 6)
+                    Text(site.displayName).font(.system(size: 20, weight: .bold)).foregroundColor(.white).padding(.top, 14)
+                    HStack(spacing: 8) { Tag(text: site.kindLabel); Tag(text: site.category); Difficulty(level: site.difficulty) }.padding(.top, 6)
                     Text(site.summary).font(.system(size: 13)).foregroundColor(.white.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                     VStack(spacing: 0) {
                         specRow("Surface", site.surfaceLabel)
@@ -515,7 +580,7 @@ struct MainMenu: View {
                 .padding(.bottom, 20)
                 HStack(spacing: 14) {
                     tile("AIRCRAFT", spec.name, spec.category, image: m.thumbnail(spec), studio: true) { m.game.cameFromMenu = true; m.overlay = .aircraft }
-                    tile("FLYING SITE", site.name.replacingOccurrences(of: "📷 ", with: ""), site.kindLabel, image: m.sitePreview(site), studio: false) { m.game.cameFromMenu = true; m.overlay = .sites }
+                    tile("FLYING SITE", site.displayName, site.kindLabel, image: m.sitePreview(site), studio: false) { m.game.cameFromMenu = true; m.overlay = .sites }
                 }
                 Button { m.game.cameFromMenu = false; m.overlay = .none } label: {
                     HStack(spacing: 8) { Image(systemName: "play.fill"); Text("Fly") }.font(.system(size: 16, weight: .bold)).frame(maxWidth: .infinity).padding(.vertical, 3)

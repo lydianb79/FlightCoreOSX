@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--smoke") { game.smokeOn = true }
         if let q = Int(arg("--quality") ?? "") { game.quality = q }
         if args.contains("--obstacles") { game.showObstacles = true }
+        if let c = arg("--view")?.split(separator: ",").compactMap({ Float($0) }), c.count == 6 { game.fixedView = (V3(c[0], c[1], c[2]), V3(c[3], c[4], c[5])) }
         if let c = arg("--closeup")?.split(separator: ",").compactMap({ Float($0) }), c.count == 3 { game.closeup = V3(c[0], c[1], c[2]) }
         if args.contains("--gearup") { game.gearUp = true }
         if args.contains("--flaps") { game.flapSetting = 1 }
@@ -235,8 +236,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acItems.append(ClosureMenuItem("Next Aircraft", key: "]") { g.keyDown(30) })
         acItems.append(ClosureMenuItem("Previous Aircraft", key: "[") { g.keyDown(33) })
         menu("Aircraft", acItems)
-        var siteItems: [NSMenuItem] = SiteSpec.all.enumerated().map { i, s in
-            ClosureMenuItem(s.name, key: i < 9 ? "\(i + 1)" : "", mods: [.command, .option]) { g.selectSite(i) }
+        var siteItems: [NSMenuItem] = []
+        for (title, photo) in [("3D Sites", false), ("Photo Sites", true)] {
+            let sub = NSMenu(title: title)
+            for (i, sp) in SiteSpec.all.enumerated() where (sp.panorama != nil) == photo { sub.addItem(ClosureMenuItem(sp.displayName) { g.selectSite(i) }) }
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.submenu = sub
+            siteItems.append(item)
         }
         siteItems.insert(ClosureMenuItem("Choose Flying Site…", key: "s", mods: [.command, .shift]) { g.cameFromMenu = false; g.hud.overlay = .sites }, at: 0)
         siteItems.insert(.separator(), at: 1)
