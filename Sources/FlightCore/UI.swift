@@ -3,14 +3,19 @@ import AppKit
 
 // MARK: - Theme
 
+/// Colours from the splash artwork: signal red, warm cream and near-black ink.
 enum Theme {
-    static let accent = Color(red: 0.22, green: 0.6, blue: 1.0)
-    static let panel = Color(red: 0.07, green: 0.08, blue: 0.1).opacity(0.9)
-    static let glass = Color(red: 0.05, green: 0.06, blue: 0.08).opacity(0.62)
-    static let card = Color.white.opacity(0.055)
-    static let stroke = Color.white.opacity(0.1)
-    static let dim = Color.white.opacity(0.6)
-    static let faint = Color.white.opacity(0.38)
+    static let red = Color(red: 0.76, green: 0.13, blue: 0.10)
+    static let deepRed = Color(red: 0.52, green: 0.07, blue: 0.05)
+    static let cream = Color(red: 0.965, green: 0.93, blue: 0.875)
+    static let ink = Color(red: 0.11, green: 0.075, blue: 0.07)
+    static let accent = red
+    static let panel = ink.opacity(0.95)
+    static let glass = ink.opacity(0.74)
+    static let card = cream.opacity(0.06)
+    static let stroke = cream.opacity(0.15)
+    static let dim = cream.opacity(0.66)
+    static let faint = cream.opacity(0.42)
 }
 
 private struct GlassBox: ViewModifier {
@@ -29,19 +34,19 @@ private extension View {
 private struct PrimaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundColor(.white)
-            .padding(.horizontal, 22).padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.accent.opacity(configuration.isPressed ? 0.7 : 1)))
+            .font(.system(size: 13.5, weight: .heavy)).tracking(1.2).textCase(.uppercase)
+            .foregroundColor(Theme.cream)
+            .padding(.horizontal, 22).padding(.vertical, 11)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.red.opacity(configuration.isPressed ? 0.75 : 1)))
     }
 }
 private struct QuietButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.white.opacity(0.9))
+            .foregroundColor(Theme.cream.opacity(0.9))
             .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(configuration.isPressed ? 0.16 : 0.08)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.cream.opacity(configuration.isPressed ? 0.16 : 0.08)))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
     }
 }
@@ -51,7 +56,7 @@ private struct Difficulty: View {
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...5, id: \.self) { i in
-                Circle().fill(i <= level ? (level >= 4 ? Color.orange : Theme.accent) : Color.white.opacity(0.15)).frame(width: 7, height: 7)
+                Circle().fill(i <= level ? (level >= 4 ? Theme.red : Theme.cream) : Theme.cream.opacity(0.16)).frame(width: 7, height: 7)
             }
             Text(["", "Beginner", "Easy", "Intermediate", "Advanced", "Expert"][min(max(level, 1), 5)])
                 .font(.system(size: 11, weight: .medium)).foregroundColor(Theme.dim).padding(.leading, 4)
@@ -62,9 +67,9 @@ private struct Difficulty: View {
 private struct Tag: View {
     var text: String
     var body: some View {
-        Text(text).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.white.opacity(0.85))
+        Text(text).font(.system(size: 10.5, weight: .semibold)).foregroundColor(Theme.cream.opacity(0.85))
             .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(Capsule().fill(Color.white.opacity(0.1)))
+            .background(Capsule().fill(Theme.cream.opacity(0.1)))
     }
 }
 
@@ -72,11 +77,11 @@ private func specRow(_ k: String, _ v: String) -> some View {
     HStack {
         Text(k).foregroundColor(Theme.dim)
         Spacer()
-        Text(v).monospacedDigit().foregroundColor(.white)
+        Text(v).monospacedDigit().foregroundColor(Theme.cream)
     }
     .font(.system(size: 12.5))
     .padding(.vertical, 5)
-    .overlay(Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1), alignment: .bottom)
+    .overlay(Rectangle().fill(Theme.cream.opacity(0.07)).frame(height: 1), alignment: .bottom)
 }
 
 /// Preview image on a soft studio backdrop.
@@ -84,7 +89,7 @@ private struct Backdrop<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         ZStack {
-            RadialGradient(colors: [Color(red: 0.36, green: 0.42, blue: 0.5), Color(red: 0.11, green: 0.13, blue: 0.17)], center: .init(x: 0.5, y: 0.42), startRadius: 4, endRadius: 260)
+            RadialGradient(colors: [Color(red: 0.6, green: 0.55, blue: 0.5), Color(red: 0.17, green: 0.12, blue: 0.11)], center: .init(x: 0.5, y: 0.42), startRadius: 4, endRadius: 260)
             content
         }
     }
@@ -97,8 +102,8 @@ private struct StickView: View {
     var body: some View {
         VStack(spacing: 5) {
             ZStack {
-                Rectangle().fill(Color.white.opacity(0.14)).frame(width: 1)
-                Rectangle().fill(Color.white.opacity(0.14)).frame(height: 1)
+                Rectangle().fill(Theme.cream.opacity(0.14)).frame(width: 1)
+                Rectangle().fill(Theme.cream.opacity(0.14)).frame(height: 1)
                 Circle().fill(Theme.accent).frame(width: 12, height: 12)
                     .shadow(color: Theme.accent.opacity(0.7), radius: 5)
                     .offset(x: CGFloat(x) * 34, y: CGFloat(-y) * 34)
@@ -116,7 +121,7 @@ private struct Metric: View {
         VStack(spacing: 1) {
             Text(label).font(.system(size: 9.5, weight: .semibold)).tracking(0.9).foregroundColor(Theme.faint)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value).font(.system(size: 19, weight: .semibold, design: .rounded)).monospacedDigit().foregroundColor(.white)
+                Text(value).font(.system(size: 19, weight: .semibold, design: .default)).monospacedDigit().foregroundColor(Theme.cream)
                 Text(unit).font(.system(size: 10.5, weight: .medium)).foregroundColor(Theme.dim)
             }
         }
@@ -129,9 +134,9 @@ private struct BarButton: View {
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundColor(.white.opacity(0.9))
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.cream.opacity(0.9))
                 .frame(width: 32, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.08)))
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.cream.opacity(0.08)))
         }
         .buttonStyle(.plain).focusable(false).help(help)
     }
@@ -145,7 +150,7 @@ private struct Chip: View {
             HStack(spacing: 8) {
                 Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.accent)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundColor(.white).lineLimit(1)
+                    Text(title).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
                     Text(subtitle).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
                 }
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundColor(Theme.faint)
@@ -163,7 +168,7 @@ struct HUDView: View {
     var body: some View {
         let s = m.s
         ZStack {
-            if m.visible && m.overlay != .menu {
+            if m.visible && m.overlay != .menu && m.overlay != .splash {
                 VStack(spacing: 0) {
                     // top bar
                     HStack(spacing: 8) {
@@ -171,7 +176,7 @@ struct HUDView: View {
                         Chip(icon: "map", title: s.site, subtitle: s.time) { m.overlay = .sites }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
-                            Text(s.camera).font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.85))
+                            Text(s.camera).font(.system(size: 11, weight: .medium)).foregroundColor(Theme.cream.opacity(0.85))
                             Text("\(s.input) · \(s.rates) rates · \(s.fps) fps").font(.system(size: 10)).monospacedDigit().foregroundColor(Theme.dim)
                         }
                         .padding(.trailing, 4).allowsHitTesting(false)
@@ -186,7 +191,7 @@ struct HUDView: View {
                     .padding(.leading, m.fullscreen ? 12 : 84).padding(.trailing, 12).padding(.top, 9)
 
                     if !s.score.isEmpty {
-                        Text(s.score).font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit().foregroundColor(.yellow)
+                        Text(s.score).font(.system(size: 14, weight: .bold, design: .default)).monospacedDigit().foregroundColor(Theme.cream)
                             .padding(.horizontal, 14).padding(.vertical, 6).glass(9).padding(.top, 8).allowsHitTesting(false)
                     }
                     Spacer()
@@ -196,7 +201,7 @@ struct HUDView: View {
                         Spacer()
                         VStack(spacing: 7) {
                             if !s.config.isEmpty {
-                                Text(s.config).font(.system(size: 11.5, weight: .semibold)).monospacedDigit().foregroundColor(.yellow)
+                                Text(s.config).font(.system(size: 11.5, weight: .semibold)).monospacedDigit().foregroundColor(Theme.cream)
                                     .padding(.horizontal, 12).padding(.vertical, 4).glass(8)
                             }
                             HStack(spacing: 6) {
@@ -235,10 +240,12 @@ struct HUDView: View {
             case .sites: SiteBrowser(m: m)
             case .environment: EnvironmentPanel(m: m)
             case .help: HelpView(m: m)
+            case .splash: SplashView(m: m)
             case .none: EmptyView()
             }
         }
         .preferredColorScheme(.dark)
+        .tint(Theme.red)
     }
 }
 
@@ -257,12 +264,12 @@ private struct Sheet<Content: View>: View {
             Color.black.opacity(0.55).ignoresSafeArea().onTapGesture { m.overlay = back }
             VStack(spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.system(size: 21, weight: .bold)).foregroundColor(.white)
+                    Text(title.uppercased()).font(.system(size: 22, weight: .black)).tracking(0.5).foregroundColor(Theme.cream)
                     Text(subtitle).font(.system(size: 12.5)).foregroundColor(Theme.dim).padding(.leading, 6)
                     Spacer()
                     Button { m.overlay = back } label: {
-                        Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundColor(.white.opacity(0.8))
-                            .frame(width: 26, height: 26).background(Circle().fill(Color.white.opacity(0.1)))
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundColor(Theme.cream.opacity(0.8))
+                            .frame(width: 26, height: 26).background(Circle().fill(Theme.cream.opacity(0.1)))
                     }
                     .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                 }
@@ -311,7 +318,7 @@ struct AircraftBrowser: View {
                             }
                             .foregroundColor(category == c ? .white : Theme.dim)
                             .padding(.horizontal, 10).padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(category == c ? Theme.accent.opacity(0.28) : Color.clear))
+                            .background(RoundedRectangle(cornerRadius: 7).fill(category == c ? Theme.red.opacity(0.85) : Color.clear))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).focusable(false)
@@ -328,7 +335,7 @@ struct AircraftBrowser: View {
                         TextField("Search aircraft", text: $search).textFieldStyle(.plain).font(.system(size: 13))
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cream.opacity(0.07)))
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 10)], spacing: 10) {
@@ -340,14 +347,14 @@ struct AircraftBrowser: View {
                                     }
                                     .frame(height: 98).clipped()
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(spec.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(.white).lineLimit(1)
+                                        Text(spec.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
                                         Text(spec.category).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
                                     }
                                     .padding(.horizontal, 9).padding(.vertical, 7)
                                 }
                                 .background(Theme.card)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.accent : Theme.stroke, lineWidth: selected == i ? 2 : 1))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.cream : Theme.stroke, lineWidth: selected == i ? 2 : 1))
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) { fly(i) }
                                 .onTapGesture { selected = i }
@@ -366,9 +373,9 @@ struct AircraftBrowser: View {
                         if let img = m.thumbnail(spec) { Image(nsImage: img).resizable().scaledToFit().padding(6) }
                     }
                     .frame(height: 205).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    Text(spec.name).font(.system(size: 20, weight: .bold)).foregroundColor(.white).padding(.top, 14)
+                    Text(spec.name).font(.system(size: 20, weight: .bold)).foregroundColor(Theme.cream).padding(.top, 14)
                     HStack(spacing: 8) { Tag(text: spec.category); Difficulty(level: spec.difficulty) }.padding(.top, 6)
-                    Text(spec.blurb).font(.system(size: 13)).foregroundColor(.white.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+                    Text(spec.blurb).font(.system(size: 13)).foregroundColor(Theme.cream.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                     VStack(spacing: 0) {
                         specRow(spec.sizeLabel, String(format: "%.2f m", spec.span))
                         specRow("Flying weight", spec.mass < 1 ? String(format: "%.0f g", spec.mass * 1000) : String(format: "%.1f kg", spec.mass))
@@ -424,7 +431,7 @@ struct SiteBrowser: View {
             }
             .foregroundColor(filter == f ? .white : Theme.dim)
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 7).fill(filter == f ? Theme.accent.opacity(0.28) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: 7).fill(filter == f ? Theme.red.opacity(0.85) : Color.clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).focusable(false)
@@ -433,9 +440,10 @@ struct SiteBrowser: View {
         Text(t).font(.system(size: 9.5, weight: .semibold)).tracking(1).foregroundColor(Theme.faint).padding(.leading, 10).padding(.top, 12).padding(.bottom, 3)
     }
     private func badge(_ site: SiteSpec) -> some View {
-        Text(site.panorama != nil ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .bold)).tracking(0.5).foregroundColor(.white)
+        Text(site.panorama != nil ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .bold)).tracking(0.5).foregroundColor(Theme.cream)
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(Capsule().fill(site.panorama != nil ? Color(red: 0.55, green: 0.35, blue: 0.9).opacity(0.9) : Theme.accent.opacity(0.9)))
+            .foregroundColor(site.panorama != nil ? Theme.ink : Theme.cream)
+            .background(Capsule().fill(site.panorama != nil ? Theme.cream : Theme.red))
     }
 
     var body: some View {
@@ -468,7 +476,7 @@ struct SiteBrowser: View {
                         TextField("Search sites", text: $search).textFieldStyle(.plain).font(.system(size: 13))
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.07)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.cream.opacity(0.07)))
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 172, maximum: 230), spacing: 10)], spacing: 10) {
@@ -482,14 +490,14 @@ struct SiteBrowser: View {
                                     }
                                     .frame(height: 104).clipped()
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(site.displayName).font(.system(size: 12.5, weight: .semibold)).foregroundColor(.white).lineLimit(1)
+                                        Text(site.displayName).font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
                                         Text(site.category).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
                                     }
                                     .padding(.horizontal, 9).padding(.vertical, 7)
                                 }
                                 .background(Theme.card)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.accent : Theme.stroke, lineWidth: selected == i ? 2 : 1))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.cream : Theme.stroke, lineWidth: selected == i ? 2 : 1))
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) { fly(i) }
                                 .onTapGesture { selected = i }
@@ -509,9 +517,9 @@ struct SiteBrowser: View {
                         if let img = m.sitePreview(site) { Image(nsImage: img).resizable().scaledToFill() }
                     }
                     .frame(width: 300, height: 188).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    Text(site.displayName).font(.system(size: 20, weight: .bold)).foregroundColor(.white).padding(.top, 14)
+                    Text(site.displayName).font(.system(size: 20, weight: .bold)).foregroundColor(Theme.cream).padding(.top, 14)
                     HStack(spacing: 8) { Tag(text: site.kindLabel); Tag(text: site.category); Difficulty(level: site.difficulty) }.padding(.top, 6)
-                    Text(site.summary).font(.system(size: 13)).foregroundColor(.white.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+                    Text(site.summary).font(.system(size: 13)).foregroundColor(Theme.cream.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                     VStack(spacing: 0) {
                         specRow("Surface", site.surfaceLabel)
                         specRow("Typical wind", site.windSpeed < 0.5 ? "Calm" : String(format: "%.0f m/s from %.0f°", site.windSpeed, site.windFrom))
@@ -530,10 +538,58 @@ struct SiteBrowser: View {
     }
 }
 
+// MARK: - Splash
+
+/// Full-screen title card shown at launch; any key or click continues.
+struct SplashView: View {
+    @ObservedObject var m: HUDModel
+    @State private var progress: CGFloat = 0
+    private static let image: NSImage? = resourceURL("Splash.jpg").flatMap { NSImage(contentsOf: $0) }
+    var body: some View {
+        ZStack {
+            Theme.red.ignoresSafeArea()
+            if let img = Self.image {
+                GeometryReader { g in
+                    Image(nsImage: img).resizable().scaledToFill().frame(width: g.size.width, height: g.size.height).clipped()
+                }
+                .ignoresSafeArea()
+            } else {
+                Text("FLIGHT CORE OSX").font(.system(size: 90, weight: .black)).foregroundColor(Theme.cream)
+            }
+            VStack {
+                Spacer()
+                Text("PRESS ANY KEY").font(.system(size: 11, weight: .heavy)).tracking(3).foregroundColor(Theme.cream.opacity(0.75)).padding(.bottom, 18)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { m.overlay = .menu }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { if m.overlay == .splash { withAnimation(.easeOut(duration: 0.5)) { m.overlay = .menu } } }
+        }
+    }
+}
+
 // MARK: - Main menu
+
+private struct CreamButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(Theme.ink)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.cream.opacity(configuration.isPressed ? 0.8 : 1)))
+    }
+}
+private struct InkButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream)
+            .padding(.horizontal, 13).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.ink.opacity(configuration.isPressed ? 0.5 : 0.32)))
+    }
+}
 
 struct MainMenu: View {
     @ObservedObject var m: HUDModel
+    private static let logo: NSImage? = resourceURL("RockFPV.png").flatMap { NSImage(contentsOf: $0) }
 
     private func tile(_ label: String, _ title: String, _ sub: String, image: NSImage?, studio: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -542,22 +598,22 @@ struct MainMenu: View {
                     if studio { Backdrop { if let i = image { Image(nsImage: i).resizable().scaledToFit().padding(6) } } }
                     else { Color.black.opacity(0.3); if let i = image { Image(nsImage: i).resizable().scaledToFill() } }
                 }
-                .frame(width: 262, height: 150).clipped()
+                .frame(width: 272, height: 152).clipped()
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(label).font(.system(size: 9.5, weight: .semibold)).tracking(1).foregroundColor(Theme.faint)
-                        Text(title).font(.system(size: 14.5, weight: .semibold)).foregroundColor(.white).lineLimit(1)
+                        Text(label).font(.system(size: 9.5, weight: .heavy)).tracking(1.6).foregroundColor(Theme.faint)
+                        Text(title).font(.system(size: 14.5, weight: .bold)).foregroundColor(Theme.cream).lineLimit(1)
                         Text(sub).font(.system(size: 11)).foregroundColor(Theme.dim).lineLimit(1)
                     }
                     Spacer()
-                    Text("Change").font(.system(size: 11.5, weight: .semibold)).foregroundColor(Theme.accent)
+                    Text("CHANGE").font(.system(size: 10, weight: .heavy)).tracking(1.2).foregroundColor(Theme.cream)
+                        .padding(.horizontal, 8).padding(.vertical, 4).background(Capsule().fill(Theme.red))
                 }
                 .padding(.horizontal, 12).padding(.vertical, 9)
             }
-            .frame(width: 262)
-            .background(Theme.card)
+            .frame(width: 272)
+            .background(Theme.ink)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
         }
         .buttonStyle(.plain).focusable(false)
     }
@@ -565,50 +621,58 @@ struct MainMenu: View {
     var body: some View {
         let spec = m.game.aircraft.spec, site = m.game.site
         ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack(spacing: 14) {
-                    if let url = resourceURL("AppIcon.png"), let icon = NSImage(contentsOf: url) {
-                        Image(nsImage: icon).resizable().frame(width: 62, height: 62)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("FlightCore").font(.system(size: 30, weight: .bold, design: .rounded)).foregroundColor(.white)
-                        Text("Radio-control flight simulator").font(.system(size: 13)).foregroundColor(Theme.dim)
-                    }
-                    Spacer()
+            Theme.ink.opacity(0.55).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("RADIO-CONTROL FLIGHT SIMULATOR").font(.system(size: 10.5, weight: .heavy)).tracking(3).foregroundColor(Theme.cream.opacity(0.85))
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("FLIGHT CORE").foregroundColor(Theme.cream)
+                    Text("OSX").foregroundColor(Theme.ink)
                 }
-                .padding(.bottom, 20)
+                .font(.system(size: 54, weight: .black)).tracking(-1.5).padding(.top, 2).padding(.bottom, 16)
                 HStack(spacing: 14) {
                     tile("AIRCRAFT", spec.name, spec.category, image: m.thumbnail(spec), studio: true) { m.game.cameFromMenu = true; m.overlay = .aircraft }
                     tile("FLYING SITE", site.displayName, site.kindLabel, image: m.sitePreview(site), studio: false) { m.game.cameFromMenu = true; m.overlay = .sites }
                 }
                 Button { m.game.cameFromMenu = false; m.overlay = .none } label: {
-                    HStack(spacing: 8) { Image(systemName: "play.fill"); Text("Fly") }.font(.system(size: 16, weight: .bold)).frame(maxWidth: .infinity).padding(.vertical, 3)
+                    HStack(spacing: 10) { Image(systemName: "play.fill"); Text("CLEARED FOR TAKE-OFF").tracking(2) }
+                        .font(.system(size: 15, weight: .black)).frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
-                .buttonStyle(PrimaryButton()).keyboardShortcut(.defaultAction).padding(.top, 18)
+                .buttonStyle(CreamButton()).keyboardShortcut(.defaultAction).padding(.top, 16)
                 HStack(spacing: 8) {
-                    Button { m.game.cameFromMenu = false; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(QuietButton())
-                    Button { m.openControllerSetup?() } label: { Label("Controller", systemImage: "gamecontroller") }.buttonStyle(QuietButton())
-                    Button { m.game.cameFromMenu = false; m.overlay = .help } label: { Label("Controls", systemImage: "keyboard") }.buttonStyle(QuietButton())
+                    Button { m.game.cameFromMenu = false; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(InkButton())
+                    Button { m.openControllerSetup?() } label: { Label("Controller", systemImage: "gamecontroller") }.buttonStyle(InkButton())
+                    Button { m.game.cameFromMenu = false; m.overlay = .help } label: { Label("Controls", systemImage: "keyboard") }.buttonStyle(InkButton())
                     Spacer()
-                    Button { NSApp.terminate(nil) } label: { Text("Quit") }.buttonStyle(QuietButton())
+                    Button { NSApp.terminate(nil) } label: { Text("Quit") }.buttonStyle(InkButton())
                 }
                 .padding(.top, 12)
+                Rectangle().fill(Theme.cream.opacity(0.5)).frame(height: 1.5).padding(.top, 16)
                 HStack(spacing: 10) {
-                    Text("Graphics").font(.system(size: 12, weight: .medium)).foregroundColor(Theme.dim)
+                    if let logo = Self.logo { Image(nsImage: logo).resizable().frame(width: 34, height: 34) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("CREATED BY").font(.system(size: 8.5, weight: .heavy)).tracking(2).foregroundColor(Theme.cream.opacity(0.8))
+                        Text("ROCK FPV").font(.system(size: 15, weight: .black)).foregroundColor(Theme.cream)
+                    }
+                    Spacer()
+                    Text("GRAPHICS").font(.system(size: 9.5, weight: .heavy)).tracking(1.6).foregroundColor(Theme.cream.opacity(0.8))
                     Picker("", selection: Binding(get: { m.game.quality }, set: { m.game.quality = $0; m.objectWillChange.send() })) {
                         ForEach(0..<3, id: \.self) { Text(Game.qualityNames[$0]).tag($0) }
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 220)
-                    Spacer()
-                    Text("⌃⌘F  full screen").font(.system(size: 11)).foregroundColor(Theme.faint)
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
                 }
-                .padding(.top, 14)
+                .padding(.top, 12)
             }
-            .padding(26)
-            .frame(width: 590)
-            .glass(18, fill: Theme.panel)
-            .shadow(color: .black.opacity(0.5), radius: 40, y: 16)
+            .padding(28)
+            .frame(width: 614)
+            .background(
+                ZStack {
+                    Theme.red
+                    Circle().fill(Theme.deepRed.opacity(0.45)).frame(width: 620, height: 620).offset(x: 250, y: -40)
+                    Circle().fill(Theme.deepRed.opacity(0.45)).frame(width: 400, height: 400).offset(x: 250, y: -40)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: .black.opacity(0.55), radius: 40, y: 16)
         }
     }
 }
@@ -624,7 +688,7 @@ struct EnvironmentPanel: View {
     private func row(_ title: String, _ value: String, _ b: Binding<Float>, _ range: ClosedRange<Float>) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(title).font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.9))
+                Text(title).font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
                 Spacer()
                 Text(value).font(.system(size: 12.5)).monospacedDigit().foregroundColor(Theme.dim)
             }
@@ -640,11 +704,11 @@ struct EnvironmentPanel: View {
             VStack {
                 VStack(alignment: .leading, spacing: 13) {
                     HStack {
-                        Text("Weather").font(.system(size: 17, weight: .bold)).foregroundColor(.white)
+                        Text("Weather").font(.system(size: 17, weight: .bold)).foregroundColor(Theme.cream)
                         Spacer()
                         Button { m.overlay = .none } label: {
-                            Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundColor(.white.opacity(0.8))
-                                .frame(width: 24, height: 24).background(Circle().fill(Color.white.opacity(0.1)))
+                            Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundColor(Theme.cream.opacity(0.8))
+                                .frame(width: 24, height: 24).background(Circle().fill(Theme.cream.opacity(0.1)))
                         }
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                     }
@@ -652,12 +716,12 @@ struct EnvironmentPanel: View {
                     row("Wind from", String(format: "%@  %.0f°", dirs[Int((env.windFrom + 22.5) / 45) % 8], env.windFrom), bind({ env.windFrom }, { env.windFrom = ($0 / 5).rounded() * 5 }), 0...355)
                     row("Turbulence", env.turbulence < 0.05 ? "Smooth" : String(format: "%.0f %%", env.turbulence * 100), bind({ env.turbulence }, { env.turbulence = $0 }), 0...1)
                     Toggle(isOn: Binding(get: { env.thermalsOn }, set: { env.thermalsOn = $0; m.objectWillChange.send() })) {
-                        Text("Thermals").font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.9))
+                        Text("Thermals").font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
                     }
                     .toggleStyle(.switch).controlSize(.small)
                     if m.game.site.panorama == nil {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Time of day").font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.9))
+                            Text("Time of day").font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
                             Picker("", selection: Binding(get: { m.game.timeOfDay }, set: { m.game.timeOfDay = $0; m.objectWillChange.send() })) {
                                 ForEach(0..<3, id: \.self) { Text(Game.timeNames[$0]).tag($0) }
                             }
@@ -695,13 +759,13 @@ struct HelpView: View {
             HStack(alignment: .top, spacing: 26) {
                 ForEach(groups, id: \.0) { g in
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(g.0.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(1).foregroundColor(Theme.accent).padding(.bottom, 3)
+                        Text(g.0.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(1.5).foregroundColor(Theme.cream.opacity(0.6)).padding(.bottom, 3)
                         ForEach(g.1, id: \.0) { k in
                             HStack(spacing: 10) {
-                                Text(k.0).font(.system(size: 11.5, weight: .semibold, design: .monospaced)).foregroundColor(.white)
+                                Text(k.0).font(.system(size: 11.5, weight: .semibold, design: .monospaced)).foregroundColor(Theme.cream)
                                     .frame(minWidth: 46).padding(.vertical, 3).padding(.horizontal, 5)
-                                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.1)))
-                                Text(k.1).font(.system(size: 12.5)).foregroundColor(.white.opacity(0.85))
+                                    .background(RoundedRectangle(cornerRadius: 5).fill(Theme.cream.opacity(0.1)))
+                                Text(k.1).font(.system(size: 12.5)).foregroundColor(Theme.cream.opacity(0.85))
                                 Spacer(minLength: 0)
                             }
                         }

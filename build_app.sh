@@ -7,7 +7,7 @@ APP="FlightCore.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp Resources/AppIcon.png "$APP/Contents/Resources/AppIcon.png"
+cp Resources/AppIcon.png Resources/Splash.jpg Resources/RockFPV.png "$APP/Contents/Resources/"
 cp -R Resources/Previews "$APP/Contents/Resources/Previews"
 cp .build/release/FlightCore "$APP/Contents/MacOS/FlightCore"
 cat > "$APP/Contents/Info.plist" <<'PLIST'

@@ -13,9 +13,9 @@ struct HUDState {
 }
 
 enum Overlay {
-    case none, menu, aircraft, sites, environment, help
+    case none, menu, aircraft, sites, environment, help, splash
     /// The simulation is frozen while these are open.
-    var pausesSim: Bool { self == .menu || self == .aircraft || self == .sites }
+    var pausesSim: Bool { self == .menu || self == .aircraft || self == .sites || self == .splash }
 }
 
 final class HUDModel: ObservableObject {

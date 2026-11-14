@@ -30,6 +30,7 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 ## Interface
 
+- **Splash screen** at launch; any key or click continues, or it moves on by itself after a few seconds.
 - **Main menu** (Esc): shows the current aircraft and flying site with previews, and starts the flight.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures.
 - **Site browser** (click the site name): preview, description and conditions for each 3D and photo site, plus a button to add your own panorama.

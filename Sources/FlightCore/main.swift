@@ -102,8 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let n = UserDefaults.standard.string(forKey: "lastSite"), let i = SiteSpec.all.firstIndex(where: { $0.name == n }) { siteArg = i }
         }
         game = Game(site: siteArg, aircraft: acArg)
-        if interactive || CommandLine.arguments.contains("--menu") { game.hud.overlay = .menu }
-        if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu][o] ?? .none }
+        if CommandLine.arguments.contains("--menu") { game.hud.overlay = .menu }
+        if interactive || CommandLine.arguments.contains("--splash") { game.hud.overlay = .splash }
+        if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu, "splash": .splash][o] ?? .none }
         game.hud.addPanorama = { [unowned self] in self.addPanorama() }
         game.hud.openControllerSetup = { [unowned self] in self.showSetup() }
         if let c = Int(arg("--cam") ?? "") { game.cameraMode = c }
@@ -133,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.styleMask.insert(.fullSizeContentView)
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = .black
+        window.backgroundColor = NSColor(srgbRed: 0.76, green: 0.13, blue: 0.1, alpha: 1)
         window.minSize = NSSize(width: 1000, height: 640)
         window.center()
         window.collectionBehavior = [.fullScreenPrimary]
@@ -175,6 +176,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [unowned self] e in
             guard e.window === self.window else { return e }
             // while a menu or browser is open the keyboard belongs to it; Esc steps back
+            if self.game.hud.overlay == .splash {
+                if e.type == .keyDown { self.game.hud.overlay = .menu }
+                return nil
+            }
             if self.game.hud.overlay != .none {
                 if e.type == .keyDown && e.keyCode == 53 {
                     let o = self.game.hud.overlay
