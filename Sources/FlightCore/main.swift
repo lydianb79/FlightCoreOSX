@@ -1,4 +1,5 @@
 import AppKit
+import GameController
 import MetalKit
 import SwiftUI
 
@@ -56,6 +57,18 @@ func runAutorotationTest() {
 
 if let i = CommandLine.arguments.firstIndex(of: "--soundtest"), i + 1 < CommandLine.arguments.count {
     writeSoundTest(to: CommandLine.arguments[i + 1])
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--hidtest") {
+    // report what the controller code detects, then quit
+    let input = InputManager()
+    RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+    print("joysticks: \(input.hid.joysticks.count)  gamepad-class: \(input.hid.gamepads.count)  name: \(input.hid.name)  used as transmitter: \(input.hid.connected)")
+    print("system game controllers: " + GCController.controllers().map { "\($0.vendorName ?? "?") extended=\($0.extendedGamepad != nil)" }.joined(separator: ", "))
+    print("axes: " + input.hid.axes.map { String(format: "%+.2f", $0) }.joined(separator: " "))
+    let c = input.poll(dt: 0.016, kind: .airplane)
+    print(String(format: "channels: aileron %+.2f elevator %+.2f throttle %.2f rudder %+.2f  source: %@", c.aileron, c.elevator, c.throttle, c.rudder, input.source))
     exit(0)
 }
 

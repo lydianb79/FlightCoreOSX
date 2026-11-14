@@ -140,7 +140,7 @@ Press **H** in the app for this list.
 ### Controllers
 
 - **Gamepads** (Xbox, PlayStation and similar) work without setup and default to Mode 2 sticks.
-- **USB RC transmitters and simulator dongles** are detected automatically.
+- **USB RC transmitters and simulator dongles** are detected automatically, whether they identify as a joystick or as a gamepad (DJI controllers, for example). `FlightCore --hidtest` prints what was detected and the current stick values.
 
 **Controller ▸ Controller Setup…** (⌘,) covers:
 

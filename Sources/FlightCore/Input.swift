@@ -9,39 +9,68 @@ import AVFoundation
 final class HIDJoystick {
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     var axes = [Float](repeating: 0, count: 9)
-    var deviceCount = 0
+    /// Devices that identify as joysticks or multi-axis controllers, and those that identify as gamepads.
+    /// Many RC transmitters (DJI, some EdgeTX modes) report as gamepads, like console controllers do.
+    private(set) var joysticks: [IOHIDDevice] = []
+    private(set) var gamepads: [IOHIDDevice] = []
     var name = ""
 
+    private static func product(_ d: IOHIDDevice) -> String { (IOHIDDeviceGetProperty(d, kIOHIDProductKey as CFString) as? String) ?? "USB Controller" }
+    private static func isGamepad(_ d: IOHIDDevice) -> Bool { (IOHIDDeviceGetProperty(d, kIOHIDPrimaryUsageKey as CFString) as? Int) == kHIDUsage_GD_GamePad }
+
+    private func store(_ el: IOHIDElement, _ raw: Int) {
+        guard IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) else { return }
+        let idx = Int(IOHIDElementGetUsage(el)) - kHIDUsage_GD_X
+        guard idx >= 0 && idx < 9 else { return }
+        let lo = Float(IOHIDElementGetLogicalMin(el)), hi = Float(IOHIDElementGetLogicalMax(el))
+        guard hi > lo else { return }
+        axes[idx] = clampf((Float(raw) - lo) / (hi - lo) * 2 - 1, -1, 1)
+    }
+
+    /// Read where the sticks are right now; change reports only arrive once something moves.
+    private func readCurrent(_ d: IOHIDDevice) {
+        for el in (IOHIDDeviceCopyMatchingElements(d, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement]) ?? [] {
+            guard IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) else { continue }
+            var ref: Unmanaged<IOHIDValue>?
+            let ok = withUnsafeMutablePointer(to: &ref) { p in
+                p.withMemoryRebound(to: Unmanaged<IOHIDValue>.self, capacity: 1) { IOHIDDeviceGetValue(d, el, $0) == kIOReturnSuccess }
+            }
+            if ok, let v = ref?.takeUnretainedValue() { store(el, IOHIDValueGetIntegerValue(v)) }
+        }
+    }
+
     init() {
-        let match: [[String: Any]] = [
-            [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: kHIDUsage_GD_Joystick],
-            [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: kHIDUsage_GD_MultiAxisController],
-        ]
+        let match: [[String: Any]] = [kHIDUsage_GD_Joystick, kHIDUsage_GD_GamePad, kHIDUsage_GD_MultiAxisController].map {
+            [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: $0]
+        }
         IOHIDManagerSetDeviceMatchingMultiple(manager, match as CFArray)
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         IOHIDManagerRegisterDeviceMatchingCallback(manager, { ctx, _, _, device in
             let me = Unmanaged<HIDJoystick>.fromOpaque(ctx!).takeUnretainedValue()
-            me.deviceCount += 1
-            me.name = (IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String) ?? "USB Joystick"
+            if HIDJoystick.isGamepad(device) { me.gamepads.append(device) } else { me.joysticks.append(device) }
+            me.name = HIDJoystick.product(device)
+            me.readCurrent(device)
         }, ctx)
-        IOHIDManagerRegisterDeviceRemovalCallback(manager, { ctx, _, _, _ in
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, { ctx, _, _, device in
             let me = Unmanaged<HIDJoystick>.fromOpaque(ctx!).takeUnretainedValue()
-            me.deviceCount = max(0, me.deviceCount - 1)
+            me.joysticks.removeAll { $0 == device }
+            me.gamepads.removeAll { $0 == device }
+            if let d = me.joysticks.last ?? me.gamepads.last { me.name = HIDJoystick.product(d) }
         }, ctx)
         IOHIDManagerRegisterInputValueCallback(manager, { ctx, _, _, value in
             let me = Unmanaged<HIDJoystick>.fromOpaque(ctx!).takeUnretainedValue()
-            let el = IOHIDValueGetElement(value)
-            guard IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) else { return }
-            let idx = Int(IOHIDElementGetUsage(el)) - kHIDUsage_GD_X
-            guard idx >= 0 && idx < 9 else { return }
-            let lo = Float(IOHIDElementGetLogicalMin(el)), hi = Float(IOHIDElementGetLogicalMax(el))
-            guard hi > lo else { return }
-            me.axes[idx] = clampf((Float(IOHIDValueGetIntegerValue(value)) - lo) / (hi - lo) * 2 - 1, -1, 1)
+            me.store(IOHIDValueGetElement(value), IOHIDValueGetIntegerValue(value))
         }, ctx)
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
     }
-    var connected: Bool { deviceCount > 0 }
+
+    /// A transmitter is in use. Gamepad-class devices count only when the system has not already
+    /// turned them into a standard game controller (Xbox, PlayStation and similar), which is handled separately.
+    var connected: Bool {
+        if !joysticks.isEmpty { return true }
+        return !gamepads.isEmpty && !GCController.controllers().contains { $0.extendedGamepad != nil }
+    }
 }
 
 /// Controller settings, saved in user defaults. Channel order: aileron, elevator, throttle, rudder.
