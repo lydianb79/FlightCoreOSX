@@ -226,3 +226,7 @@ swift run -c release FlightCore --selftest
 - Created by Rock FPV.
 - The photo-site presets are written for CC0 panoramas from [Poly Haven](https://polyhaven.com), which are not included.
 - Aircraft named after real types are approximate scale models and are not affiliated with or endorsed by their manufacturers.
+
+## Licence
+
+FlightCore OSX is free software, released under the [GNU General Public License, version 3](LICENSE). You may use, study, share and modify it; if you distribute it or a modified version, you must do so under the same licence and make the source available. It comes with no warranty.
