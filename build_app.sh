@@ -8,6 +8,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/AppIcon.png Resources/Splash.jpg Resources/RockFPV.png "$APP/Contents/Resources/"
+cp LICENSE "$APP/Contents/Resources/LICENSE"
 cp -R Resources/Previews "$APP/Contents/Resources/Previews"
 cp .build/release/FlightCore "$APP/Contents/MacOS/FlightCore"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -21,8 +22,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>FlightCore</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.1.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.simulation-games</string>
     <key>NSHighResolutionCapable</key><true/>
