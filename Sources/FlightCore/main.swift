@@ -11,7 +11,7 @@ func runSelfTest() {
         let ac = Aircraft(spec)
         var ap = Autopilot()
         if spec.handLaunch {
-            ac.reset(pos: V3(2, 1.9, 0), heading: 0, speed: 9)
+            ac.reset(pos: V3(2, 1.9, 0), heading: 0, speed: clampf(spec.stallSpeed * 1.7, 4, 9))
         } else {
             ac.reset(pos: V3(spec.kind == .airplane ? -50 : -6, ac.restHeight + 0.02, 0), heading: -.pi / 2)
         }
@@ -175,9 +175,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClosureMenuItem("Hide FlightCore", key: "h") { NSApp.hide(nil) },
             ClosureMenuItem("Quit FlightCore", key: "q") { NSApp.terminate(nil) },
         ])
-        menu("Aircraft", AircraftLibrary.all.enumerated().map { i, s in
-            ClosureMenuItem(s.name, key: i < 9 ? "\(i + 1)" : "") { g.selectAircraft(i) }
-        })
+        // aircraft grouped into submenus by category
+        var acItems: [NSMenuItem] = []
+        let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Jets", "Gliders", "Helicopters", "Multirotors"]
+        let cats = order + Set(AircraftLibrary.all.map { $0.category }).subtracting(order).sorted()
+        for cat in cats {
+            let sub = NSMenu(title: cat)
+            for (i, sp) in AircraftLibrary.all.enumerated() where sp.category == cat {
+                sub.addItem(ClosureMenuItem(sp.name, key: i < 9 ? "\(i + 1)" : "") { g.selectAircraft(i) })
+            }
+            guard sub.items.count > 0 else { continue }
+            let item = NSMenuItem(title: cat, action: nil, keyEquivalent: "")
+            item.submenu = sub
+            acItems.append(item)
+        }
+        acItems.append(.separator())
+        acItems.append(ClosureMenuItem("Next Aircraft", key: "]") { g.keyDown(30) })
+        acItems.append(ClosureMenuItem("Previous Aircraft", key: "[") { g.keyDown(33) })
+        menu("Aircraft", acItems)
         var siteItems: [NSMenuItem] = SiteSpec.all.enumerated().map { i, s in
             ClosureMenuItem(s.name, key: i < 9 ? "\(i + 1)" : "", mods: [.command, .option]) { g.selectSite(i) }
         }

@@ -27,6 +27,14 @@ struct PlaneGeom {
     var struts = false
     var pants = false               // wheel spats
     var wheelR: Float = 0.035
+    var category = "Sport"
+    var blades = 2
+    var spinnerScale: Float = 0.4   // spinner radius relative to fuselage half-width (small for radial engines)
+    var spinnerColor: V4? = nil
+    var tTail = false
+    var noseIntake = false          // jets: intake in the nose instead of on the cheeks
+    var profile = false             // flat foam "profile" airframe: plate fuselage and slab wings
+    var tough: Float = 1            // crash tolerance multiplier (foam bounces)
     var twin: Float = 0             // engine offset from centreline; 0 = single nose engine
     var upperWingY: Float? = nil    // set for a biplane
     var gear = GearType.tricycle
@@ -48,7 +56,8 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     let slope = 2 * Float.pi * ar / (ar + 2)
     let L = g.fuseLen, nz = g.noseZ, tz = g.noseZ + g.fuseLen
     let w = g.fuseW / 2, h = g.fuseH / 2
-    let stabY = h * 0.3
+    let finY = h * 0.3
+    let stabY = g.tTail ? finY + g.finH : finY
     func chord(_ f: Float) -> Float { lerp(g.rootChord, g.tipChord, f) }
 
     let wings: [(y: Float, z: Float)] = g.upperWingY.map { [(g.wingY, Float(0)), ($0, Float(-0.07))] } ?? [(g.wingY, Float(0))]
@@ -76,7 +85,7 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
                                     stall: 0.27, cd0: 0.012, flapCh: 1, flapGain: -flapTau(g.elevFrac) * g.elevThrow * deg, wash: g.washTail))
     }
     let far = 1.6 * g.finH / g.finChord
-    surfaces.append(AeroSurface(pos: V3(0, stabY + g.finH / 2, g.finZ + 0.25 * g.finChord), normal: V3(1, 0, 0),
+    surfaces.append(AeroSurface(pos: V3(0, finY + g.finH / 2, g.finZ + 0.25 * g.finChord), normal: V3(1, 0, 0),
                                 area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
                                 stall: 0.27, cd0: 0.012, flapCh: 2, flapGain: -flapTau(g.rudFrac) * g.rudThrow * deg, wash: g.washTail))
     for (n, a) in [(V3(1, 0, 0), L * g.fuseH * 0.75), (V3(0, 1, 0), L * g.fuseW * 0.75)] {
@@ -108,7 +117,8 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     contacts.append(Contact(pos: V3(0, h * 0.2, tz), crashSpeed: 3.5))
     contacts.append(Contact(pos: V3(hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
     contacts.append(Contact(pos: V3(-hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
-    contacts.append(Contact(pos: V3(0, stabY + g.finH, g.finZ + g.finChord * 0.6), crashSpeed: 2.5))
+    contacts.append(Contact(pos: V3(0, finY + g.finH, g.finZ + g.finChord * 0.6), crashSpeed: 2.5))
+    contacts = contacts.map { var c = $0; c.crashSpeed *= g.tough; return c }
     contacts.append(Contact(pos: V3(0, max(h, g.wingY) + 0.03, nz + 0.3 * L), crashSpeed: 2.5))
 
     let engines: [V3] = g.twin > 0 ? [V3(g.twin, g.wingY, g.wingLE - 0.1), V3(-g.twin, g.wingY, g.wingLE - 0.1)] : [V3(0, 0, nz)]
@@ -124,6 +134,8 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     spec.contacts = contacts
     spec.cdA = g.cdA
     spec.handLaunch = g.handLaunch
+    spec.category = g.category
+    spec.stallSpeed = sqrt(2 * g.mass * gravity / (rho * area * Float(wings.count) * wingEff * (g.profile ? 0.8 : 1.15)))
     spec.hasFlaps = g.flaps && g.ailStart > 0.4
     spec.hasRetracts = g.retracts && g.gear != .none
     spec.smokePos = V3(0, -h * 0.4, nz + 0.55 * L)
@@ -182,6 +194,20 @@ func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.1, 0.1, 0.
     s.smokePos = V3(0, 0, 0.3)
     s.modes = []
     return s
+}
+
+/// Copy of a design scaled to a new wingspan (lengths scale linearly, mass and thrust roughly with volume).
+func sized(_ base: PlaneGeom, span: Float, _ edit: (inout PlaneGeom) -> Void = { _ in }) -> PlaneGeom {
+    var g = base
+    let k = span / base.span, m = pow(k, 2.6)
+    g.span = span; g.rootChord *= k; g.tipChord *= k; g.wingY *= k; g.wingLE *= k; g.sweep *= k
+    g.noseZ *= k; g.fuseLen *= k; g.fuseW *= k; g.fuseH *= k
+    g.stabSpan *= k; g.stabChord *= k; g.stabZ *= k; g.finH *= k; g.finChord *= k; g.finZ *= k
+    g.propDia *= k; g.gearH *= k; g.track *= k; g.twin *= k; g.wheelR *= k
+    if let u = g.upperWingY { g.upperWingY = u * k }
+    g.mass *= m; g.thrust *= m; g.cdA *= k * k
+    edit(&g)
+    return g
 }
 
 enum AircraftLibrary {
@@ -325,24 +351,181 @@ enum AircraftLibrary {
         sail.fuse = rgb(0.97, 0.97, 0.97); sail.wingTop = rgb(0.97, 0.97, 0.97); sail.wingBottom = rgb(0.95, 0.45, 0.05)
         sail.tail = rgb(0.95, 0.45, 0.05); sail.accent = rgb(0.2, 0.25, 0.6); sail.sound = 105
 
+
+        // ---- categories for the original designs
+        trainer.category = "Trainers & Sport"; park.category = "Trainers & Sport"; racer.category = "Trainers & Sport"
+        bush.category = "Scale Civil"; twin.category = "Scale Civil"; warbird.category = "Warbirds"
+        acro.category = "Aerobatic"; bipe.category = "Aerobatic"; jet.category = "Jets"
+        glider.category = "Gliders"; sail.category = "Gliders"
+
+        // ---- scale models of real aircraft
+        let silver = rgb(0.36, 0.38, 0.41), cream = rgb(0.95, 0.94, 0.9)
+        let j3 = sized(bush, span: 1.9) {
+            $0.name = "Piper J-3 Cub"; $0.blurb = "The classic yellow high-wing taildragger: slow, gentle, honest"
+            $0.flaps = false; $0.wheelR = 0.05; $0.thrust *= 0.75; $0.camber = 4; $0.sound = 105
+        }
+        let c182 = sized(trainer, span: 1.75) {
+            $0.name = "Cessna 182 Skylane"; $0.blurb = "Scale high-wing tourer with tricycle gear and flaps"; $0.category = "Scale Civil"
+            $0.scheme = 6; $0.struts = true; $0.flaps = true; $0.fuseExp = 2.5; $0.canopyLen = 0.13; $0.mass *= 1.12
+            $0.fuse = cream; $0.wingTop = cream; $0.wingBottom = cream; $0.tail = cream; $0.accent = rgb(0.1, 0.25, 0.6); $0.spinnerColor = cream; $0.sound = 120
+        }
+        let pc6 = sized(bush, span: 2.0) {
+            $0.name = "Pilatus PC-6 Porter"; $0.blurb = "Swiss STOL workhorse: long turbine nose, huge flaps, short strips"
+            $0.scheme = 6; $0.fuseExp = 3.3; $0.noseZ *= 1.25; $0.fuseLen *= 1.12; $0.blades = 3; $0.spinnerScale = 0.3; $0.thrust *= 1.25; $0.wheelR = 0.05
+            $0.fuse = cream; $0.wingTop = cream; $0.wingBottom = cream; $0.tail = cream; $0.accent = rgb(0.8, 0.08, 0.08); $0.spinnerColor = silver; $0.sound = 170
+        }
+        let beaver = sized(bush, span: 1.8) {
+            $0.name = "DHC-2 Beaver"; $0.blurb = "Radial-engined bush plane, steady and strong"
+            $0.scheme = 6; $0.fuseExp = 2.3; $0.spinnerScale = 0.18; $0.mass *= 1.15; $0.wheelR = 0.05
+            $0.fuse = rgb(0.95, 0.75, 0.1); $0.wingTop = rgb(0.95, 0.75, 0.1); $0.wingBottom = rgb(0.95, 0.75, 0.1); $0.tail = rgb(0.95, 0.75, 0.1)
+            $0.accent = rgb(0.1, 0.2, 0.5); $0.spinnerColor = silver; $0.sound = 95
+        }
+        let storch = sized(bush, span: 1.7) {
+            $0.name = "Fieseler Storch"; $0.blurb = "Stilt-legged STOL observation plane that almost hovers into wind"
+            $0.scheme = 7; $0.fuseExp = 3.2; $0.gearH *= 1.3; $0.camber = 5.5; $0.mass *= 0.85; $0.canopyLen = 0.15
+            $0.fuse = rgb(0.2, 0.26, 0.15); $0.wingTop = rgb(0.2, 0.26, 0.15); $0.accent = rgb(0.1, 0.13, 0.09); $0.wingBottom = rgb(0.42, 0.52, 0.6)
+            $0.tail = rgb(0.2, 0.26, 0.15); $0.spinnerColor = rgb(0.1, 0.13, 0.09); $0.sound = 100
+        }
+        let p51 = sized(warbird, span: 1.5) {
+            $0.name = "P-51D Mustang"; $0.blurb = "Polished-metal long-range fighter: fast, slippery, lands hot"
+            $0.scheme = 2; $0.blades = 4; $0.canopyLen = 0.1; $0.spinnerColor = rgb(0.8, 0.1, 0.1)
+            $0.fuse = silver; $0.wingTop = silver; $0.wingBottom = silver; $0.tail = rgb(0.8, 0.1, 0.1); $0.accent = silver
+        }
+        let spit = sized(warbird, span: 1.5) {
+            $0.name = "Supermarine Spitfire"; $0.blurb = "Graceful wide-chord wing, light on the controls"
+            $0.scheme = 7; $0.rootChord *= 1.12; $0.tipChord *= 0.72; $0.blades = 4; $0.track *= 0.75; $0.mass *= 0.95
+            $0.fuse = rgb(0.16, 0.22, 0.12); $0.wingTop = rgb(0.16, 0.22, 0.12); $0.accent = rgb(0.22, 0.25, 0.27); $0.wingBottom = rgb(0.44, 0.5, 0.55)
+            $0.tail = rgb(0.16, 0.22, 0.12); $0.spinnerColor = rgb(0.1, 0.1, 0.1)
+        }
+        let bf109 = sized(warbird, span: 1.4) {
+            $0.name = "Messerschmitt Bf 109"; $0.blurb = "Small, heavy, narrow-track fighter: tricky on the ground"
+            $0.scheme = 7; $0.track *= 0.6; $0.blades = 3; $0.mass *= 1.05; $0.canopyLen = 0.09
+            $0.fuse = rgb(0.27, 0.29, 0.31); $0.wingTop = rgb(0.27, 0.29, 0.31); $0.accent = rgb(0.15, 0.17, 0.19); $0.wingBottom = rgb(0.42, 0.5, 0.58)
+            $0.tail = rgb(0.27, 0.29, 0.31); $0.spinnerColor = rgb(0.9, 0.8, 0.1)
+        }
+        let zero = sized(warbird, span: 1.5) {
+            $0.name = "Mitsubishi A6M Zero"; $0.blurb = "Very light radial fighter that turns on a wingtip"
+            $0.scheme = 8; $0.fuseExp = 2.0; $0.spinnerScale = 0.24; $0.blades = 3; $0.mass *= 0.85; $0.rootChord *= 1.1
+            let grey = rgb(0.48, 0.5, 0.46)
+            $0.fuse = grey; $0.wingTop = grey; $0.wingBottom = grey; $0.tail = grey; $0.accent = rgb(0.06, 0.06, 0.08); $0.spinnerColor = silver; $0.sound = 115
+        }
+        let hellcat = sized(warbird, span: 1.55) {
+            $0.name = "Grumman F6F Hellcat"; $0.blurb = "Big, rugged carrier fighter with a deep radial growl"
+            $0.scheme = 8; $0.fuseExp = 2.0; $0.fuseW *= 1.2; $0.fuseH *= 1.12; $0.spinnerScale = 0.2; $0.blades = 3; $0.mass *= 1.12; $0.thrust *= 1.1
+            let navy = rgb(0.07, 0.11, 0.24)
+            $0.fuse = navy; $0.wingTop = navy; $0.wingBottom = navy; $0.tail = navy; $0.accent = navy; $0.spinnerColor = silver; $0.sound = 100
+        }
+        let mossie = sized(twin, span: 1.9) {
+            $0.name = "DH Mosquito"; $0.blurb = "Fast twin-engine wooden wonder; watch the swing on take-off"; $0.category = "Warbirds"
+            $0.scheme = 7; $0.gear = .taildragger; $0.fuseExp = 2.1; $0.wingY = -0.01; $0.blades = 3; $0.thrust *= 1.25; $0.pitchSpeed = 32; $0.cdA *= 0.7
+            $0.fuse = rgb(0.16, 0.22, 0.12); $0.wingTop = rgb(0.16, 0.22, 0.12); $0.accent = rgb(0.22, 0.25, 0.27); $0.wingBottom = rgb(0.44, 0.48, 0.5)
+            $0.tail = rgb(0.16, 0.22, 0.12); $0.spinnerColor = rgb(0.1, 0.1, 0.1)
+        }
+        let dc3 = sized(twin, span: 2.1) {
+            $0.name = "Douglas DC-3"; $0.blurb = "Stately twin airliner: wide circuits, wheel landings"
+            $0.scheme = 8; $0.gear = .taildragger; $0.fuseExp = 2.0; $0.wingY = -0.035; $0.sweep = 0.07; $0.blades = 3; $0.canopyLen = 0.05; $0.dihedral = 5
+            $0.fuse = silver; $0.wingTop = silver; $0.wingBottom = silver; $0.tail = silver; $0.accent = silver; $0.spinnerColor = rgb(0.1, 0.1, 0.1); $0.sound = 95
+        }
+        let extra = sized(acro, span: 1.5) {
+            $0.name = "Extra 300"; $0.blurb = "Unlimited competition aerobat with a straight-edged wing"; $0.category = "Aerobatic"
+            $0.fuse = rgb(0.96, 0.96, 0.96); $0.wingTop = rgb(0.85, 0.08, 0.08); $0.wingBottom = rgb(0.96, 0.96, 0.96); $0.tail = rgb(0.85, 0.08, 0.08)
+            $0.accent = rgb(0.96, 0.96, 0.96); $0.spinnerColor = rgb(0.08, 0.08, 0.08); $0.blades = 3
+        }
+        let pitts = sized(bipe, span: 1.1) {
+            $0.name = "Pitts Special"; $0.blurb = "Tiny snap-rolling biplane: short-coupled and lively"
+            $0.fuse = rgb(0.85, 0.08, 0.08); $0.wingTop = rgb(0.85, 0.08, 0.08); $0.wingBottom = rgb(0.97, 0.97, 0.97); $0.tail = rgb(0.97, 0.97, 0.97)
+            $0.accent = rgb(0.97, 0.97, 0.97); $0.fuseExp = 2.1
+        }
+        let stearman = sized(bipe, span: 1.4) {
+            $0.name = "Boeing Stearman"; $0.blurb = "Big open-cockpit trainer biplane with a lazy radial"; $0.category = "Scale Civil"
+            $0.scheme = 8; $0.pants = false; $0.fuseExp = 2.2; $0.spinnerScale = 0.15; $0.incidence = 2; $0.camber = 3; $0.dihedral = 2.5
+            $0.thrust *= 0.5; $0.ailThrow = 18; $0.elevThrow = 20; $0.rudThrow = 28; $0.washTail = 0.5; $0.wheelR = 0.05; $0.gearH *= 1.1
+            let yel = rgb(0.96, 0.78, 0.08)
+            $0.fuse = rgb(0.1, 0.2, 0.5); $0.wingTop = yel; $0.wingBottom = yel; $0.tail = yel; $0.accent = silver; $0.spinnerColor = silver; $0.sound = 90
+        }
+        let moth = sized(bipe, span: 1.5) {
+            $0.name = "DH Tiger Moth"; $0.blurb = "Gentle 1930s trainer biplane: lots of rudder, little power"; $0.category = "Scale Civil"
+            $0.scheme = 8; $0.pants = false; $0.fuseExp = 3.0; $0.sweep = 0.06; $0.incidence = 2.5; $0.camber = 3.5; $0.dihedral = 3
+            $0.mass *= 0.8; $0.thrust *= 0.36; $0.ailThrow = 16; $0.elevThrow = 18; $0.rudThrow = 28; $0.washTail = 0.5; $0.wheelR = 0.045
+            let yel = rgb(0.96, 0.8, 0.1)
+            $0.fuse = silver; $0.wingTop = yel; $0.wingBottom = yel; $0.tail = silver; $0.accent = silver; $0.spinnerColor = silver; $0.sound = 85
+        }
+        let pc7 = sized(warbird, span: 1.45) {
+            $0.name = "Pilatus PC-7"; $0.blurb = "Swiss turboprop trainer: tandem canopy, crisp aerobatics"; $0.category = "Aerobatic"
+            $0.scheme = 0; $0.gear = .tricycle; $0.gearH = 0.17; $0.fuseExp = 2.0; $0.canopyLen = 0.17; $0.blades = 3; $0.spinnerScale = 0.3; $0.mass *= 0.92
+            $0.ailThrow = 22; $0.elevThrow = 20
+            $0.fuse = rgb(0.96, 0.96, 0.96); $0.wingTop = rgb(0.85, 0.08, 0.08); $0.wingBottom = rgb(0.96, 0.96, 0.96); $0.tail = rgb(0.85, 0.08, 0.08)
+            $0.accent = rgb(0.96, 0.96, 0.96); $0.spinnerColor = silver; $0.sound = 175
+        }
+        var f16 = jet
+        f16.name = "F-16 Fighting Falcon"; f16.blurb = "EDF fighter with a cropped delta wing: fast, needs room"
+        f16.mass = 1.5; f16.span = 0.9; f16.rootChord = 0.42; f16.tipChord = 0.12; f16.sweep = 0.3; f16.wingLE = -0.2; f16.wingY = 0; f16.dihedral = 0
+        f16.thrust = 20; f16.pitchSpeed = 62; f16.stabSpan = 0.5; f16.stabChord = 0.17; f16.stabZ = 0.43; f16.finH = 0.27; f16.finChord = 0.24; f16.finZ = 0.33
+        f16.noseZ = -0.58; f16.fuseLen = 1.18; f16.canopyLen = 0.13; f16.ailThrow = 14; f16.elevThrow = 14
+        f16.fuse = rgb(0.3, 0.33, 0.37); f16.wingTop = rgb(0.27, 0.3, 0.34); f16.wingBottom = rgb(0.42, 0.45, 0.5); f16.tail = rgb(0.22, 0.25, 0.29); f16.accent = rgb(0.2, 0.22, 0.26)
+        var sabre = jet
+        sabre.name = "F-86 Sabre"; sabre.blurb = "Swept-wing classic jet with a nose intake; smooth and fast"
+        sabre.mass = 1.5; sabre.span = 1.05; sabre.rootChord = 0.3; sabre.tipChord = 0.15; sabre.sweep = 0.34; sabre.wingLE = -0.21; sabre.wingY = -0.02; sabre.dihedral = 2
+        sabre.thrust = 18; sabre.pitchSpeed = 60; sabre.noseIntake = true; sabre.fuseW = 0.12; sabre.fuseH = 0.13; sabre.finH = 0.24; sabre.canopyLen = 0.12
+        sabre.fuse = silver; sabre.wingTop = silver; sabre.wingBottom = silver; sabre.tail = silver; sabre.accent = rgb(0.95, 0.8, 0.1)
+        let ask21 = sized(sail, span: 3.2) {
+            $0.name = "ASK 21"; $0.blurb = "Two-seat training sailplane with a T-tail, here with a nose motor to self-launch"
+            $0.tTail = true; $0.finH *= 1.15; $0.stabSpan *= 1.1; $0.canopyLen = 0.16
+            $0.fuse = rgb(0.97, 0.97, 0.97); $0.wingTop = rgb(0.97, 0.97, 0.97); $0.wingBottom = rgb(0.85, 0.1, 0.1); $0.tail = rgb(0.85, 0.1, 0.1); $0.accent = rgb(0.97, 0.97, 0.97)
+        }
+        var scale = [j3, c182, pc6, beaver, storch, p51, spit, bf109, zero, hellcat, mossie, dc3, extra, pitts, stearman, moth, pc7, f16, sabre, ask21]
+        for i in scale.indices where scale[i].category == "Sport" { scale[i].category = "Scale Civil" }
+
+        // ---- flat foam 3D planes: plate fuselage, slab wings, huge surfaces, more thrust than weight
+        var flatty = PlaneGeom()
+        flatty.name = "Flatty 3D"; flatty.blurb = "Flat EPP profile plane: hovers, harriers and bounces off the ground"; flatty.category = "Foam 3D"
+        flatty.profile = true; flatty.scheme = 9; flatty.tough = 2.2
+        flatty.mass = 0.19; flatty.span = 0.82; flatty.rootChord = 0.27; flatty.tipChord = 0.2
+        flatty.wingY = 0; flatty.wingLE = -0.075; flatty.dihedral = 0; flatty.incidence = 0; flatty.camber = 0; flatty.thick = 0.028; flatty.stall = 0.2; flatty.cd0 = 0.02
+        flatty.noseZ = -0.3; flatty.fuseLen = 0.85; flatty.fuseW = 0.008; flatty.fuseH = 0.2
+        flatty.stabSpan = 0.36; flatty.stabChord = 0.17; flatty.stabZ = 0.37; flatty.elevFrac = 0.65; flatty.finH = 0.17; flatty.finChord = 0.2; flatty.finZ = 0.36; flatty.rudFrac = 0.65
+        flatty.ailFrac = 0.4; flatty.ailStart = 0; flatty.ailThrow = 42; flatty.elevThrow = 48; flatty.rudThrow = 48
+        flatty.thrust = 4.3; flatty.pitchSpeed = 10; flatty.propDia = 0.2; flatty.washTail = 0.85; flatty.washWing = 0.6
+        flatty.gear = .taildragger; flatty.gearH = 0.1; flatty.track = 0.09; flatty.wheelR = 0.018; flatty.cdA = 0.006
+        flatty.fuse = rgb(0.97, 0.97, 0.97); flatty.wingTop = rgb(0.97, 0.97, 0.97); flatty.wingBottom = rgb(0.97, 0.97, 0.97)
+        flatty.tail = rgb(0.9, 0.1, 0.5); flatty.accent = rgb(0.1, 0.6, 0.9); flatty.sound = 230
+
+        var f3p = flatty
+        f3p.name = "F3P Indoor Aerobat"; f3p.blurb = "90-gram indoor pattern ship: walking-pace manoeuvres in calm air"
+        f3p.mass = 0.09; f3p.span = 0.8; f3p.rootChord = 0.31; f3p.tipChord = 0.24; f3p.thick = 0.02; f3p.thrust = 2.3; f3p.pitchSpeed = 7.5; f3p.propDia = 0.22
+        f3p.gear = .none; f3p.handLaunch = true; f3p.fuseH = 0.24; f3p.cdA = 0.012
+        f3p.tail = rgb(0.95, 0.5, 0.05); f3p.accent = rgb(0.5, 0.2, 0.75); f3p.sound = 250
+
+        let edgeXL = sized(flatty, span: 1.05) {
+            $0.name = "Profile Edge XL"; $0.blurb = "Metre-span EPP profile aerobat with punch for outdoor 3D in a breeze"
+            $0.mass = 0.48; $0.thrust = 11.5; $0.pitchSpeed = 13; $0.tail = rgb(0.1, 0.1, 0.12); $0.accent = rgb(0.95, 0.75, 0.05); $0.sound = 200
+        }
+        var foamBipe = flatty
+        foamBipe.name = "Foam Bipe 3D"; foamBipe.blurb = "Flat-plate biplane: enormous lift and drag, slowest hover of all"
+        foamBipe.upperWingY = 0.2; foamBipe.wingY = -0.03; foamBipe.span = 0.74; foamBipe.mass = 0.26; foamBipe.thrust = 6.2; foamBipe.fuseH = 0.26
+        foamBipe.tail = rgb(0.1, 0.65, 0.3); foamBipe.accent = rgb(0.95, 0.3, 0.1)
+        let foamies = [flatty, f3p, edgeXL, foamBipe]
+
         var trainerHeli = rescale(makeHeli(body: rgb(0.95, 0.95, 0.95), canopy: rgb(0.85, 0.1, 0.1)), 0.6)
         trainerHeli.name = "Sparrow 450"; trainerHeli.blurb = "Small, docile helicopter for learning to hover"
         trainerHeli.mass = 0.9; trainerHeli.inertia = V3(0.010, 0.009, 0.004); trainerHeli.cdA = 0.012; trainerHeli.soundBase = 105
         trainerHeli.heli!.collMax = 9 * deg; trainerHeli.heli!.maxMoment = 1.1; trainerHeli.heli!.tailMax = 0.45
-        trainerHeli.heli!.maxRate = 3.2; trainerHeli.heli!.maxYaw = 4.5
+        trainerHeli.heli!.maxRate = 3.2; trainerHeli.heli!.maxYaw = 4.5; trainerHeli.category = "Helicopters"
 
         var bigHeli = rescale(makeHeli(body: rgb(0.08, 0.25, 0.7), canopy: rgb(0.95, 0.6, 0.05)), 1.27)
         bigHeli.name = "Condor 700"; bigHeli.blurb = "Large 700-class helicopter: smooth, powerful, imposing"
         bigHeli.mass = 5.3; bigHeli.inertia = V3(0.27, 0.24, 0.11); bigHeli.cdA = 0.045; bigHeli.soundBase = 52
-        bigHeli.heli!.maxMoment = 22; bigHeli.heli!.tailMax = 8
+        bigHeli.heli!.maxMoment = 22; bigHeli.heli!.tailMax = 8; bigHeli.category = "Helicopters"
 
         var racerQuad = rescale(makeQuad(shell: rgb(0.55, 0.9, 0.1), front: rgb(0.6, 0.15, 0.8), rear: rgb(0.2, 0.2, 0.22)), 0.5)
         racerQuad.name = "Wasp Racing Quad"; racerQuad.blurb = "5-inch racing quad: brutal power, best flown in acro"
         racerQuad.mass = 0.6; racerQuad.inertia = V3(0.0016, 0.0028, 0.0016); racerQuad.cdA = 0.008; racerQuad.soundBase = 380
-        racerQuad.multi!.maxThrust = 6.5; racerQuad.multi!.kYaw = 0.008; racerQuad.multi!.maxRate = 9; racerQuad.multi!.maxYaw = 6; racerQuad.multi!.maxAngle = 0.95
+        racerQuad.multi!.maxThrust = 6.5; racerQuad.multi!.kYaw = 0.008; racerQuad.multi!.maxRate = 9; racerQuad.multi!.maxYaw = 6; racerQuad.multi!.maxAngle = 0.95; racerQuad.category = "Multirotors"
 
-        return [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), makeHeli(), makeQuad(),
+        var heli = makeHeli(); heli.category = "Helicopters"
+        var quad = makeQuad(); quad.category = "Multirotors"
+        return [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad]
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane)
     }()
 }

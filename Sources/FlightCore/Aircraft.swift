@@ -99,6 +99,8 @@ struct AircraftSpec {
     var multi: MultiSpec? = nil
     var heli: HeliSpec? = nil
     var handLaunch = false
+    var category = "Sport"
+    var stallSpeed: Float = 9
     var hasFlaps = false
     var hasRetracts = false
     var smokePos = V3(0, 0, 0.2)

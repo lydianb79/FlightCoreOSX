@@ -104,10 +104,10 @@ final class Game {
             // photo sites: each has its own start point and take-off direction
             let k: Float = spec.kind == .airplane ? 1 : 0.6
             let hd = -site.startHeading * deg
-            if spec.handLaunch { aircraft.reset(pos: V3(2, 1.9, -3), heading: hd, speed: 9) }
+            if spec.handLaunch { aircraft.reset(pos: V3(2, 1.9, -3), heading: hd, speed: clampf(spec.stallSpeed * 1.7, 4, 9)) }
             else { aircraft.reset(pos: V3(site.startX * k, aircraft.restHeight + 0.02, site.startZ * k), heading: hd) }
         } else if spec.handLaunch {
-            aircraft.reset(pos: terrain.pilotPos + V3(2, 1.9, -3), heading: 0, speed: 9)
+            aircraft.reset(pos: terrain.pilotPos + V3(2, 1.9, -3), heading: 0, speed: clampf(spec.stallSpeed * 1.7, 4, 9))
         } else {
             let x: Float = spec.kind == .airplane ? -min(site.runwayLen / 2 - 20, 45) : -5
             let z: Float = site.startZ + (spec.kind == .airplane ? 0 : -1)

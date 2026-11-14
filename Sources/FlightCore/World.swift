@@ -240,11 +240,12 @@ struct Autopilot {
             let climbing = agl < 6
             let rollT = climbing ? 0 : clampf(herr * 1.2, -0.65, 0.65)
             let altT: Float = 40
-            let pitchT = climbing ? (ac.airspeed > 9 ? 0.16 : 0.03) : clampf(0.02 * (altT - agl), -0.18, 0.28)
+            let vs = ac.spec.stallSpeed
+            let pitchT = climbing ? (ac.airspeed > vs * 1.15 ? 0.16 : 0.03) : clampf(0.02 * (altT - agl), -0.18, 0.28)
             c.aileron = clampf(2.5 * (rollT - ac.roll) + 0.25 * ac.omega.z, -1, 1)
             c.elevator = clampf(3 * (pitchT - ac.pitch) - 0.3 * ac.omega.x + 0.25 * abs(ac.roll), -1, 1)
             c.rudder = ac.onGround ? clampf(1.5 * herr * 0, -1, 1) : clampf(0.3 * (rollT - ac.roll), -0.5, 0.5)
-            c.throttle = climbing ? 1 : clampf(0.6 + 0.08 * (16 - ac.airspeed) + 0.02 * (altT - agl), 0.2, 1)
+            c.throttle = climbing ? 1 : clampf(0.6 + 0.08 * (clampf(vs * 1.8, 5, 24) - ac.airspeed) + 0.02 * (altT - agl), 0.2, 1)
         case .multirotor, .helicopter:
             let ang = t * 0.25
             let tp = V3(30 * sin(ang), 0, -45 + 20 * cos(ang))

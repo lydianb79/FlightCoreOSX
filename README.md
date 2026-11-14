@@ -30,26 +30,21 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 ## Aircraft
 
-Sixteen aircraft, selected with `[` and `]`, keys 1–9, or the Aircraft menu.
+Forty aircraft, grouped by category in the Aircraft menu. Step through them with `[` and `]`; keys 1–9 pick the first nine.
 
-| Aircraft | Type |
+| Category | Aircraft |
 |---|---|
-| Skylark Trainer | High-wing trainer, tricycle gear |
-| Vortex 3D | Unlimited aerobat: hovers, knife-edges, tumbles |
-| Thermal 2M | Hand-launched electric glider |
-| Arrow EDF | Swept-wing ducted-fan jet |
-| Kestrel 550 | Flybarless collective-pitch 3D helicopter |
-| Quad X450 | 450-class quadcopter, self-level or acro |
-| Feather Park Flyer | 320 g slow flyer |
-| Bushmaster STOL | High-wing taildragger for short take-offs |
-| Falcon Warbird | Heavy, fast low-wing fighter |
-| Twin Courier | Twin-engine transport |
-| Jester Biplane | Compact aerobatic biplane |
-| Stiletto Racer | Pylon racer |
-| Zephyr 3.6 Sailplane | Large self-launching sailplane |
-| Sparrow 450 | Small, docile helicopter |
-| Condor 700 | Large 700-class helicopter |
-| Wasp Racing Quad | 5-inch racing quad |
+| Trainers & Sport | Skylark Trainer, Feather Park Flyer, Stiletto Racer |
+| Scale Civil | Piper J-3 Cub, Cessna 182 Skylane, Pilatus PC-6 Porter, DHC-2 Beaver, Fieseler Storch, Douglas DC-3, Boeing Stearman, DH Tiger Moth, Bushmaster STOL, Twin Courier |
+| Warbirds | P-51D Mustang, Supermarine Spitfire, Messerschmitt Bf 109, Mitsubishi A6M Zero, Grumman F6F Hellcat, DH Mosquito, Falcon Warbird |
+| Aerobatic | Extra 300, Pitts Special, Pilatus PC-7, Vortex 3D, Jester Biplane |
+| Foam 3D | Flatty 3D, F3P Indoor Aerobat, Profile Edge XL, Foam Bipe 3D |
+| Jets | F-16 Fighting Falcon, F-86 Sabre, Arrow EDF |
+| Gliders | ASK 21, Thermal 2M, Zephyr 3.6 Sailplane |
+| Helicopters | Kestrel 550, Sparrow 450, Condor 700 |
+| Multirotors | Quad X450, Wasp Racing Quad |
+
+The scale models are approximations built by the same parametric generator as the rest: proportions, engine layout, gear and colours follow the real aircraft, but shapes such as elliptical or gull wings are simplified and there are no national markings. The Foam 3D planes are flat-plate "profile" airframes with oversized control surfaces and more thrust than weight, for hovering and other 3D flying.
 
 ## Flying sites
 
