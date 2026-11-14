@@ -3,6 +3,127 @@ import Foundation
 
 enum GearType { case tricycle, taildragger, none }
 
+/// Wing section families. Each sets the zero-lift offset, where and how sharply the section stalls,
+/// how far below the stall the flow reattaches, how much lift survives the stall, and the profile drag.
+enum Airfoil {
+    case flatBottom     // Clark-Y style trainer section: lots of lift, soft stall
+    case semiSymmetric  // NACA 23xx / 24xx: the classic general-purpose section
+    case symmetric      // aerobatic sections: same upright and inverted
+    case laminar        // thin fast sections: low drag, sharp stall, slow to recover
+    case thin           // undercambered First World War sections
+    case glider         // high-lift, low-drag sailplane sections
+    case slatted        // leading-edge slats: stalls late and gently
+    case plate          // flat foam sheet: no real stall break
+    var params: (camber: Float, stall: Float, width: Float, hyst: Float, post: Float, cd0: Float) {
+        switch self {
+        case .flatBottom: return (3.5, 15, 0.16, 0.035, 1.0, 0.016)
+        case .semiSymmetric: return (2.0, 14.5, 0.11, 0.05, 0.95, 0.013)
+        case .symmetric: return (0, 14, 0.11, 0.05, 0.95, 0.013)
+        case .laminar: return (1.5, 13, 0.05, 0.09, 0.8, 0.009)
+        case .thin: return (4, 12, 0.1, 0.04, 0.9, 0.02)
+        case .glider: return (3.5, 13.5, 0.09, 0.05, 0.9, 0.008)
+        case .slatted: return (3.5, 19, 0.2, 0.03, 1.0, 0.018)
+        case .plate: return (0, 11, 0.25, 0, 1.1, 0.02)
+        }
+    }
+}
+
+/// Published figures for the full-size aircraft (approximate): span and length in metres, wing area in
+/// square metres, loaded mass in kg, power in kW (or thrust-to-weight for jets), top speed in km/h, wing taper ratio.
+struct RealData {
+    var span: Float, area: Float, length: Float, mass: Float, power: Float, vmax: Float, taper: Float
+    var airfoil: Airfoil
+    var washout: Float = 1.5
+    var jetTW: Float = 0
+}
+private func rd(_ span: Float, _ area: Float, _ length: Float, _ mass: Float, _ power: Float, _ vmax: Float, _ taper: Float, _ af: Airfoil, washout: Float = 1.5, tw: Float = 0) -> RealData {
+    RealData(span: span, area: area, length: length, mass: mass, power: power, vmax: vmax, taper: taper, airfoil: af, washout: washout, jetTW: tw)
+}
+let realData: [String: RealData] = [
+    "Piper J-3 Cub": rd(10.74, 16.58, 6.83, 550, 48, 140, 1.0, .flatBottom, washout: 2),
+    "Piper PA-18 Super Cub": rd(10.73, 16.58, 6.88, 794, 112, 210, 1.0, .flatBottom, washout: 2),
+    "Cessna 152": rd(10.2, 14.9, 7.3, 757, 82, 200, 0.7, .semiSymmetric, washout: 2),
+    "Cessna 172 Skyhawk": rd(11.0, 16.2, 8.28, 1111, 120, 230, 0.7, .semiSymmetric, washout: 2.5),
+    "Cessna 182 Skylane": rd(11.0, 16.2, 8.84, 1406, 172, 280, 0.7, .semiSymmetric, washout: 2.5),
+    "Cessna 208 Caravan": rd(15.87, 25.96, 11.46, 3629, 503, 344, 0.6, .semiSymmetric, washout: 2.5),
+    "Pilatus PC-6 Porter": rd(15.87, 30.15, 10.9, 2800, 410, 232, 1.0, .flatBottom, washout: 2),
+    "DHC-2 Beaver": rd(14.63, 23.2, 9.22, 2313, 336, 255, 1.0, .semiSymmetric, washout: 2),
+    "Fieseler Storch": rd(14.25, 26.0, 9.9, 1325, 180, 175, 1.0, .slatted, washout: 0),
+    "Piper PA-28 Cherokee": rd(9.14, 14.86, 7.16, 975, 112, 230, 1.0, .semiSymmetric, washout: 2),
+    "Beechcraft Bonanza": rd(10.21, 16.8, 8.38, 1656, 224, 326, 0.5, .semiSymmetric, washout: 3),
+    "Cirrus SR22": rd(11.68, 13.71, 7.92, 1633, 231, 340, 0.5, .laminar, washout: 2.5),
+    "Diamond DA40": rd(11.94, 13.54, 8.06, 1198, 134, 285, 0.55, .laminar, washout: 2.5),
+    "Robin DR400": rd(8.72, 14.2, 6.96, 1100, 134, 278, 0.8, .semiSymmetric, washout: 2),
+    "DHC-6 Twin Otter": rd(19.8, 39.0, 15.77, 5670, 920, 314, 1.0, .flatBottom, washout: 2),
+    "Beechcraft King Air": rd(16.61, 28.2, 13.34, 5670, 1268, 536, 0.45, .semiSymmetric, washout: 3),
+    "Antonov An-2": rd(18.2, 71.5, 12.4, 5500, 750, 258, 1.0, .slatted, washout: 0),
+    "Douglas DC-3": rd(29.0, 91.7, 19.7, 11430, 1790, 370, 0.35, .semiSymmetric, washout: 3),
+    "Boeing Stearman": rd(9.8, 27.6, 7.63, 1232, 164, 200, 1.0, .semiSymmetric, washout: 0),
+    "DH Tiger Moth": rd(8.94, 22.2, 7.34, 828, 97, 175, 1.0, .thin, washout: 0),
+    "P-51D Mustang": rd(11.28, 21.83, 9.83, 4175, 1111, 703, 0.45, .laminar, washout: 1.5),
+    "Supermarine Spitfire": rd(11.23, 22.48, 9.47, 3350, 1175, 650, 0.4, .semiSymmetric, washout: 2.5),
+    "Messerschmitt Bf 109": rd(9.92, 16.05, 8.95, 3150, 1085, 640, 0.5, .slatted, washout: 0),
+    "Mitsubishi A6M Zero": rd(12.0, 22.44, 9.06, 2410, 700, 533, 0.5, .semiSymmetric, washout: 2.5),
+    "Grumman F6F Hellcat": rd(13.06, 31.0, 10.24, 5714, 1490, 610, 0.5, .semiSymmetric, washout: 2),
+    "DH Mosquito": rd(16.52, 42.18, 13.57, 8500, 2200, 668, 0.35, .semiSymmetric, washout: 2),
+    "Hawker Hurricane": rd(12.19, 23.92, 9.84, 3480, 880, 547, 0.5, .flatBottom, washout: 2),
+    "P-47 Thunderbolt": rd(12.42, 27.87, 11.0, 6600, 1890, 697, 0.5, .semiSymmetric, washout: 1.5),
+    "Curtiss P-40 Warhawk": rd(11.38, 21.92, 10.16, 3760, 860, 580, 0.5, .semiSymmetric, washout: 1.5),
+    "Focke-Wulf Fw 190": rd(10.51, 18.3, 9.0, 4400, 1250, 656, 0.5, .laminar, washout: 1),
+    "Yakovlev Yak-3": rd(9.2, 14.85, 8.5, 2692, 960, 655, 0.45, .semiSymmetric, washout: 1.5),
+    "North American T-6 Texan": rd(12.81, 23.57, 8.84, 2548, 450, 335, 0.45, .semiSymmetric, washout: 1),
+    "Hawker Sea Fury": rd(11.7, 26.0, 10.6, 5670, 1850, 740, 0.45, .laminar, washout: 1.5),
+    "Douglas A-26 Invader": rd(21.34, 50.0, 15.24, 12500, 3000, 570, 0.4, .laminar, washout: 2),
+    "Sopwith Camel": rd(8.53, 21.46, 5.71, 659, 97, 185, 1.0, .thin, washout: 0),
+    "Royal Aircraft Factory S.E.5a": rd(8.11, 22.67, 6.38, 902, 150, 222, 1.0, .thin, washout: 0),
+    "Extra 300": rd(8.0, 10.7, 6.95, 950, 224, 407, 0.45, .symmetric, washout: 0),
+    "Pitts Special": rd(6.1, 11.6, 5.71, 737, 194, 340, 1.0, .symmetric, washout: 0),
+    "Pilatus PC-7": rd(10.4, 16.6, 9.78, 2700, 410, 412, 0.5, .laminar, washout: 2),
+    "Sukhoi Su-26": rd(7.8, 11.8, 6.83, 1000, 265, 450, 0.45, .symmetric, washout: 0),
+    "Zivko Edge 540": rd(7.43, 9.1, 6.3, 816, 254, 426, 0.45, .symmetric, washout: 0),
+    "Yakovlev Yak-54": rd(8.16, 12.89, 6.91, 990, 265, 450, 0.5, .symmetric, washout: 0),
+    "Mudry CAP 232": rd(7.39, 9.86, 6.76, 816, 224, 340, 0.45, .symmetric, washout: 0),
+    "Christen Eagle": rd(6.07, 11.6, 5.46, 725, 149, 296, 1.0, .symmetric, washout: 0),
+    "Zlín Z-50": rd(8.58, 12.5, 6.62, 720, 194, 337, 0.5, .symmetric, washout: 0),
+    "F-16 Fighting Falcon": rd(9.96, 27.87, 15.06, 12000, 0, 2120, 0.22, .laminar, washout: 0, tw: 1.0),
+    "F-86 Sabre": rd(11.31, 29.11, 11.44, 6870, 0, 1100, 0.5, .laminar, washout: 2, tw: 0.42),
+    "BAe Hawk": rd(9.39, 16.69, 11.17, 5700, 0, 1040, 0.35, .laminar, washout: 2, tw: 0.45),
+    "Aero L-39 Albatros": rd(9.46, 18.8, 12.13, 4700, 0, 750, 0.5, .semiSymmetric, washout: 2, tw: 0.37),
+    "Mikoyan MiG-15": rd(10.08, 20.6, 10.1, 4960, 0, 1076, 0.55, .laminar, washout: 1.5, tw: 0.54),
+    "Lockheed F-104 Starfighter": rd(6.63, 18.22, 16.66, 9365, 0, 2137, 0.38, .laminar, washout: 0, tw: 0.76),
+    "Aermacchi MB-339": rd(10.86, 19.3, 10.97, 4400, 0, 898, 0.5, .semiSymmetric, washout: 2, tw: 0.41),
+    "ASK 21": rd(17.0, 17.95, 8.35, 600, 0, 280, 0.4, .glider, washout: 2.5),
+    "Schleicher ASW 28": rd(15.0, 10.5, 6.59, 525, 0, 270, 0.4, .glider, washout: 2),
+    "DG-1000": rd(20.0, 17.5, 8.57, 750, 0, 270, 0.35, .glider, washout: 2.5),
+    "Schempp-Hirth Discus": rd(15.0, 10.58, 6.58, 525, 0, 250, 0.4, .glider, washout: 2),
+    "Schleicher Ka 8": rd(15.0, 14.15, 7.0, 310, 0, 200, 0.5, .flatBottom, washout: 3),
+]
+
+/// Reshape a model to the proportions of the full-size aircraft and give it scale wing and power loading.
+func applyRealData(_ g: inout PlaneGeom) {
+    guard let r = realData[g.name] else { return }
+    let nW: Float = g.upperWingY != nil ? 2 : 1
+    let ar = r.span * r.span / (r.area / nW)
+    let cbar = g.span / ar
+    g.rootChord = 2 * cbar / (1 + r.taper); g.tipChord = r.taper * g.rootChord
+    let newLen = g.span * r.length / r.span, f = newLen / g.fuseLen
+    g.noseZ *= f; g.fuseLen = newLen; g.stabZ *= f; g.finZ *= f
+    // wing cube loading rises with the logarithm of the full-size wing loading: a Cub model is light for
+    // its size, a Starfighter model heavy
+    let modelArea = cbar * g.span * nW
+    let oldMass = g.mass
+    g.mass = (2 + 2.6 * log(r.mass / r.area / 10)) * pow(modelArea, 1.5)
+    if r.jetTW > 0 {
+        g.thrust = g.mass * gravity * (0.45 + 0.5 * r.jetTW); g.pitchSpeed = 45 + r.vmax / 100
+    } else if r.power > 0 {
+        g.thrust = g.mass * gravity * (0.4 + 2.6 * r.power / r.mass + (g.category == "Aerobatic" ? 0.7 : 0))
+        g.pitchSpeed = min(12 + r.vmax * 0.055, 40)
+    } else {
+        g.thrust *= g.mass / oldMass
+    }
+    g.airfoil = r.airfoil; g.washout = r.washout
+}
+
 /// Parametric airplane: the same numbers drive both the aerodynamic panels and the visual model.
 struct PlaneGeom {
     var name = "", blurb = ""
@@ -21,6 +142,10 @@ struct PlaneGeom {
     var ducted = false
     var flaps = false
     var retracts = false
+    var airfoil: Airfoil? = nil     // nil = chosen by category
+    var washout: Float = 1.5        // degrees of twist reducing the tip's incidence
+    var margin: Float? = nil        // static margin as a fraction of mean chord; nil = by category
+    var endurance: Float? = nil     // seconds at full throttle
     var scheme = 0                  // trim scheme: 0 sport, 1 aerobatic, 2 warbird, 3 glider, 4 jet, 5 vintage
     var fuseExp: Float = 2.8        // fuselage cross-section: 2 = round, higher = boxier
     var canopyLen: Float = 0.11     // canopy half-length as a fraction of fuselage length
@@ -48,12 +173,48 @@ struct PlaneGeom {
 
 private func flapTau(_ frac: Float) -> Float { min(0.9 * sqrt(frac), 0.8) }
 
-func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
+func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
+    var g = g0
+    applyRealData(&g)
+    // wing section
+    let af: Airfoil = g.airfoil ?? (g.profile ? .plate : (["Aerobatic": .symmetric, "Gliders": .glider, "Jets": .laminar, "Trainers & Sport": .flatBottom][g.category] ?? .semiSymmetric))
+    let afp = af.params
+    if g.airfoil != nil || !g.profile { g.camber = af == .symmetric || af == .plate ? 0 : afp.camber; g.stall = afp.stall * deg; g.cd0 = afp.cd0 }
+    if g.profile || g.category == "Aerobatic" { g.washout = 0 }
+
     let hs = g.span / 2
     let dih = g.dihedral * deg, inc = g.incidence * deg
+    let nWings: Float = g.upperWingY != nil ? 2 : 1
+    let wingEff: Float = nWings > 1 ? 0.85 : 1
     let area = (g.rootChord + g.tipChord) / 2 * g.span
     let ar = g.span * g.span / area
     let slope = 2 * Float.pi * ar / (ar + 2)
+    let downK = 2 / (Float.pi * ar)                       // downwash angle per unit lift coefficient
+    let taper = g.tipChord / g.rootChord
+    let mac = 2.0 / 3.0 * g.rootChord * (1 + taper + taper * taper) / (1 + taper)
+    // Tailplane size: keep the tail volume (area x arm relative to wing area x chord) in the range real
+    // aircraft use, so reshaping the wing or fuselage does not leave an oversized or feeble tail.
+    if !g.profile {
+        let vh = g.stabSpan * g.stabChord * (g.stabZ + 0.25 * g.stabChord) / (area * nWings * wingEff * mac)
+        let hi: Float = g.category == "Aerobatic" ? 0.8 : 0.62, lo: Float = g.category == "Gliders" ? 0.38 : 0.45
+        let k = sqrt(clampf(vh, lo, hi) / vh)
+        g.stabSpan *= k; g.stabChord *= k
+    }
+    let sar = g.stabSpan / g.stabChord
+    let tailSlope = 2 * Float.pi * sar / (sar + 2) * 0.9
+
+    // Balance: put the centre of gravity a set fraction of the mean chord ahead of the neutral point
+    // (the point where the wing's and tail's lift changes balance out).
+    do {
+        let ybar = (1 + 2 * taper) / (3 * (1 + taper))
+        let acOff = g.sweep * ybar + 0.25 * mac + (nWings > 1 ? -0.035 : 0)
+        let aW = slope * area * nWings * wingEff
+        let aT = tailSlope * g.stabSpan * g.stabChord * (1 - slope * downK)
+        let zT = g.stabZ + 0.25 * g.stabChord
+        let m = g.margin ?? (g.profile ? 0.05 : (["Aerobatic": 0.07, "Warbirds": 0.10, "Jets": 0.10, "Gliders": 0.12, "Scale Civil": 0.14, "Trainers & Sport": 0.16][g.category] ?? 0.12))
+        g.wingLE = (m * mac * (aW + aT) - aT * zT) / aW - acOff
+    }
+
     let L = g.fuseLen, nz = g.noseZ, tz = g.noseZ + g.fuseLen
     let w = g.fuseW / 2, h = g.fuseH / 2
     let finY = h * 0.3
@@ -61,33 +222,52 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     func chord(_ f: Float) -> Float { lerp(g.rootChord, g.tipChord, f) }
 
     let wings: [(y: Float, z: Float)] = g.upperWingY.map { [(g.wingY, Float(0)), ($0, Float(-0.07))] } ?? [(g.wingY, Float(0))]
-    let wingEff: Float = wings.count > 1 ? 0.85 : 1
 
-    // --- Aerodynamics
+    // --- Aerodynamics: six panels per half wing, each with its own chord, twist and loading
     var surfaces: [AeroSurface] = []
+    let nPan = 6
+    let meanChord = area / g.span
+    // Schrenk's approximation: each section carries the average of its own chord and an elliptical one,
+    // so a strongly tapered wing loads its tips hardest and a rectangular wing its root
+    var loads = (0..<nPan).map { k -> Float in
+        let fm = (Float(k) + 0.5) / Float(nPan)
+        let cEll = 4 * area / (Float.pi * g.span) * sqrt(max(1 - fm * fm, 0))
+        return (1 + cEll / chord(fm)) / 2
+    }
+    do {
+        var sum: Float = 0, wsum: Float = 0
+        for k in 0..<nPan { let c = chord((Float(k) + 0.5) / Float(nPan)); sum += loads[k] * c; wsum += c }
+        loads = loads.map { $0 * wsum / sum }
+    }
     for wg in wings { for side in [Float(-1), 1] {
-        for f0 in [Float(0), 0.5] {
-            let fm = f0 + 0.25, ch = chord(fm), x = side * hs * fm
+        for k in 0..<nPan {
+            let f0 = Float(k) / Float(nPan), fm = (Float(k) + 0.5) / Float(nPan)
+            let ch = chord(fm), x = side * hs * fm
+            let incL = inc - g.washout * deg * fm
             let n0 = V3(-sin(dih) * side, cos(dih), 0), c0 = V3(0, 0, -1)
             var s = AeroSurface(pos: V3(x, wg.y + abs(x) * tan(dih), g.wingLE + wg.z + g.sweep * fm + 0.25 * ch),
-                                normal: n0 * cos(inc) - c0 * sin(inc), chordDir: c0 * cos(inc) + n0 * sin(inc),
-                                area: ch * hs * 0.5 * wingEff, ar: ar, liftSlope: slope, stall: g.stall, cd0: g.cd0, alpha0: g.camber * deg)
+                                normal: n0 * cos(incL) - c0 * sin(incL), chordDir: c0 * cos(incL) + n0 * sin(incL),
+                                area: ch * hs / Float(nPan) * wingEff, ar: ar, liftSlope: slope,
+                                stall: g.stall * pow(ch / meanChord, 0.12), cd0: g.cd0, alpha0: g.camber * deg)
+            s.isWing = true; s.load = loads[k]; s.chord = ch
+            s.stallWidth = afp.width; s.hyst = afp.hyst; s.postStall = afp.post
             if f0 >= g.ailStart - 0.01 { s.flapCh = 0; s.flapGain = -side * flapTau(g.ailFrac) * g.ailThrow * deg }
-            s.wash = f0 == 0 ? g.washWing : 0
-            if g.flaps && f0 == 0 && g.ailStart > 0.4 { s.flapsGain = 0.14 }
+            s.wash = fm < 0.34 ? g.washWing : 0
+            if g.flaps && g.ailStart > 0.4 && f0 < g.ailStart - 0.01 { s.flapsGain = 0.14 }
             surfaces.append(s)
         }
     } }
-    let sar = g.stabSpan / g.stabChord
     for side in [Float(-1), 1] {
         surfaces.append(AeroSurface(pos: V3(side * g.stabSpan / 4, stabY, g.stabZ + 0.25 * g.stabChord), normal: V3(0, 1, 0),
-                                    area: g.stabSpan * g.stabChord / 2, ar: sar, liftSlope: 2 * .pi * sar / (sar + 2) * 0.85,
-                                    stall: 0.27, cd0: 0.012, flapCh: 1, flapGain: -flapTau(g.elevFrac) * g.elevThrow * deg, wash: g.washTail))
+                                    area: g.stabSpan * g.stabChord / 2, ar: sar, liftSlope: tailSlope,
+                                    stall: 0.27, cd0: 0.012, flapCh: 1, flapGain: -flapTau(g.elevFrac) * g.elevThrow * deg, wash: g.washTail,
+                                    chord: g.stabChord, downwash: g.tTail ? 0.5 : 1))
     }
     let far = 1.6 * g.finH / g.finChord
     surfaces.append(AeroSurface(pos: V3(0, finY + g.finH / 2, g.finZ + 0.25 * g.finChord), normal: V3(1, 0, 0),
                                 area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
-                                stall: 0.27, cd0: 0.012, flapCh: 2, flapGain: -flapTau(g.rudFrac) * g.rudThrow * deg, wash: g.washTail))
+                                stall: 0.27, cd0: 0.012, flapCh: 2, flapGain: -flapTau(g.rudFrac) * g.rudThrow * deg, wash: g.washTail,
+                                chord: g.finChord, swirl: g.ducted || g.twin > 0 ? 0 : 1))
     for (n, a) in [(V3(1, 0, 0), L * g.fuseH * 0.75), (V3(0, 1, 0), L * g.fuseW * 0.75)] {
         surfaces.append(AeroSurface(pos: V3(0, 0, nz + 0.42 * L), normal: n, area: a, ar: 0.4, liftSlope: 0.9, stall: 0.6, cd0: 0))
     }
@@ -125,17 +305,42 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
 
     let parts = buildAirplaneModel(g, wheels: wheels, engines: engines, wings: wings)
 
-    var spec = AircraftSpec(name: g.name, kind: .airplane, blurb: g.blurb, mass: g.mass,
-                            inertia: V3(g.mass * pow(0.19 * L, 2), 0, g.mass * pow(0.11 * g.span, 2)), span: g.span)
-    spec.inertia.y = spec.inertia.x + spec.inertia.z * 0.9
+    // Mass distribution: wing, fuselage, tail, power unit, and a battery placed to balance the model
+    // on its centre of gravity. The moments of inertia follow from where the mass sits.
+    let engZ = g.ducted ? tz - 0.15 : (g.twin > 0 ? g.wingLE - 0.1 : nz + 0.04)
+    let glider = g.category == "Gliders"
+    let mWing = g.mass * (glider ? 0.34 : 0.22), mFuse = g.mass * 0.24, mTail = g.mass * 0.06, mEng = g.mass * (glider ? 0.1 : 0.16)
+    let mBatt = g.mass - mWing - mFuse - mTail - mEng
+    let zWing = g.wingLE + g.sweep * 0.42 + 0.4 * mac, zFuse = nz + 0.45 * L, zTail = g.stabZ + 0.4 * g.stabChord
+    let zBatt = clampf(-(mWing * zWing + mFuse * zFuse + mTail * zTail + mEng * engZ) / mBatt, nz + 0.05, tz - 0.2)
+    var ixx = mWing * (mac * mac / 12 + zWing * zWing) + mFuse * (L * L / 12 + zFuse * zFuse) + mTail * zTail * zTail
+        + mEng * engZ * engZ + mBatt * zBatt * zBatt
+    var izz = mWing * g.span * g.span / 12 * (taper < 0.7 ? 0.8 : 1) + mTail * g.stabSpan * g.stabSpan / 12 + (mFuse + mBatt) * (w * w + h * h) / 4
+        + mEng * g.twin * g.twin
+    if nWings > 1, let uy = g.upperWingY { izz += mWing * 0.25 * pow(uy - g.wingY, 2); ixx += mWing * 0.25 * pow(uy - g.wingY, 2) }
+    ixx = max(ixx, g.mass * 0.01); izz = max(izz, g.mass * 0.004)
+    var spec = AircraftSpec(name: g.name, kind: .airplane, blurb: g.blurb, mass: g.mass, inertia: V3(ixx, ixx + izz * 0.92, izz), span: g.span)
     spec.surfaces = surfaces
-    spec.props = engines.map { Propulsor(pos: $0, staticThrust: g.thrust / Float(engines.count), pitchSpeed: g.pitchSpeed, diameter: g.propDia, torqueK: g.ducted || g.twin > 0 ? 0 : 0.03) }
+    spec.props = engines.enumerated().map { i, pos in
+        var p = Propulsor(pos: pos, staticThrust: g.thrust / Float(engines.count), pitchSpeed: g.pitchSpeed, diameter: g.propDia, torqueK: g.ducted ? 0 : 0.03)
+        let d = g.ducted ? Float(0.08) : g.propDia
+        p.tau = g.ducted ? 0.5 : 0.35 + 1.2 * g.propDia
+        // propeller and motor rotor as a spinning mass; speed from the pitch speed and a typical pitch of 0.62 diameters
+        let revs = g.pitchSpeed / (0.62 * (g.ducted ? 0.12 : g.propDia))
+        p.momentum = 0.6 * pow(d, 2.5) * d * d / 12 * 1.5 * revs * 2 * .pi
+        p.spinDir = g.twin > 0 && i == 1 ? -1 : 1            // twins have handed propellers
+        p.pFactor = g.ducted ? 0 : 0.18
+        return p
+    }
+    spec.wingArea = area * nWings
+    spec.downwashK = downK * (nWings > 1 ? 1.3 : 1)
+    spec.endurance = g.endurance ?? (glider ? 420 : (g.profile ? 200 : 240))
     if g.ducted { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
     spec.contacts = contacts
     spec.cdA = g.cdA
     spec.handLaunch = g.handLaunch
     spec.category = g.category
-    spec.stallSpeed = sqrt(2 * g.mass * gravity / (rho * area * Float(wings.count) * wingEff * (g.profile ? 0.8 : 1.15)))
+    spec.stallSpeed = sqrt(2 * g.mass * gravity / (rho * area * nWings * wingEff * max(slope * (g.stall + g.camber * deg) * 0.92, 0.5)))
     spec.hasFlaps = g.flaps && g.ailStart > 0.4
     spec.hasRetracts = g.retracts && g.gear != .none
     spec.smokePos = V3(0, -h * 0.4, nz + 0.55 * L)

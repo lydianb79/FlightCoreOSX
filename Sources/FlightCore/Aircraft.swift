@@ -33,6 +33,14 @@ struct AeroSurface {
     var flapGain: Float = 0     // change of effective alpha (rad) at full deflection
     var wash: Float = 0         // fraction of prop wash seen by this panel
     var flapsGain: Float = 0    // landing flaps: change of effective alpha (rad) when fully down
+    var isWing = false          // main wing panel: contributes to the downwash on the tail
+    var load: Float = 1         // local section loading relative to the wing average (taper makes tips work harder)
+    var chord: Float = 0.2
+    var stallWidth: Float = 0.14    // how abruptly the section lets go (rad): small = sharp break
+    var hyst: Float = 0.04          // the flow reattaches this far below the stall angle (rad)
+    var postStall: Float = 1.0      // lift retained once fully stalled
+    var downwash: Float = 0         // 1 for a tailplane sitting in the wing's downwash
+    var swirl: Float = 0            // 1 for a fin in the propeller's spiral slipstream
 }
 
 struct Propulsor {
@@ -41,6 +49,10 @@ struct Propulsor {
     var pitchSpeed: Float
     var diameter: Float
     var torqueK: Float = 0.03
+    var tau: Float = 0.7            // rotor inertia: larger = slower to change speed
+    var momentum: Float = 0         // angular momentum at full speed (kg m^2/s), for gyroscopic effects
+    var spinDir: Float = 1          // +1 clockwise seen from behind
+    var pFactor: Float = 0.18       // sideways shift of the thrust centre per radian of inflow angle, in diameters
 }
 
 struct Contact {
@@ -137,6 +149,9 @@ struct AircraftSpec {
     var stallSpeed: Float = 9
     var hasFlaps = false
     var hasRetracts = false
+    var wingArea: Float = 0.4
+    var downwashK: Float = 0        // downwash angle at the tail per unit wing lift coefficient
+    var endurance: Float = 240      // seconds of full-throttle running on a fresh battery
     var smokePos = V3(0, 0, 0.2)
     var parts: [Part] = []
     var modes: [String] = []
@@ -169,6 +184,18 @@ final class Aircraft {
         renderQ = w > 1e-6 ? simd_normalize(q * simd_quatf(angle: w * t, axis: omega / w)) : q
     }
     var flap: Float = 0             // actual flap position 0...1
+    var battery: Float = 1          // state of charge 0...1
+    var unlimitedBattery = false
+    var stallT: [Float]             // per surface: 0 attached flow ... 1 fully stalled
+    var stalled: [Bool]
+    private var eps: Float = 0      // downwash angle at the tail
+    private var motorLoad: Float = 0
+    /// Fraction of the main wing that is stalled (for the display and tests).
+    var wingStall: Float {
+        var a: Float = 0, t: Float = 0
+        for (i, sf) in spec.surfaces.enumerated() where sf.isWing { a += sf.area; t += sf.area * stallT[i] }
+        return a > 0 ? t / a : 0
+    }
     var gear: Float = 0             // 0 down, 1 retracted
     var crashImpact: Float = 0      // speed of the impact that caused the crash
     var detached = Set<Int>()       // parts that have broken off
@@ -182,6 +209,8 @@ final class Aircraft {
         levels = [Float](repeating: 0, count: n)
         spin = [Float](repeating: 0, count: n)
         want = [Float](repeating: 0, count: n)
+        stallT = [Float](repeating: 0, count: spec.surfaces.count)
+        stalled = [Bool](repeating: false, count: spec.surfaces.count)
         kSpring = spec.mass * gravity / 0.03
         cDamp = 0.5 * sqrt(kSpring * spec.mass)
         restHeight = -(spec.contacts.map { $0.pos.y }.min() ?? 0)
@@ -203,21 +232,31 @@ final class Aircraft {
         for i in levels.indices { levels[i] = 0 }
         vi = 0; yawI = 0; crashed = false; onGround = false
         flap = 0; gear = 0; crashImpact = 0; detached = []
+        battery = 1; eps = 0; motorLoad = 0
+        for i in stallT.indices { stallT[i] = 0; stalled[i] = false }
         if spec.kind == .helicopter { levels[0] = 1 }    // rotor already at speed
     }
 
     /// Animation input for hinged parts: 0-2 control surfaces, 3 flaps, 4 landing gear.
     func animValue(_ ch: Int) -> Float { ch < 3 ? servo[ch] : (ch == 3 ? flap : gear) }
 
-    private func liftDrag(_ alpha: Float, _ s: AeroSurface) -> (Float, Float) {
-        // wrap to -pi...pi
+    /// Section lift and drag. Below the stall the lift is linear; above it the section behaves like a
+    /// flat plate. `i` selects the surface's stall state, which lags behind the airflow and has hysteresis.
+    private func liftDrag(_ alpha: Float, _ s: AeroSurface, _ i: Int, speed: Float, dt: Float) -> (Float, Float) {
         var a = alpha
         if a > .pi { a -= 2 * .pi } else if a < -.pi { a += 2 * .pi }
-        let t = smoothstep(s.stall, s.stall + 0.14, abs(a))
-        let clLin = s.liftSlope * a
+        let aL = abs(a) * s.load
+        let onset = stalled[i] ? s.stall - s.hyst : s.stall
+        let target = smoothstep(onset, onset + s.stallWidth, aL)
+        if target > 0.6 { stalled[i] = true } else if aL < s.stall - s.hyst { stalled[i] = false }
+        // separation and reattachment take a few chord lengths of travel
+        let tau = clampf(3 * s.chord / max(speed, 1), 0.008, 0.15)
+        stallT[i] += (target - stallT[i]) * min(1, dt / tau)
+        let t = stallT[i]
+        let clLin = s.liftSlope * a * s.load
         let cdLin = s.cd0 + clLin * clLin / (.pi * s.ar * 0.8)
         let sa = sin(a)
-        let clP = 1.1 * sin(2 * a)
+        let clP = 1.1 * s.postStall * sin(2 * a)
         let cdP = s.cd0 + 1.5 * sa * sa
         return (clLin + (clP - clLin) * t, cdLin + (cdP - cdLin) * t)
     }
@@ -236,40 +275,69 @@ final class Aircraft {
 
         switch spec.kind {
         case .airplane:
-            var washV: Float = 0
+            var washV: Float = 0, swirlV: Float = 0, draw: Float = 0
             let vfwd = -va.z
+            // inflow angle at the propeller: nose-up attitude and sideslip tilt the disc to the airflow
+            let aoa = vfwd > 1 ? clampf(atan2(-va.y, vfwd), -0.6, 0.6) : 0
+            let slip = vfwd > 1 ? clampf(atan2(va.x, vfwd), -0.6, 0.6) : 0
+            // battery voltage relative to a fresh pack at full load: rises when unloaded, sags as it empties
+            let volts = 1 + 0.1 * (1 - motorLoad) - 0.22 * (1 - battery) * (1 - battery)
+            let cutoff: Float = battery < 0.03 ? 0.3 : 1          // low-voltage cut: enough left to land
+            var loadSum: Float = 0
             for (i, p) in spec.props.enumerated() {
-                levels[i] += (thr - levels[i]) * min(1, dt / 0.12)
-                let lv = levels[i]
-                let T = p.staticThrust * lv * lv * clampf(1 - vfwd / (p.pitchSpeed * max(lv, 0.05)), -0.3, 1)
+                let n = levels[i]                                  // shaft speed, 1 = static full throttle
+                let ct = clampf(1 - vfwd / (p.pitchSpeed * max(n, 0.05)), -0.3, 1)
+                let T = p.staticThrust * n * n * ct
+                // electric motor: torque falls off as the speed approaches the no-load speed; the propeller's
+                // load grows with speed squared and eases as the aircraft flies faster
+                let qm = clampf((thr * cutoff * volts - 0.82 * n) / 0.18, -0.05, 2.2)
+                let ql = n * n * (0.35 + 0.65 * max(ct, 0))
+                levels[i] = clampf(n + (qm - ql) / p.tau * dt, 0, 1.4)
+                loadSum += clampf(qm, 0, 1.5)
+                draw += max(qm, 0) * n
                 let f = V3(0, 0, -T)
-                fb += f; tb += cross(p.pos, f)
-                tb.z += p.torqueK * T * p.diameter
+                // P-factor: the down-going blade bites harder, so thrust acts off-centre
+                let off = T > 0 ? V3(aoa, slip, 0) * (p.pFactor * p.diameter * p.spinDir) : V3.zero
+                fb += f; tb += cross(p.pos + off, f)
+                tb.z += p.torqueK * p.staticThrust * p.diameter * max(qm, 0) * p.spinDir      // torque reaction
+                tb -= cross(omega, V3(0, 0, -p.momentum * n * p.spinDir))                     // gyroscopic precession
                 if T > 0 {
                     let A = Float.pi * p.diameter * p.diameter / 4
                     let v0 = max(vfwd, 0)
-                    washV = max(washV, -v0 + sqrt(v0 * v0 + 2 * T / (rho * A)))
+                    let w = -v0 + sqrt(v0 * v0 + 2 * T / (rho * A))
+                    washV = max(washV, w)
+                    if abs(p.pos.x) < 0.01 { swirlV = 0.07 * w * p.spinDir }          // spiral slipstream
                 }
-                spin[i] += (lv > 0.01 ? 12 + 45 * sqrt(lv) : 0) * dt
+                spin[i] += (n > 0.01 ? 12 + 45 * sqrt(min(n, 1)) : 0) * dt
             }
-            for s in spec.surfaces {
+            let np = Float(max(spec.props.count, 1))
+            motorLoad += (loadSum / np - motorLoad) * min(1, dt / 0.05)
+            if !unlimitedBattery { battery = max(0, battery - draw / np * dt / spec.endurance) }
+
+            var wingCl: Float = 0, wingArea: Float = 0
+            for (i, s) in spec.surfaces.enumerated() {
                 var v = va + cross(omega, s.pos)
                 v.z -= s.wash * washV
+                v.x -= s.swirl * s.wash * swirlV
                 let vf = dot(v, s.chordDir), vn = dot(v, s.normal)
                 let sp2 = vf * vf + vn * vn
                 if sp2 < 1e-6 { continue }
                 let sp = sqrt(sp2)
-                var alpha = atan2(-vn, vf) + s.alpha0
-                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] }
+                var alpha = atan2(-vn, vf) + s.alpha0 - s.downwash * eps
+                // control surfaces lose their bite in separated flow
+                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.6 * stallT[i]) }
                 alpha += s.flapsGain * flap
-                var (cl, cd) = liftDrag(alpha, s)
+                var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
                 if s.flapsGain != 0 { cd += 0.07 * flap }
+                if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
                 let qS = 0.5 * rho * sp2 * s.area
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
                 let f = (l * cl - u * cd) * qS
                 fb += f; tb += cross(s.pos, f)
             }
+            // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
+            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea - eps) * min(1, dt / 0.04) }
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:

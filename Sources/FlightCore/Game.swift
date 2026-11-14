@@ -118,6 +118,9 @@ final class Game {
     var debris: [Debris] = []
     var particles: [Particle] = []
     var showObstacles = false
+    /// When off, the battery drains with use and the motor fades as it empties.
+    var unlimitedBattery: Bool = UserDefaults.standard.bool(forKey: "unlimitedBattery") { didSet { UserDefaults.standard.set(unlimitedBattery, forKey: "unlimitedBattery") } }
+    private var warnedBattery = false
     /// Graphics quality: 0 low (reduced resolution, no ambient occlusion), 1 medium, 2 high (full resolution)
     var quality: Int = (UserDefaults.standard.object(forKey: "quality") as? Int) ?? 2 { didSet { UserDefaults.standard.set(quality, forKey: "quality") } }
     static let qualityNames = ["Low", "Medium", "High"]
@@ -186,7 +189,7 @@ final class Game {
         crashTimer = 0
         autopilot = Autopilot()
         camSnap = true
-        debris = []; wasCrashed = false
+        debris = []; wasCrashed = false; warnedBattery = false
         flapSetting = 0; gearUp = false; hold = false
         lastY = aircraft.pos.y; climb = 0
     }
@@ -296,6 +299,8 @@ final class Game {
             controls.mode = flightMode
         }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
+        aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
+        if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say("Battery low — land soon", 4) }
 
         if !paused && !hud.overlay.pausesSim {
             let h: Float = 0.001
@@ -557,6 +562,8 @@ final class Game {
         var cfg: [String] = []
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
+        if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: "Battery %.0f%%", aircraft.battery * 100)) }
+        if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround { cfg.append("STALL") }
         if spec.kind == .helicopter { cfg.append(String(format: "Rotor %.0f%%%@", aircraft.levels[0] * 100, hold ? " HOLD" : "")) }
         if smokeOn { cfg.append("Smoke") }
         s.config = cfg.joined(separator: " · ")

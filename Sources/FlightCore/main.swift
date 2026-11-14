@@ -72,6 +72,82 @@ if CommandLine.arguments.contains("--hidtest") {
     exit(0)
 }
 
+/// Scripted manoeuvres that exercise the stall, spin and propeller effects, and print each aircraft's figures.
+func runPhysicsTest() {
+    let site = SiteSpec.all[0]
+    let terrain = Terrain(site: site)
+    func fly(_ ac: Aircraft, _ seconds: Float, _ c: (Float) -> Controls, each: (Float) -> Void = { _ in }) {
+        for i in 0..<Int(seconds * 1000) {
+            ac.step(dt: 0.001, c: c(Float(i) / 1000), terrain: terrain, wind: .zero, rollMu: site.rollMu)
+            if i % 20 == 0 { each(Float(i) / 1000) }
+        }
+    }
+    print("name                          mass  W/S g/dm2  T/W  stall km/h  Ipitch  Iroll  CG %MAC")
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let wingZ = spec.surfaces.filter { $0.isWing }.map { $0.pos.z - 0.25 * $0.chord }.min() ?? 0
+        let rootChord = spec.surfaces.first { $0.isWing }?.chord ?? 0.2
+        print(String(format: "%-28@ %5.2f  %6.0f   %4.2f   %5.0f     %6.3f %6.3f   %3.0f", spec.name as NSString, spec.mass, spec.mass / spec.wingArea * 10,
+                     spec.thrustToWeight, spec.stallSpeed * 3.6, spec.inertia.x, spec.inertia.z, -wingZ / rootChord * 100))
+    }
+    for name in ["Skylark Trainer", "North American T-6 Texan", "P-51D Mustang", "Piper J-3 Cub", "Extra 300", "Flatty 3D"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        print("== \(name)")
+        // 1. power-off stall from level flight: hold the nose up as the speed bleeds away
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        ac.reset(pos: V3(0, 150, 0), heading: 0, speed: spec.stallSpeed * 1.6)
+        var minV: Float = 99, breakV: Float = 0, maxBank: Float = 0, pitchAtBreak: Float = 0, lowestPitch: Float = 9
+        fly(ac, 14, { t in
+            var c = Controls()
+            c.elevator = clampf(0.1 + t * 0.09, -1, 1)
+            c.aileron = clampf(-1.5 * ac.roll, -0.3, 0.3) * (ac.wingStall > 0.3 ? 0 : 1)
+            return c
+        }, each: { _ in
+            minV = min(minV, ac.airspeed)
+            if breakV == 0 && ac.wingStall > 0.5 { breakV = ac.airspeed; pitchAtBreak = ac.pitch }
+            if breakV > 0 { maxBank = max(maxBank, abs(ac.roll)); lowestPitch = min(lowestPitch, ac.pitch) }
+        })
+        print(String(format: "   stall: wing lets go at %.0f km/h (predicted %.0f), nose %.0f° -> %.0f°, wing drop up to %.0f°",
+                     breakV * 3.6, spec.stallSpeed * 3.6, pitchAtBreak / deg, lowestPitch / deg, maxBank / deg))
+        // 1b. the same with power on: torque and slipstream make one wing go first
+        ac.reset(pos: V3(0, 150, 0), heading: 0, speed: spec.stallSpeed * 1.5)
+        var bank2: Float = 0, went = false
+        fly(ac, 12, { t in var c = Controls(); c.throttle = 0.7; c.elevator = clampf(0.1 + t * 0.1, -1, 1); return c },
+            each: { _ in if ac.wingStall > 0.4 { went = true }; if went && abs(bank2) < abs(ac.roll) { bank2 = ac.roll } })
+        print(String(format: "   power-on stall, ailerons neutral: rolls %.0f° %@", abs(bank2) / deg, bank2 < 0 ? "left" : "right"))
+        // 2. spin: stall it, then full rudder and up elevator; then neutralise and count the recovery
+        ac.reset(pos: V3(0, 250, 0), heading: 0, speed: spec.stallSpeed * 1.15)
+        var yawTurned: Float = 0, startY: Float = 0
+        fly(ac, 6, { t in
+            var c = Controls(); c.elevator = 1; c.rudder = t > 1 ? 1 : 0; c.aileron = 0; return c
+        }, each: { t in if t > 1 { yawTurned += abs(ac.q.act(ac.omega).y) * 0.02 } })
+        let spinRate = abs(ac.q.act(ac.omega).y) / deg, sink = -ac.vel.y
+        startY = ac.pos.y
+        var recovered: Float = -1
+        fly(ac, 6, { _ in var c = Controls(); c.rudder = -0.6; c.elevator = -0.2; return c },
+            each: { t in if recovered < 0 && ac.wingStall < 0.1 && abs(ac.q.act(ac.omega).y) < 0.4 && t > 0.3 { recovered = t } })
+        print(String(format: "   spin: turned %.1f times in 5 s, %.0f°/s, sinking %.0f m/s; recovery %@, height lost recovering %.0f m",
+                     yawTurned / (2 * .pi), spinRate, sink, recovered < 0 ? "not within 6 s" : String(format: "%.1f s", recovered), startY - ac.pos.y))
+        // 3. take-off run with the controls untouched: how far does it swing?
+        ac.reset(pos: V3(0, ac.restHeight + 0.02, 0), heading: 0)
+        fly(ac, 3.0, { _ in var c = Controls(); c.throttle = 1; return c })
+        let hd = atan2(-ac.forward.x, -ac.forward.z) / deg
+        print(String(format: "   take-off, hands off, 3 s at full throttle: heading swings %.0f° %@, bank %.0f°, speed %.0f km/h",
+                     abs(hd), hd > 0 ? "left" : "right", ac.roll / deg, ac.airspeed * 3.6))
+        // 4. battery: full throttle on the ground
+        let ac2 = Aircraft(spec)
+        ac2.reset(pos: V3(0, 100, 0), heading: 0, speed: spec.stallSpeed * 1.5)
+        var t50: Float = 0
+        fly(ac2, 40, { _ in var c = Controls(); c.throttle = 1; c.elevator = clampf(2 * (0 - ac2.pitch), -0.5, 0.5); c.aileron = clampf(-2 * ac2.roll, -0.5, 0.5); return c })
+        t50 = ac2.battery
+        print(String(format: "   battery after 40 s at full throttle in flight: %.0f%%  (shaft speed %.0f%% of static)", t50 * 100, ac2.levels[0] * 100))
+    }
+}
+
+if CommandLine.arguments.contains("--physicstest") {
+    runPhysicsTest()
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--selftest") {
     runSelfTest()
     runAutorotationTest()
@@ -303,6 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClosureMenuItem("Balloon Burst Challenge", key: "b") { g.toggleChallenge() },
             ClosureMenuItem("Demo Pilot", key: "k") { g.keyDown(40) },
             ClosureMenuItem("Flight Mode (Self-level / Acro)") { g.keyDown(3) },
+            ClosureMenuItem("Unlimited Battery On / Off") { g.unlimitedBattery.toggle(); g.say(g.unlimitedBattery ? "Unlimited battery" : "Battery drains with use") },
         ])
         var envItems: [NSMenuItem] = [0, 2, 5, 8, 12].map { s in ClosureMenuItem("Wind \(s) m/s") { g.env.windSpeed = Float(s); g.say("Wind \(s) m/s") } }
         envItems.append(.separator())

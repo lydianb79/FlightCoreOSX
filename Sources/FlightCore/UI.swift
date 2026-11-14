@@ -379,7 +379,10 @@ struct AircraftBrowser: View {
                     VStack(spacing: 0) {
                         specRow(spec.sizeLabel, String(format: "%.2f m", spec.span))
                         specRow("Flying weight", spec.mass < 1 ? String(format: "%.0f g", spec.mass * 1000) : String(format: "%.1f kg", spec.mass))
-                        if spec.kind == .airplane { specRow("Stall speed", String(format: "%.0f km/h", spec.stallSpeed * 3.6)) }
+                        if spec.kind == .airplane {
+                            specRow("Wing loading", String(format: "%.0f g/dm²", spec.mass / spec.wingArea * 10))
+                            specRow("Stall speed", String(format: "%.0f km/h", spec.stallSpeed * 3.6))
+                        }
                         if spec.kind != .helicopter { specRow("Thrust to weight", String(format: "%.1f : 1", spec.thrustToWeight)) }
                     }
                     .padding(.top, 12)
