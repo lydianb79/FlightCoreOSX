@@ -19,6 +19,8 @@ struct PlaneGeom {
     var thrust: Float = 18, pitchSpeed: Float = 24, propDia: Float = 0.28
     var washTail: Float = 0.5, washWing: Float = 0.2
     var ducted = false
+    var flaps = false
+    var retracts = false
     var twin: Float = 0             // engine offset from centreline; 0 = single nose engine
     var upperWingY: Float? = nil    // set for a biplane
     var gear = GearType.tricycle
@@ -57,6 +59,7 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
                                 area: ch * hs * 0.5 * wingEff, ar: ar, liftSlope: slope, stall: g.stall, cd0: g.cd0, alpha0: g.camber * deg)
             if f0 >= g.ailStart - 0.01 { s.flapCh = 0; s.flapGain = -side * flapTau(g.ailFrac) * g.ailThrow * deg }
             s.wash = f0 == 0 ? g.washWing : 0
+            if g.flaps && f0 == 0 && g.ailStart > 0.4 { s.flapsGain = 0.14 }
             surfaces.append(s)
         }
     } }
@@ -96,6 +99,7 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     let tipY = g.wingY + hs * tan(dih)
     contacts.append(Contact(pos: V3(0, 0, nz - 0.03), crashSpeed: 2.5))
     contacts.append(Contact(pos: V3(0, -h * 0.9, nz * 0.7), crashSpeed: 3))
+    contacts.append(Contact(pos: V3(0, -h * 0.85, 0.15), crashSpeed: 3.5, mu: 0.45))
     contacts.append(Contact(pos: V3(0, h * 0.2, tz), crashSpeed: 3.5))
     contacts.append(Contact(pos: V3(hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
     contacts.append(Contact(pos: V3(-hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
@@ -114,17 +118,25 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
         let up = V3(-sin(dih) * side, cos(dih), 0)
         func le(_ f: Float) -> V3 { V3(side * hs * f, wg.y + hs * f * tan(dih), g.wingLE + wg.z + g.sweep * f) }
         let a0 = g.ailStart, k = 1 - g.ailFrac
+        let hasFlap = g.flaps && a0 > 0.4
+        var wm = MeshBuilder()
         if a0 > 0.01 {
-            b.wing(root: le(0), tip: le(a0), rootChord: chord(0), tipChord: chord(a0), thick: g.thick, up: up, top: g.wingTop, bottom: g.wingBottom)
+            let ik: Float = hasFlap ? k : 1
+            wm.wing(root: le(0), tip: le(a0), rootChord: chord(0) * ik, tipChord: chord(a0) * ik, thick: g.thick / ik, up: up, top: g.wingTop, bottom: g.wingBottom)
         }
-        b.wing(root: le(a0), tip: le(1), rootChord: chord(a0) * k, tipChord: chord(1) * k, thick: g.thick / k, up: up, top: g.wingTop, bottom: g.wingBottom)
-        let r0 = le(a0) + V3(0, 0, chord(a0) * k), r1 = le(1) + V3(0, 0, chord(1) * k)
-        var am = MeshBuilder()
-        am.wing(root: r0, tip: r1, rootChord: chord(a0) * g.ailFrac, tipChord: chord(1) * g.ailFrac, thick: g.thick * 1.2, up: up, top: g.accent, bottom: g.wingBottom)
-        am.translate(-r0)
-        parts.append(Part(mesh: am, pivot: r0, axis: normalize(r1 - r0) * side, anim: .hinge(0, -side * g.ailThrow * deg)))
-        // wing tip stripe marker for orientation
-        b.box(center: le(1) + V3(side * 0.004, 0, g.tipChord * 0.5), size: V3(0.012, g.thick * g.tipChord * 1.3, g.tipChord), color: side > 0 ? rgb(0.1, 0.7, 0.2) : rgb(0.9, 0.1, 0.1))
+        wm.wing(root: le(a0), tip: le(1), rootChord: chord(a0) * k, tipChord: chord(1) * k, thick: g.thick / k, up: up, top: g.wingTop, bottom: g.wingBottom)
+        // wing tip marker for orientation: green right, red left
+        wm.box(center: le(1) + V3(side * 0.004, 0, g.tipChord * 0.5), size: V3(0.012, g.thick * g.tipChord * 1.3, g.tipChord), color: side > 0 ? rgb(0.1, 0.7, 0.2) : rgb(0.9, 0.1, 0.1))
+        parts.append(Part(mesh: wm, detach: true, center: le(0.5) + V3(0, 0, chord(0.5) * 0.5)))
+        func surface(_ f0: Float, _ f1: Float, _ anim: Anim, _ top: V4) {
+            let r0 = le(f0) + V3(0, 0, chord(f0) * k), r1 = le(f1) + V3(0, 0, chord(f1) * k)
+            var m = MeshBuilder()
+            m.wing(root: r0, tip: r1, rootChord: chord(f0) * g.ailFrac, tipChord: chord(f1) * g.ailFrac, thick: g.thick * 1.2, up: up, top: top, bottom: g.wingBottom)
+            m.translate(-r0)
+            parts.append(Part(mesh: m, pivot: r0, axis: normalize(r1 - r0) * side, anim: anim))
+        }
+        surface(a0, 1, .hinge(0, -side * g.ailThrow * deg), g.accent)
+        if hasFlap { surface(0.08, a0, .hinge(3, 38 * deg), g.wingTop) }
     } }
     if let uy = g.upperWingY {
         let grey = rgb(0.75, 0.75, 0.78)
@@ -178,8 +190,18 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     }
     for wp in wheels {
         let c = wp + V3(0, rw, 0)
-        b.cylinder(from: c - V3(0.012, 0, 0), to: c + V3(0.012, 0, 0), r0: rw, r1: rw, seg: 12, color: rgb(0.08, 0.08, 0.08))
-        b.cylinder(from: c, to: V3(wp.x * 0.35, -h * 0.6, wp.z), r0: 0.006, r1: 0.008, seg: 6, color: rgb(0.7, 0.7, 0.72))
+        let top = V3(wp.x * 0.35, -h * 0.6, wp.z)
+        var gm = MeshBuilder()
+        gm.cylinder(from: c - V3(0.012, 0, 0), to: c + V3(0.012, 0, 0), r0: rw, r1: rw, seg: 12, color: rgb(0.08, 0.08, 0.08))
+        gm.cylinder(from: c, to: top, r0: 0.006, r1: 0.008, seg: 6, color: rgb(0.7, 0.7, 0.72))
+        if g.retracts {
+            gm.translate(-top)
+            let nose = abs(wp.x) < 0.01
+            parts.append(Part(mesh: gm, pivot: top, axis: nose ? V3(1, 0, 0) : V3(0, 0, 1),
+                              anim: .hinge(4, (nose ? -88 : (wp.x > 0 ? -84 : 84)) * deg)))
+        } else {
+            b.append(gm)
+        }
     }
     parts.insert(Part(mesh: b), at: 0)
 
@@ -192,6 +214,9 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     spec.contacts = contacts
     spec.cdA = g.cdA
     spec.handLaunch = g.handLaunch
+    spec.hasFlaps = g.flaps && g.ailStart > 0.4
+    spec.hasRetracts = g.retracts && g.gear != .none
+    spec.smokePos = V3(0, -h * 0.4, nz + 0.55 * L)
     spec.parts = parts
     spec.soundBase = g.sound
     spec.eyeOffset = V3(0, max(h, g.wingY) + 0.1, nz + 0.35 * L)
@@ -213,7 +238,7 @@ func rescale(_ spec: AircraftSpec, _ k: Float) -> AircraftSpec {
     return s
 }
 
-func makeQuad() -> AircraftSpec {
+func makeQuad(shell: V4 = rgb(0.95, 0.55, 0.05), front: V4 = rgb(0.9, 0.1, 0.1), rear: V4 = rgb(0.95, 0.95, 0.95)) -> AircraftSpec {
     let a: Float = 0.16
     let motors = [V3(a, 0.03, -a), V3(-a, 0.03, -a), V3(-a, 0.03, a), V3(a, 0.03, a)]
     var s = AircraftSpec(name: "Quad X450", kind: .multirotor, blurb: "450-class quadcopter, self-level or acro", mass: 1.2,
@@ -227,17 +252,17 @@ func makeQuad() -> AircraftSpec {
     s.contacts.append(Contact(pos: V3(0, 0.09, 0), crashSpeed: 2.5))
     var b = MeshBuilder()
     b.box(center: V3(0, 0.015, 0), size: V3(0.11, 0.045, 0.2), color: rgb(0.13, 0.13, 0.15))
-    b.ellipsoid(center: V3(0, 0.045, -0.02), radii: V3(0.05, 0.035, 0.09), color: rgb(0.95, 0.55, 0.05))
+    b.ellipsoid(center: V3(0, 0.045, -0.02), radii: V3(0.05, 0.035, 0.09), color: shell)
     b.box(center: V3(0, 0.0, -0.11), size: V3(0.05, 0.04, 0.03), color: rgb(0.05, 0.05, 0.05))
     var parts: [Part] = []
     for (i, m) in motors.enumerated() {
-        let front = m.z < 0
-        let col = front ? rgb(0.9, 0.1, 0.1) : rgb(0.95, 0.95, 0.95)
+        let isFront = front
+        let col = m.z < 0 ? isFront : rear
         b.cylinder(from: V3(m.x * 0.2, 0.015, m.z * 0.2), to: V3(m.x, 0.015, m.z), r0: 0.011, r1: 0.009, seg: 6, color: col)
         b.cylinder(from: V3(m.x, 0.0, m.z), to: V3(m.x, 0.045, m.z), r0: 0.02, r1: 0.02, seg: 8, color: rgb(0.3, 0.3, 0.32))
         b.cylinder(from: V3(m.x * 0.8, 0.01, m.z * 0.8), to: V3(m.x * 0.8, -0.09, m.z * 0.8), r0: 0.006, r1: 0.006, seg: 5, color: rgb(0.2, 0.2, 0.2))
         var pm = MeshBuilder()
-        pm.box(center: .zero, size: V3(0.25, 0.004, 0.024), color: front ? rgb(0.95, 0.4, 0.05) : rgb(0.15, 0.15, 0.15))
+        pm.box(center: .zero, size: V3(0.25, 0.004, 0.024), color: m.z < 0 ? shell : rgb(0.15, 0.15, 0.15))
         parts.append(Part(mesh: pm, pivot: V3(m.x, 0.052, m.z), axis: V3(0, 1, 0), anim: .spin(i)))
     }
     parts.insert(Part(mesh: b), at: 0)
@@ -246,7 +271,7 @@ func makeQuad() -> AircraftSpec {
     return s
 }
 
-func makeHeli() -> AircraftSpec {
+func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.08, 0.1, 0.2)) -> AircraftSpec {
     let R: Float = 0.62
     var s = AircraftSpec(name: "Kestrel 550", kind: .helicopter, blurb: "Flybarless collective-pitch 3D helicopter", mass: 3.2,
                          inertia: V3(0.10, 0.09, 0.04), span: 2 * R)
@@ -259,9 +284,9 @@ func makeHeli() -> AircraftSpec {
     s.contacts.append(Contact(pos: V3(0, -0.02, 1.0), crashSpeed: 2.5))
     s.contacts.append(Contact(pos: V3(0, -0.05, -0.38), crashSpeed: 2.5))
     var b = MeshBuilder()
-    let yel = rgb(0.98, 0.8, 0.05), dark = rgb(0.12, 0.12, 0.14)
+    let dark = rgb(0.12, 0.12, 0.14)
     b.body([(-0.38, 0.01, 0.01, -0.03), (-0.3, 0.05, 0.06, -0.02), (-0.12, 0.075, 0.1, 0), (0.08, 0.06, 0.09, 0.01), (0.2, 0.03, 0.04, 0.03)], color: yel)
-    b.ellipsoid(center: V3(0, 0.04, -0.22), radii: V3(0.05, 0.045, 0.1), color: rgb(0.08, 0.1, 0.2))
+    b.ellipsoid(center: V3(0, 0.04, -0.22), radii: V3(0.05, 0.045, 0.1), color: canopy)
     b.box(center: V3(0, 0.02, 0.1), size: V3(0.08, 0.16, 0.22), color: dark)
     b.cylinder(from: V3(0, 0.03, 0.15), to: V3(0, 0.03, 0.98), r0: 0.013, r1: 0.011, seg: 8, color: dark)
     b.wing(root: V3(0, 0.03, 0.9), tip: V3(0, 0.2, 0.98), rootChord: 0.1, tipChord: 0.05, thick: 0.08, up: V3(1, 0, 0), top: yel, bottom: yel)
@@ -283,6 +308,8 @@ func makeHeli() -> AircraftSpec {
     s.parts = [Part(mesh: b), Part(mesh: rotor, pivot: V3(0, 0.25, 0), axis: V3(0, 1, 0), anim: .spin(0)),
                Part(mesh: tail, pivot: V3(0.03, 0.03, 0.98), axis: V3(1, 0, 0), anim: .spin(1))]
     s.eyeOffset = V3(0, -0.02, -0.42)
+    s.smokePos = V3(0, 0, 0.3)
+    s.modes = []
     return s
 }
 
@@ -327,6 +354,7 @@ enum AircraftLibrary {
         jet.thrust = 15; jet.pitchSpeed = 58; jet.ducted = true
         jet.gear = .tricycle; jet.gearH = 0.13; jet.track = 0.14; jet.cdA = 0.005
         jet.fuse = rgb(0.55, 0.58, 0.62); jet.wingTop = rgb(0.5, 0.53, 0.57); jet.wingBottom = rgb(0.85, 0.87, 0.9)
+        jet.retracts = true
         jet.tail = rgb(0.9, 0.35, 0.05); jet.accent = rgb(0.9, 0.35, 0.05); jet.sound = 420
 
         var warbird = PlaneGeom()
@@ -339,6 +367,7 @@ enum AircraftLibrary {
         warbird.thrust = 30; warbird.pitchSpeed = 33; warbird.propDia = 0.33; warbird.washTail = 0.5; warbird.washWing = 0.25
         warbird.gear = .taildragger; warbird.gearH = 0.2; warbird.track = 0.2; warbird.cdA = 0.008
         warbird.fuse = rgb(0.35, 0.4, 0.3); warbird.wingTop = rgb(0.33, 0.38, 0.28); warbird.wingBottom = rgb(0.7, 0.78, 0.85)
+        warbird.flaps = true; warbird.retracts = true
         warbird.tail = rgb(0.8, 0.1, 0.1); warbird.accent = rgb(0.9, 0.85, 0.2); warbird.sound = 130
 
         var bush = PlaneGeom()
@@ -351,6 +380,7 @@ enum AircraftLibrary {
         bush.thrust = 21; bush.pitchSpeed = 18; bush.propDia = 0.33; bush.washTail = 0.6; bush.washWing = 0.3
         bush.gear = .taildragger; bush.gearH = 0.25; bush.track = 0.24; bush.cdA = 0.016
         bush.fuse = rgb(0.98, 0.8, 0.1); bush.wingTop = rgb(0.98, 0.8, 0.1); bush.wingBottom = rgb(0.12, 0.12, 0.12)
+        bush.flaps = true
         bush.tail = rgb(0.12, 0.12, 0.12); bush.accent = rgb(0.98, 0.8, 0.1); bush.sound = 110
 
         var park = PlaneGeom()
@@ -386,6 +416,7 @@ enum AircraftLibrary {
         twin.thrust = 30; twin.pitchSpeed = 26; twin.propDia = 0.25; twin.washTail = 0.25; twin.washWing = 0.5
         twin.gear = .tricycle; twin.gearH = 0.2; twin.track = 0.3; twin.cdA = 0.014
         twin.fuse = rgb(0.93, 0.93, 0.95); twin.wingTop = rgb(0.93, 0.93, 0.95); twin.wingBottom = rgb(0.15, 0.3, 0.6)
+        twin.flaps = true; twin.retracts = true
         twin.tail = rgb(0.15, 0.3, 0.6); twin.accent = rgb(0.9, 0.5, 0.1); twin.sound = 150
 
         var bipe = PlaneGeom()
@@ -412,18 +443,18 @@ enum AircraftLibrary {
         sail.fuse = rgb(0.97, 0.97, 0.97); sail.wingTop = rgb(0.97, 0.97, 0.97); sail.wingBottom = rgb(0.95, 0.45, 0.05)
         sail.tail = rgb(0.95, 0.45, 0.05); sail.accent = rgb(0.2, 0.25, 0.6); sail.sound = 105
 
-        var trainerHeli = rescale(makeHeli(), 0.6)
+        var trainerHeli = rescale(makeHeli(body: rgb(0.9, 0.12, 0.1), canopy: rgb(0.95, 0.95, 0.95)), 0.6)
         trainerHeli.name = "Sparrow 450"; trainerHeli.blurb = "Small, docile helicopter for learning to hover"
         trainerHeli.mass = 0.9; trainerHeli.inertia = V3(0.010, 0.009, 0.004); trainerHeli.cdA = 0.012; trainerHeli.soundBase = 105
         trainerHeli.heli!.collMax = 9 * deg; trainerHeli.heli!.maxMoment = 1.1; trainerHeli.heli!.tailMax = 0.45
         trainerHeli.heli!.maxRate = 3.2; trainerHeli.heli!.maxYaw = 4.5
 
-        var bigHeli = rescale(makeHeli(), 1.27)
+        var bigHeli = rescale(makeHeli(body: rgb(0.1, 0.3, 0.75), canopy: rgb(0.85, 0.87, 0.9)), 1.27)
         bigHeli.name = "Condor 700"; bigHeli.blurb = "Large 700-class helicopter: smooth, powerful, imposing"
         bigHeli.mass = 5.3; bigHeli.inertia = V3(0.27, 0.24, 0.11); bigHeli.cdA = 0.045; bigHeli.soundBase = 52
         bigHeli.heli!.maxMoment = 22; bigHeli.heli!.tailMax = 8
 
-        var racerQuad = rescale(makeQuad(), 0.5)
+        var racerQuad = rescale(makeQuad(shell: rgb(0.55, 0.9, 0.1), front: rgb(0.6, 0.15, 0.8), rear: rgb(0.2, 0.2, 0.22)), 0.5)
         racerQuad.name = "Wasp Racing Quad"; racerQuad.blurb = "5-inch racing quad: brutal power, best flown in acro"
         racerQuad.mass = 0.6; racerQuad.inertia = V3(0.0016, 0.0028, 0.0016); racerQuad.cdA = 0.008; racerQuad.soundBase = 380
         racerQuad.multi!.maxThrust = 6.5; racerQuad.multi!.kYaw = 0.008; racerQuad.multi!.maxRate = 9; racerQuad.multi!.maxYaw = 6; racerQuad.multi!.maxAngle = 0.95

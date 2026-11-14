@@ -12,6 +12,9 @@ struct Controls {
     var rudder: Float = 0       // + yaw right
     var throttle: Float = 0     // 0...1 (collective for helicopters)
     var mode: Int = 0
+    var flaps: Float = 0        // 0...1
+    var gearUp = false
+    var hold = false            // helicopter throttle hold (engine disengaged)
 }
 
 /// One lifting panel. Forces are computed from its own local airflow, so stall,
@@ -29,6 +32,7 @@ struct AeroSurface {
     var flapCh: Int = -1        // 0 aileron, 1 elevator, 2 rudder
     var flapGain: Float = 0     // change of effective alpha (rad) at full deflection
     var wash: Float = 0         // fraction of prop wash seen by this panel
+    var flapsGain: Float = 0    // landing flaps: change of effective alpha (rad) when fully down
 }
 
 struct Propulsor {
@@ -76,6 +80,8 @@ struct Part {
     var pivot: V3 = .zero
     var axis: V3 = V3(0, 1, 0)
     var anim: Anim = .fixed
+    var detach = false          // fixed part that can break off in a crash
+    var center = V3.zero        // its centre, for tumbling
 }
 
 struct AircraftSpec {
@@ -92,6 +98,9 @@ struct AircraftSpec {
     var multi: MultiSpec? = nil
     var heli: HeliSpec? = nil
     var handLaunch = false
+    var hasFlaps = false
+    var hasRetracts = false
+    var smokePos = V3(0, 0, 0.2)
     var parts: [Part] = []
     var modes: [String] = []
     var soundBase: Float = 120   // Hz at full power
@@ -110,6 +119,10 @@ final class Aircraft {
     var crashed = false
     var onGround = false
     var airspeed: Float = 0
+    var flap: Float = 0             // actual flap position 0...1
+    var gear: Float = 0             // 0 down, 1 retracted
+    var crashImpact: Float = 0      // speed of the impact that caused the crash
+    var detached = Set<Int>()       // parts that have broken off
     let kSpring: Float, cDamp: Float
     let restHeight: Float
     private var want: [Float]
@@ -140,7 +153,12 @@ final class Aircraft {
         pos = p; vel = q.act(V3(0, 0, -speed)); omega = .zero; servo = .zero
         for i in levels.indices { levels[i] = 0 }
         vi = 0; yawI = 0; crashed = false; onGround = false
+        flap = 0; gear = 0; crashImpact = 0; detached = []
+        if spec.kind == .helicopter { levels[0] = 1 }    // rotor already at speed
     }
+
+    /// Animation input for hinged parts: 0-2 control surfaces, 3 flaps, 4 landing gear.
+    func animValue(_ ch: Int) -> Float { ch < 3 ? servo[ch] : (ch == 3 ? flap : gear) }
 
     private func liftDrag(_ alpha: Float, _ s: AeroSurface) -> (Float, Float) {
         // wrap to -pi...pi
@@ -159,6 +177,8 @@ final class Aircraft {
         let R = simd_float3x3(q)
         let Rt = R.transpose
         servo += (V3(c.aileron, c.elevator, c.rudder) - servo) * min(1, dt / 0.04)
+        if spec.hasFlaps { flap += clampf(c.flaps - flap, -dt / 1.5, dt / 1.5) }
+        if spec.hasRetracts { gear += clampf((c.gearUp && !crashed ? 1 : 0) - gear, -dt / 1.2, dt / 1.2) }
         let va = Rt * (vel - wind)            // velocity through the air, body frame
         airspeed = length(va)
         var fb = V3.zero                       // body-frame force
@@ -192,14 +212,16 @@ final class Aircraft {
                 let sp = sqrt(sp2)
                 var alpha = atan2(-vn, vf) + s.alpha0
                 if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] }
-                let (cl, cd) = liftDrag(alpha, s)
+                alpha += s.flapsGain * flap
+                var (cl, cd) = liftDrag(alpha, s)
+                if s.flapsGain != 0 { cd += 0.07 * flap }
                 let qS = 0.5 * rho * sp2 * s.area
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
                 let f = (l * cl - u * cd) * qS
                 fb += f; tb += cross(s.pos, f)
             }
-            fb -= va * (0.5 * rho * spec.cdA * airspeed)
+            fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:
             let m = spec.multi!
@@ -241,27 +263,34 @@ final class Aircraft {
             fb -= va * (0.5 * rho * spec.cdA * airspeed + 0.1 * sum)
 
         case .helicopter:
+            // Rotor speed is a real state: the governed engine drives it, aerodynamic torque loads it,
+            // and with throttle hold it is driven only by the airflow (autorotation).
             let h = spec.heli!
-            let spool: Float = crashed ? 0 : 1
-            levels[0] += (spool - levels[0]) * min(1, dt / 0.6)
-            let om = h.rpm * 2 * .pi / 60 * levels[0]
+            let om0 = h.rpm * 2 * .pi / 60
+            let lv = levels[0]
+            let om = om0 * lv
             let tip = max(om * h.rotorR, 1)
             let A = Float.pi * h.rotorR * h.rotorR
             let theta = (2 * thr - 1) * h.collMax
             let vc = va.y
             let vin = sqrt(va.x * va.x + va.z * va.z)
             let lam = (vc + vi) / tip
-            var T = 0.5 * rho * 5.7 * h.sigma * A * tip * tip * (theta / 3 - lam / 2) * levels[0]
+            var T = 0.5 * rho * 5.7 * h.sigma * A * tip * tip * (theta / 3 - lam / 2)
             let agl = pos.y - terrain.height(pos.x, pos.z)
             if agl < h.rotorR * 1.5 { T *= 1 + 0.12 * (1 - max(agl, 0) / (h.rotorR * 1.5)) }
             let viT = T / (2 * rho * A * max(sqrt(vin * vin + (vc + vi) * (vc + vi)), 1.5))
             vi += (viT - vi) * min(1, dt / 0.08)
             let f = V3(-0.25 * va.x, T, -0.25 * va.z)
             fb += f; tb += cross(h.hub, f)
-            let Q = (abs(T * (vc + vi)) + 70) / max(om, 20) * levels[0]
-            tb.y += Q
+            let pScale = spec.mass / 3.2
+            let qMax = 600 * pScale / om0
+            let qEng: Float = (crashed || c.hold) ? 0 : clampf(40 * (1 - lv), 0, 1) * qMax
+            let qAero = (T * (vc + vi) + 70 * pScale * lv * lv * lv) / max(om, 20)
+            let iRot = 0.04 * spec.mass * h.rotorR * h.rotorR
+            levels[0] = clampf(lv + (qEng - qAero - (crashed ? qMax : 0)) / iRot / om0 * dt, 0, 1.3)
+            tb.y += qEng                       // only engine torque is reacted by the airframe
             if !crashed {
-                let auth = levels[0] * levels[0]
+                let auth = min(lv * lv, 1.2)
                 let ex = c.elevator * h.maxRate - omega.x
                 let ez = -c.aileron * h.maxRate - omega.z
                 tb.x += clampf(spec.inertia.x * 40 * ex, -h.maxMoment * auth, h.maxMoment * auth)
@@ -281,13 +310,14 @@ final class Aircraft {
         for cp in spec.contacts {
             let rw = R * cp.pos
             let pw = pos + rw
+            if cp.wheel && gear > 0.5 { continue }
             let d = terrain.height(pw.x, pw.z) - pw.y
             if d <= 0 { continue }
             touching = true
             let n = terrain.normal(pw.x, pw.z)
             let vp = vel + R * cross(omega, cp.pos)
             let vn = dot(vp, n)
-            if !crashed && (-vn > cp.crashSpeed || (!cp.wheel && cp.crashSpeed < 3.2 && length(vp) > 13)) { crashed = true }
+            if !crashed && (-vn > cp.crashSpeed || (!cp.wheel && cp.crashSpeed < 3.2 && length(vp) > 13)) { crashed = true; crashImpact = max(-vn, length(vp) * 0.6) }
             let N = max(0, kSpring * min(d, 0.25) - cDamp * vn)
             var f = n * N
             let vt = vp - n * vn
@@ -309,7 +339,7 @@ final class Aircraft {
             tb += Rt * cross(rw, f)
         }
         onGround = touching
-        if touching && !crashed && (R * V3(0, 1, 0)).y < -0.2 { crashed = true }
+        if touching && !crashed && (R * V3(0, 1, 0)).y < -0.2 { crashed = true; crashImpact = 3 }
 
         // Integrate
         vel += (fw + R * fb) / spec.mass * dt

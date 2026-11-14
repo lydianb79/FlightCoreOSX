@@ -19,6 +19,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var shadowPSO: MTLRenderPipelineState!
     private var depthMain: MTLDepthStencilState!
     private var depthOff: MTLDepthStencilState!
+    private var depthRead: MTLDepthStencilState!
     private var depthShadow: MTLDepthStencilState!
     private var sampler: MTLSamplerState!
     private var shadowTex: [MTLTexture] = []
@@ -106,6 +107,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         depthMain = depth(.greaterEqual, true)       // reverse-Z
         depthOff = depth(.always, false)
+        depthRead = depth(.greaterEqual, false)
         depthShadow = depth(.lessEqual, true)
 
         let smp = MTLSamplerDescriptor()
@@ -135,6 +137,24 @@ final class Renderer: NSObject, MTKViewDelegate {
             aircraftVersion = game.aircraftVersion
             partMeshes = game.aircraft.spec.parts.map { GPUMesh(device, $0.mesh) }
         }
+    }
+
+    /// Camera-facing quads for all smoke and dust particles, oldest first.
+    private func particleMesh() -> GPUMesh? {
+        guard !game.particles.isEmpty else { return nil }
+        let fwd = normalize(game.target - game.eye)
+        let right = normalize(cross(fwd, game.upVec)), up = cross(right, fwd)
+        var b = MeshBuilder()
+        b.data.reserveCapacity(game.particles.count * 60)
+        let corners: [(Float, Float)] = [(-1, -1), (1, -1), (1, 1), (-1, -1), (1, 1), (-1, 1)]
+        for p in game.particles {
+            let t = p.age / p.life
+            let size = p.size * (1 + 7 * t)
+            var c = p.color
+            c.w *= (1 - t) * min(1, p.age * 12)
+            for (u, v) in corners { b.v(p.pos + (right * u + up * v) * size, V3(u, v, 0), c) }
+        }
+        return GPUMesh(device, b)
     }
 
     /// Upload an image as an sRGB texture with a full mip chain.
@@ -169,14 +189,18 @@ final class Renderer: NSObject, MTKViewDelegate {
         var acItems: [DrawItem] = []
         let base = M4.translation(ac.pos) * M4(ac.q)
         for (i, part) in ac.spec.parts.enumerated() {
-            guard i < partMeshes.count, let mesh = partMeshes[i] else { continue }
+            guard i < partMeshes.count, let mesh = partMeshes[i], !ac.detached.contains(i) else { continue }
             var local = M4.identity
             switch part.anim {
             case .fixed: break
             case .spin(let k): local = M4.translation(part.pivot) * M4.rotation(ac.spin[k], part.axis)
-            case .hinge(let ch, let maxA): local = M4.translation(part.pivot) * M4.rotation(ac.servo[ch] * maxA, part.axis)
+            case .hinge(let ch, let maxA): local = M4.translation(part.pivot) * M4.rotation(ac.animValue(ch) * maxA, part.axis)
             }
             acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 0.5))
+        }
+        for d in game.debris {
+            guard d.part < partMeshes.count, let mesh = partMeshes[d.part] else { continue }
+            acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 0.5))
         }
         var world: [DrawItem] = []
         if let m = sceneryMesh { world.append(DrawItem(mesh: m, model: .identity)) }
@@ -264,6 +288,22 @@ final class Renderer: NSObject, MTKViewDelegate {
             if game.site.panorama != nil, let c = catcherMesh { drawItems(enc, [DrawItem(mesh: c, model: .identity, material: 2)], fragment: true) }
             drawItems(enc, world, fragment: true)
             drawItems(enc, acItems, fragment: true)
+            if game.showObstacles, !game.site.obstacles.isEmpty {
+                var ob = MeshBuilder()
+                for (i, o) in game.site.obstacles.enumerated() {
+                    let c = Panoramas.position(o, north: game.site.north)
+                    let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
+                    ob.cylinder(from: V3(c.x, 0, c.y), to: V3(c.x, o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
+                }
+                if let om = GPUMesh(device, ob) {
+                    enc.setDepthStencilState(depthRead)
+                    drawItems(enc, [DrawItem(mesh: om, model: .identity, material: 4)], fragment: true)
+                }
+            }
+            if let pm = particleMesh() {
+                enc.setDepthStencilState(depthRead)
+                drawItems(enc, [DrawItem(mesh: pm, model: .identity, material: 3)], fragment: true)
+            }
             enc.endEncoding()
         }
 

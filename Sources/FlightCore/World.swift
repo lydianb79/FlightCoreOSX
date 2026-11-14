@@ -22,6 +22,9 @@ struct SiteSpec {
     var horizon: Float = 0
     var eyeHeight: Float = 1.7
     var startZ: Float = 0
+    var startX: Float = -30
+    var startHeading: Float = 90        // compass degrees: 0 = away from the pilot, 90 = to the right
+    var obstacles: [PanoObstacle] = []
 
     static var all: [SiteSpec] = builtIn + Panoramas.discover()
 

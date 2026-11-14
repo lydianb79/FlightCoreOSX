@@ -77,6 +77,15 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     int material = int(d.params.x);
     float spec = d.params.y;
 
+    if (material == 4) { return float4(albedo, in.col.a); }      // flat translucent helper geometry
+    if (material == 3) {
+        // smoke / dust puff: the normal attribute carries the position inside the quad
+        float a = in.col.a * smoothstep(1.0, 0.25, length(in.nrm.xy));
+        float3 c = albedo * (f.ambient.rgb * 1.5 + f.sunColor.rgb * 0.3);
+        c = mix(c, f.horizon.rgb, 1.0 - exp(-dist * f.sunColor.w));
+        return float4(tonemap(c), a);
+    }
+
     if (material == 1) {
         float2 p = in.wp.xz;
         float fade = exp(-dist * 0.006);

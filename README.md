@@ -71,7 +71,20 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Photo sites have a flat, invisible ground plane and no collision with objects in the picture, and they use the pilot camera only.
+Five Poly Haven panoramas have built-in presets (rotation, start point, take-off direction and obstacles) that apply automatically when the file keeps its original name: `alps_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02` and `dry_cracked_lake`.
+
+For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
+
+```json
+{
+  "startX": -20, "startZ": -15, "startHeading": 90,
+  "obstacles": [ { "bearing": -52, "distance": 30, "radius": 5, "height": 13 } ]
+}
+```
+
+`bearing` is measured in the photo (0° at the image centre, positive to the right). **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
+
+Photo sites have a flat, invisible ground plane and use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
 ## Controls
 
@@ -92,6 +105,10 @@ Press **H** in the app for this list.
 | Z | Zoom: auto, keep ground in view, fixed |
 | F | Flight mode (quadcopters) |
 | L | High / low rates |
+| E | Flaps: up, half, full (Bushmaster, Falcon, Twin Courier) |
+| G | Landing gear up / down (Falcon, Arrow EDF, Twin Courier) |
+| Y | Smoke on / off |
+| U | Helicopter throttle hold (autorotation) |
 | P | Pause |
 | T | Slow motion |
 | , / . | Less / more wind |
@@ -118,6 +135,8 @@ Press **H** in the app for this list.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Rendering** uses Metal with procedural terrain, sky and clouds, two shadow maps (one tight around the aircraft, one for the airfield) and 4× MSAA. Shaders are compiled from source at launch.
 - **Sound** is synthesized, with distance attenuation and Doppler shift.
+- **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
+- **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
 
 ### Source layout
 
@@ -146,6 +165,5 @@ swift run -c release FlightCore --selftest
 - Aircraft and airport editors
 - Flight recording and playback
 - Flight-instructor lessons
-- Breakable parts, retracts, flaps and smoke
 - Float planes and water
-- Terrain and object collision on photo sites
+- Sloping ground and occlusion by photographed objects on photo sites

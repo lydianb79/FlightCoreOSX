@@ -7,7 +7,7 @@ struct HUDState {
     var alt: Float = 0, speed: Float = 0, dist: Float = 0, climb: Float = 0, throttle: Float = 0
     var wind = "", message = "", camera = "", mode = "", input = "", score = "", time = ""
     var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0
-    var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = ""
+    var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = "", config = ""
     var fps = 0
 }
 
@@ -18,6 +18,12 @@ final class HUDModel: ObservableObject {
 }
 
 struct Balloon { var pos: V3; var color: V4; var alive = true }
+
+/// A part that has broken off in a crash and tumbles on its own.
+struct Debris { var part: Int; var pos: V3; var q: simd_quatf; var vel: V3; var omega: V3; var offset: V3 }
+
+/// Smoke / dust puff, drawn as a camera-facing quad.
+struct Particle { var pos: V3; var vel: V3; var age: Float; var life: Float; var size: Float; var color: V4 }
 
 struct Lighting { var sunDir: V3; var sun: V3; var ambient: V3; var zenith: V3; var horizon: V3 }
 
@@ -50,6 +56,13 @@ final class Game {
     private var camSnap = true
 
     var balloons: [Balloon] = []
+    var debris: [Debris] = []
+    var particles: [Particle] = []
+    var showObstacles = false
+    var flapSetting: Float = 0
+    var gearUp = false, smokeOn = false, hold = false
+    private var wasCrashed = false, smokeAcc: Float = 0
+    private var rng = LCG(7)
     var challenge = false
     private var score = 0, challengeTime: Float = 0
     private var acc: Float = 0, crashTimer: Float = 0, hudTimer: Float = 0
@@ -86,7 +99,13 @@ final class Game {
 
     func resetAircraft() {
         let spec = aircraft.spec
-        if spec.handLaunch {
+        if site.panorama != nil {
+            // photo sites: each has its own start point and take-off direction
+            let k: Float = spec.kind == .airplane ? 1 : 0.6
+            let hd = -site.startHeading * deg
+            if spec.handLaunch { aircraft.reset(pos: V3(2, 1.9, -3), heading: hd, speed: 9) }
+            else { aircraft.reset(pos: V3(site.startX * k, aircraft.restHeight + 0.02, site.startZ * k), heading: hd) }
+        } else if spec.handLaunch {
             aircraft.reset(pos: terrain.pilotPos + V3(2, 1.9, -3), heading: 0, speed: 9)
         } else {
             let x: Float = spec.kind == .airplane ? -min(site.runwayLen / 2 - 20, 45) : -5
@@ -97,6 +116,8 @@ final class Game {
         crashTimer = 0
         autopilot = Autopilot()
         camSnap = true
+        debris = []; wasCrashed = false
+        flapSetting = 0; gearUp = false; hold = false
         lastY = aircraft.pos.y; climb = 0
     }
 
@@ -162,6 +183,14 @@ final class Game {
         case 4: hud.showHelp.toggle()
         case 9: hud.visible.toggle()
         case 17: timeScale = timeScale == 1 ? 0.5 : (timeScale == 0.5 ? 0.25 : 1); say(String(format: "Simulation speed %.0f%%", timeScale * 100))
+        case 14:
+            if aircraft.spec.hasFlaps { flapSetting = flapSetting >= 1 ? 0 : flapSetting + 0.5; say(["Flaps up", "Flaps half", "Flaps full"][Int(flapSetting * 2)]) }
+            else { say("This aircraft has no flaps") }
+        case 5:
+            if aircraft.spec.hasRetracts { gearUp.toggle(); say(gearUp ? "Gear up" : "Gear down") } else { say("This aircraft has fixed gear") }
+        case 16: smokeOn.toggle(); say(smokeOn ? "Smoke on" : "Smoke off")
+        case 32:
+            if aircraft.spec.kind == .helicopter { hold.toggle(); say(hold ? "Throttle hold — autorotate!" : "Engine engaged") }
         case 37: input.lowRates.toggle(); say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.settings.lowRate * 100) : "High rates")
         case 46: sound.muted.toggle(); say(sound.muted ? "Sound off" : "Sound on")
         case 45: selectSite((siteIndex + 1) % SiteSpec.all.count)
@@ -194,6 +223,7 @@ final class Game {
             controls = input.poll(dt: dt, kind: aircraft.spec.kind)
             controls.mode = flightMode
         }
+        controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
 
         if !paused {
             let h: Float = 0.001
@@ -228,6 +258,19 @@ final class Game {
                 }
             }
         }
+        if !aircraft.crashed {
+            for o in site.obstacles {
+                let c = Panoramas.position(o, north: site.north)
+                let dx = p.x - c.x, dz = p.z - c.y
+                if p.y < o.height && dx * dx + dz * dz < o.radius * o.radius {
+                    aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
+                    break
+                }
+            }
+        }
+        if aircraft.crashed && !wasCrashed { breakUp() }
+        wasCrashed = aircraft.crashed
+        updateEffects(dt)
         if aircraft.crashed {
             crashTimer += dt
             if crashTimer > 3.5 { resetAircraft() }
@@ -244,6 +287,69 @@ final class Game {
                 }
             }
         }
+    }
+
+    /// Called once when the aircraft crashes: parts break off, dust flies, and there is a thud.
+    private func breakUp() {
+        let ac = aircraft
+        let sev = clampf(ac.crashImpact / 10, 0.25, 1)
+        sound.crash(sev)
+        for (i, part) in ac.spec.parts.enumerated() where i > 0 {
+            var animated = true
+            if case .fixed = part.anim { animated = false }
+            guard animated || part.detach else { continue }
+            if rng.next() > 0.3 + 0.7 * sev { continue }
+            let origin = animated ? part.pivot : part.center
+            let v = ac.vel * 0.6 + ac.q.act(cross(ac.omega, origin)) + V3(rng.range(-2.5, 2.5), rng.range(1, 4.5), rng.range(-2.5, 2.5)) * sev
+            debris.append(Debris(part: i, pos: ac.pos + ac.q.act(origin), q: ac.q, vel: v,
+                                 omega: V3(rng.range(-9, 9), rng.range(-9, 9), rng.range(-9, 9)), offset: animated ? .zero : -part.center))
+            ac.detached.insert(i)
+        }
+        let ground = V3(ac.pos.x, terrain.height(ac.pos.x, ac.pos.z) + 0.1, ac.pos.z)
+        let dust: V4 = site.style == 1 ? rgb(0.75, 0.62, 0.45) : rgb(0.5, 0.42, 0.32)
+        for _ in 0..<Int(10 + 22 * sev) {
+            particles.append(Particle(pos: ground + V3(rng.range(-0.3, 0.3), 0, rng.range(-0.3, 0.3)),
+                                      vel: V3(rng.range(-2.5, 2.5), rng.range(0.5, 3), rng.range(-2.5, 2.5)) * sev + ac.vel * 0.15,
+                                      age: 0, life: rng.range(1.2, 2.4), size: rng.range(0.1, 0.22), color: V4(dust.x, dust.y, dust.z, 0.32)))
+        }
+    }
+
+    private func updateEffects(_ dt: Float) {
+        // tumbling wreckage
+        for i in debris.indices {
+            var d = debris[i]
+            d.vel.y -= gravity * dt
+            d.vel *= 1 - min(0.6 * dt, 1)
+            d.pos += d.vel * dt
+            let g = terrain.height(d.pos.x, d.pos.z) + 0.03
+            if d.pos.y < g {
+                d.pos.y = g
+                d.vel = V3(d.vel.x * 0.55, abs(d.vel.y) * 0.3, d.vel.z * 0.55)
+                d.omega *= 0.5
+                if length(d.vel) < 0.4 { d.vel = .zero; d.omega = .zero }
+            }
+            let w = length(d.omega)
+            if w > 0.01 { d.q = simd_normalize(d.q * simd_quatf(angle: w * dt, axis: d.omega / w)) }
+            debris[i] = d
+        }
+        // smoke trail
+        if smokeOn && !aircraft.crashed && aircraft.power > 0.08 {
+            smokeAcc += dt * 70
+            let wind = env.windVec
+            while smokeAcc >= 1 {
+                smokeAcc -= 1
+                let p = aircraft.pos + aircraft.q.act(aircraft.spec.smokePos) - aircraft.vel * (rng.next() * dt)
+                particles.append(Particle(pos: p, vel: wind * 0.8 + aircraft.vel * 0.08 + V3(rng.range(-0.4, 0.4), rng.range(-0.2, 0.5), rng.range(-0.4, 0.4)),
+                                          age: 0, life: rng.range(3.5, 5), size: rng.range(0.12, 0.2), color: V4(0.96, 0.96, 0.97, 0.5)))
+            }
+        }
+        for i in particles.indices {
+            particles[i].age += dt
+            particles[i].vel *= 1 - min(0.8 * dt, 1)
+            particles[i].pos += particles[i].vel * dt
+        }
+        particles.removeAll { $0.age >= $0.life }
+        if particles.count > 900 { particles.removeFirst(particles.count - 900) }
     }
 
     private func updateCamera(_ dt: Float) {
@@ -329,6 +435,12 @@ final class Game {
         default: s.lx = controls.rudder; s.ly = tY; s.rx = controls.aileron; s.ry = eY
         }
         s.rates = input.lowRates ? "Low" : "High"
+        var cfg: [String] = []
+        if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
+        if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
+        if spec.kind == .helicopter { cfg.append(String(format: "Rotor %.0f%%%@", aircraft.levels[0] * 100, hold ? " HOLD" : "")) }
+        if smokeOn { cfg.append("Smoke") }
+        s.config = cfg.joined(separator: " · ")
         s.fps = fps
         hud.s = s
     }
@@ -393,6 +505,7 @@ struct HUDView: View {
                                 row("Wind", s.wind)
                                 row("Rates", s.rates)
                                 if !s.mode.isEmpty { row("Mode", s.mode) }
+                                if !s.config.isEmpty { Text(s.config).font(.system(size: 12, weight: .semibold)).foregroundColor(.yellow).monospacedDigit() }
                             }
                         }
                         Spacer()
@@ -436,7 +549,7 @@ private struct HelpView: View {
     let keys: [(String, String)] = [
         ("← →", "Aileron (roll)"), ("↑ ↓", "Elevator: ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective up, down"),
         ("X", "Throttle cut"), ("Shift", "Full stick deflection"), ("Space / R", "Reset aircraft"), ("[  ]  1 – 9", "Previous / next aircraft, or pick"),
-        ("N", "Next flying site"), ("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom: auto, keep ground, fixed"), ("F", "Flight mode (quadcopter)"), ("L", "High / low rates"),
+        ("N", "Next flying site"), ("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom: auto, keep ground, fixed"), ("F", "Flight mode (quadcopter)"), ("L", "High / low rates"), ("E", "Flaps: up, half, full"), ("G", "Landing gear up / down"), ("Y", "Smoke on / off"), ("U", "Helicopter throttle hold"),
         ("P", "Pause"), ("T", "Slow motion"), (",  .", "Wind less / more"), ("B", "Balloon Burst challenge"),
         ("K", "Demo pilot on / off"), ("M", "Mute sound"), ("V", "Hide / show HUD"), ("H", "This help"),
     ]

@@ -199,6 +199,9 @@ final class SoundEngine {
     private var p1: Float = 0, p2: Float = 0, p3: Float = 0
     private var seed: UInt32 = 12345
     private var lp: Float = 0
+    private var crashEnv: Float = 0, thud: Float = 0
+
+    func crash(_ strength: Float) { crashEnv = max(crashEnv, 0.4 + 0.6 * strength) }
 
     init() {
         let sr: Float = 44100
@@ -233,7 +236,10 @@ final class SoundEngine {
                 default:
                     s = ((2 * self.p1 - 1) + (2 * self.p2 - 1) + (2 * self.p3 - 1)) * 0.17 + self.lp * 0.25
                 }
-                out[i] = s * self.g * 0.5
+                self.thud += (n - self.thud) * 0.04
+                self.crashEnv *= 0.99975
+                let boom = self.muted ? 0 : (self.thud * 2.2 + n * 0.25) * self.crashEnv * self.crashEnv
+                out[i] = s * self.g * 0.5 + boom
             }
             return noErr
         }

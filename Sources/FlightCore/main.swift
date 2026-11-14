@@ -33,8 +33,30 @@ func runSelfTest() {
     }
 }
 
+func runAutorotationTest() {
+    let site = SiteSpec.all[0]
+    let terrain = Terrain(site: site)
+    let ac = Aircraft(AircraftLibrary.all[4])
+    ac.reset(pos: V3(0, 90, 0), heading: 0)
+    ac.vel = V3(0, 0, -8)
+    var c = Controls(); c.hold = true
+    print("== Autorotation: \(ac.spec.name), engine off at 90 m, 8 m/s forward")
+    for i in 0..<12_000 {
+        let agl = ac.pos.y - terrain.height(ac.pos.x, ac.pos.z)
+        c.throttle = agl > 6 ? 0.42 : 0.9          // slightly negative collective, then flare
+        c.elevator = clampf(3 * (-0.12 - ac.pitch) - 0.3 * ac.omega.x, -1, 1) * (agl > 6 ? 1 : 0) + (agl > 6 ? 0 : clampf(3 * (0.0 - ac.pitch), -1, 1))
+        c.aileron = clampf(2 * (0 - ac.roll), -1, 1)
+        ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0.05)
+        if i % 1000 == 0 || ac.onGround {
+            print(String(format: "t=%4.1f agl=%5.1f sink=%5.1f m/s fwd=%4.1f rotor=%3.0f%% %@", Float(i) / 1000, agl, -ac.vel.y, ac.airspeed, ac.levels[0] * 100, ac.crashed ? "CRASHED" : (ac.onGround ? "LANDED" : "")))
+            if ac.onGround { break }
+        }
+    }
+}
+
 if CommandLine.arguments.contains("--selftest") {
     runSelfTest()
+    runAutorotationTest()
     exit(0)
 }
 
@@ -73,7 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let t = Int(arg("--tod") ?? "") { game.timeOfDay = t }
         if CommandLine.arguments.contains("--auto") { game.autopilotOn = true }
         if CommandLine.arguments.contains("--balloons") { game.toggleChallenge() }
+        let args = CommandLine.arguments
+        if args.contains("--smoke") { game.smokeOn = true }
+        if args.contains("--obstacles") { game.showObstacles = true }
+        if args.contains("--gearup") { game.gearUp = true }
+        if args.contains("--flaps") { game.flapSetting = 1 }
         if let ff = Float(arg("--ff") ?? "") { for _ in 0..<Int(ff * 60) { game.frame(dt: 1 / 60) } }
+        if args.contains("--crash") {       // test hook: dive into the ground
+            game.aircraft.pos.y = game.terrain.height(game.aircraft.pos.x, game.aircraft.pos.z) + 2.5
+            game.aircraft.vel = V3(9, -14, 0)
+            for _ in 0..<40 { game.frame(dt: 1 / 60) }
+        }
 
         let frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
         window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -158,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         siteItems.append(ClosureMenuItem("Photo: Horizon Down 0.5°", key: String(UnicodeScalar(NSDownArrowFunctionKey)!), mods: [.command, .option]) { g.adjustPanorama(horizon: -0.5) })
         siteItems.append(ClosureMenuItem("Photo: Eye Height +0.1 m") { g.adjustPanorama(eye: 0.1) })
         siteItems.append(ClosureMenuItem("Photo: Eye Height −0.1 m") { g.adjustPanorama(eye: -0.1) })
+        siteItems.append(ClosureMenuItem("Photo: Show / Hide Obstacles") { g.showObstacles.toggle(); g.say(g.site.obstacles.isEmpty ? "This site has no obstacles defined" : (g.showObstacles ? "Obstacles shown" : "Obstacles hidden")) })
         menu("Flying Site", siteItems)
         menu("Simulation", [
             ClosureMenuItem("Reset Aircraft", key: "r") { g.resetAircraft() },
