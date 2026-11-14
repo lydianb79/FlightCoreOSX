@@ -1,0 +1,6 @@
+.build/
+FlightCore.app/
+.DS_Store
+*.xcodeproj
+.swiftpm/
+DerivedData/

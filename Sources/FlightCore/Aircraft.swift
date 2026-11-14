@@ -1,0 +1,323 @@
+import simd
+import Foundation
+
+// Body frame: +X right, +Y up, -Z forward.
+// Body rates: +x pitch up, +y yaw left, +z roll left.
+
+enum AircraftKind { case airplane, multirotor, helicopter }
+
+struct Controls {
+    var aileron: Float = 0      // + roll right
+    var elevator: Float = 0     // + pitch up (stick back)
+    var rudder: Float = 0       // + yaw right
+    var throttle: Float = 0     // 0...1 (collective for helicopters)
+    var mode: Int = 0
+}
+
+/// One lifting panel. Forces are computed from its own local airflow, so stall,
+/// spin, damping and prop-wash effects fall out of the geometry.
+struct AeroSurface {
+    var pos: V3
+    var normal: V3
+    var chordDir: V3 = V3(0, 0, -1)
+    var area: Float
+    var ar: Float
+    var liftSlope: Float
+    var stall: Float = 0.25
+    var cd0: Float = 0.012
+    var alpha0: Float = 0
+    var flapCh: Int = -1        // 0 aileron, 1 elevator, 2 rudder
+    var flapGain: Float = 0     // change of effective alpha (rad) at full deflection
+    var wash: Float = 0         // fraction of prop wash seen by this panel
+}
+
+struct Propulsor {
+    var pos: V3
+    var staticThrust: Float
+    var pitchSpeed: Float
+    var diameter: Float
+    var torqueK: Float = 0.03
+}
+
+struct Contact {
+    var pos: V3
+    var wheel = false
+    var steer: Float = 0
+    var crashSpeed: Float = 3
+    var mu: Float = 0.5
+}
+
+struct MultiSpec {
+    var motors: [V3]
+    var dirs: [Float]
+    var maxThrust: Float
+    var kYaw: Float = 0.016
+    var maxRate: Float = 6.5
+    var maxYaw: Float = 4.0
+    var maxAngle: Float = 0.7
+}
+
+struct HeliSpec {
+    var rotorR: Float
+    var hub: V3
+    var rpm: Float
+    var sigma: Float
+    var collMax: Float
+    var maxMoment: Float
+    var tailMax: Float
+    var maxRate: Float
+    var maxYaw: Float
+}
+
+enum Anim { case fixed, spin(Int), hinge(Int, Float) }
+
+struct Part {
+    var mesh: MeshBuilder
+    var pivot: V3 = .zero
+    var axis: V3 = V3(0, 1, 0)
+    var anim: Anim = .fixed
+}
+
+struct AircraftSpec {
+    var name: String
+    var kind: AircraftKind
+    var blurb: String
+    var mass: Float
+    var inertia: V3
+    var span: Float
+    var surfaces: [AeroSurface] = []
+    var props: [Propulsor] = []
+    var contacts: [Contact] = []
+    var cdA: Float = 0.01
+    var multi: MultiSpec? = nil
+    var heli: HeliSpec? = nil
+    var handLaunch = false
+    var parts: [Part] = []
+    var modes: [String] = []
+    var soundBase: Float = 120   // Hz at full power
+    var eyeOffset: V3 = V3(0, 0.15, 0.05)
+}
+
+final class Aircraft {
+    let spec: AircraftSpec
+    var pos = V3.zero, vel = V3.zero, omega = V3.zero
+    var q = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    var servo = V3.zero
+    var levels: [Float]
+    var spin: [Float]
+    var vi: Float = 0
+    var yawI: Float = 0
+    var crashed = false
+    var onGround = false
+    var airspeed: Float = 0
+    let kSpring: Float, cDamp: Float
+    let restHeight: Float
+    private var want: [Float]
+
+    init(_ spec: AircraftSpec) {
+        self.spec = spec
+        let n = max(spec.props.count, spec.multi?.motors.count ?? 0, 2)
+        levels = [Float](repeating: 0, count: n)
+        spin = [Float](repeating: 0, count: n)
+        want = [Float](repeating: 0, count: n)
+        kSpring = spec.mass * gravity / 0.03
+        cDamp = 0.5 * sqrt(kSpring * spec.mass)
+        restHeight = -(spec.contacts.map { $0.pos.y }.min() ?? 0)
+    }
+
+    var power: Float {
+        let n = spec.kind == .airplane ? max(spec.props.count, 1) : levels.count
+        return levels.prefix(n).reduce(0, +) / Float(n)
+    }
+    var forward: V3 { q.act(V3(0, 0, -1)) }
+    var up: V3 { q.act(V3(0, 1, 0)) }
+    var right: V3 { q.act(V3(1, 0, 0)) }
+    var pitch: Float { asin(clampf(forward.y, -1, 1)) }
+    var roll: Float { atan2(-right.y, up.y) }
+
+    func reset(pos p: V3, heading: Float, speed: Float = 0) {
+        q = simd_quatf(angle: heading, axis: V3(0, 1, 0))
+        pos = p; vel = q.act(V3(0, 0, -speed)); omega = .zero; servo = .zero
+        for i in levels.indices { levels[i] = 0 }
+        vi = 0; yawI = 0; crashed = false; onGround = false
+    }
+
+    private func liftDrag(_ alpha: Float, _ s: AeroSurface) -> (Float, Float) {
+        // wrap to -pi...pi
+        var a = alpha
+        if a > .pi { a -= 2 * .pi } else if a < -.pi { a += 2 * .pi }
+        let t = smoothstep(s.stall, s.stall + 0.14, abs(a))
+        let clLin = s.liftSlope * a
+        let cdLin = s.cd0 + clLin * clLin / (.pi * s.ar * 0.8)
+        let sa = sin(a)
+        let clP = 1.1 * sin(2 * a)
+        let cdP = s.cd0 + 1.5 * sa * sa
+        return (clLin + (clP - clLin) * t, cdLin + (cdP - cdLin) * t)
+    }
+
+    func step(dt: Float, c: Controls, terrain: Terrain, wind: V3, rollMu: Float) {
+        let R = simd_float3x3(q)
+        let Rt = R.transpose
+        servo += (V3(c.aileron, c.elevator, c.rudder) - servo) * min(1, dt / 0.04)
+        let va = Rt * (vel - wind)            // velocity through the air, body frame
+        airspeed = length(va)
+        var fb = V3.zero                       // body-frame force
+        var tb = V3.zero                       // body-frame torque
+        let thr = crashed ? 0 : clampf(c.throttle, 0, 1)
+
+        switch spec.kind {
+        case .airplane:
+            var washV: Float = 0
+            let vfwd = -va.z
+            for (i, p) in spec.props.enumerated() {
+                levels[i] += (thr - levels[i]) * min(1, dt / 0.12)
+                let lv = levels[i]
+                let T = p.staticThrust * lv * lv * clampf(1 - vfwd / (p.pitchSpeed * max(lv, 0.05)), -0.3, 1)
+                let f = V3(0, 0, -T)
+                fb += f; tb += cross(p.pos, f)
+                tb.z += p.torqueK * T * p.diameter
+                if T > 0 {
+                    let A = Float.pi * p.diameter * p.diameter / 4
+                    let v0 = max(vfwd, 0)
+                    washV = max(washV, -v0 + sqrt(v0 * v0 + 2 * T / (rho * A)))
+                }
+                spin[i] += (lv > 0.01 ? 12 + 45 * sqrt(lv) : 0) * dt
+            }
+            for s in spec.surfaces {
+                var v = va + cross(omega, s.pos)
+                v.z -= s.wash * washV
+                let vf = dot(v, s.chordDir), vn = dot(v, s.normal)
+                let sp2 = vf * vf + vn * vn
+                if sp2 < 1e-6 { continue }
+                let sp = sqrt(sp2)
+                var alpha = atan2(-vn, vf) + s.alpha0
+                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] }
+                let (cl, cd) = liftDrag(alpha, s)
+                let qS = 0.5 * rho * sp2 * s.area
+                let u = (s.chordDir * vf + s.normal * vn) / sp
+                let l = (s.normal * vf - s.chordDir * vn) / sp
+                let f = (l * cl - u * cd) * qS
+                fb += f; tb += cross(s.pos, f)
+            }
+            fb -= va * (0.5 * rho * spec.cdA * airspeed)
+
+        case .multirotor:
+            let m = spec.multi!
+            let n = m.motors.count
+            for i in 0..<n { want[i] = 0 }
+            if thr > 0.03 {
+                var wd: V3
+                if c.mode == 0 {
+                    var fh = R * V3(0, 0, -1); fh.y = 0
+                    fh = length(fh) > 0.15 ? normalize(fh) : V3(0, 0, -1)
+                    let hr = cross(fh, V3(0, 1, 0))
+                    let t = normalize(V3(0, 1, 0) - fh * tan(c.elevator * m.maxAngle) + hr * tan(c.aileron * m.maxAngle))
+                    let eb = Rt * cross(R * V3(0, 1, 0), t)
+                    wd = V3(clampf(eb.x * 9, -m.maxRate, m.maxRate), -c.rudder * m.maxYaw, clampf(eb.z * 9, -m.maxRate, m.maxRate))
+                } else {
+                    wd = V3(c.elevator * m.maxRate * 1.6, -c.rudder * m.maxYaw * 1.5, -c.aileron * m.maxRate * 1.6)
+                }
+                let tq = spec.inertia * ((wd - omega) * V3(30, 12, 30))
+                var sx: Float = 0, sz: Float = 0
+                for p in m.motors { sx += p.x * p.x; sz += p.z * p.z }
+                let base = thr * m.maxThrust
+                for i in 0..<n {
+                    let p = m.motors[i]
+                    let yaw = clampf(tq.y * m.dirs[i] / (Float(n) * m.kYaw), -0.25 * m.maxThrust, 0.25 * m.maxThrust)
+                    want[i] = clampf(base - tq.x * p.z / sz + tq.z * p.x / sx + yaw, 0.03 * m.maxThrust, m.maxThrust)
+                }
+            }
+            let inflow = clampf(1 - va.y / 28, 0.3, 1.3)
+            var sum: Float = 0
+            for i in 0..<n {
+                levels[i] += (want[i] / m.maxThrust - levels[i]) * min(1, dt / 0.03)
+                let T = levels[i] * m.maxThrust * inflow
+                fb.y += T
+                tb += cross(m.motors[i], V3(0, T, 0))
+                tb.y += m.dirs[i] * m.kYaw * T
+                sum += levels[i]
+                spin[i] += (levels[i] > 0.01 ? 14 + 50 * sqrt(levels[i]) : 0) * m.dirs[i] * dt
+            }
+            fb -= va * (0.5 * rho * spec.cdA * airspeed + 0.1 * sum)
+
+        case .helicopter:
+            let h = spec.heli!
+            let spool: Float = crashed ? 0 : 1
+            levels[0] += (spool - levels[0]) * min(1, dt / 0.6)
+            let om = h.rpm * 2 * .pi / 60 * levels[0]
+            let tip = max(om * h.rotorR, 1)
+            let A = Float.pi * h.rotorR * h.rotorR
+            let theta = (2 * thr - 1) * h.collMax
+            let vc = va.y
+            let vin = sqrt(va.x * va.x + va.z * va.z)
+            let lam = (vc + vi) / tip
+            var T = 0.5 * rho * 5.7 * h.sigma * A * tip * tip * (theta / 3 - lam / 2) * levels[0]
+            let agl = pos.y - terrain.height(pos.x, pos.z)
+            if agl < h.rotorR * 1.5 { T *= 1 + 0.12 * (1 - max(agl, 0) / (h.rotorR * 1.5)) }
+            let viT = T / (2 * rho * A * max(sqrt(vin * vin + (vc + vi) * (vc + vi)), 1.5))
+            vi += (viT - vi) * min(1, dt / 0.08)
+            let f = V3(-0.25 * va.x, T, -0.25 * va.z)
+            fb += f; tb += cross(h.hub, f)
+            let Q = (abs(T * (vc + vi)) + 70) / max(om, 20) * levels[0]
+            tb.y += Q
+            if !crashed {
+                let auth = levels[0] * levels[0]
+                let ex = c.elevator * h.maxRate - omega.x
+                let ez = -c.aileron * h.maxRate - omega.z
+                tb.x += clampf(spec.inertia.x * 40 * ex, -h.maxMoment * auth, h.maxMoment * auth)
+                tb.z += clampf(spec.inertia.z * 40 * ez, -h.maxMoment * auth, h.maxMoment * auth)
+                let ey = -c.rudder * h.maxYaw - omega.y
+                yawI = clampf(yawI + spec.inertia.y * 160 * ey * dt, -h.tailMax, h.tailMax)
+                tb.y += clampf(spec.inertia.y * 35 * ey + yawI, -h.tailMax * auth, h.tailMax * auth)
+            }
+            fb -= va * (0.5 * rho * spec.cdA * airspeed)
+            spin[0] += 32 * levels[0] * dt
+            spin[1] += 55 * levels[0] * dt
+        }
+
+        // Ground contact
+        var fw = V3(0, -spec.mass * gravity, 0)
+        var touching = false
+        for cp in spec.contacts {
+            let rw = R * cp.pos
+            let pw = pos + rw
+            let d = terrain.height(pw.x, pw.z) - pw.y
+            if d <= 0 { continue }
+            touching = true
+            let n = terrain.normal(pw.x, pw.z)
+            let vp = vel + R * cross(omega, cp.pos)
+            let vn = dot(vp, n)
+            if !crashed && (-vn > cp.crashSpeed || (!cp.wheel && cp.crashSpeed < 3.2 && length(vp) > 13)) { crashed = true }
+            let N = max(0, kSpring * min(d, 0.25) - cDamp * vn)
+            var f = n * N
+            let vt = vp - n * vn
+            if cp.wheel && !crashed {
+                let ang = cp.steer * servo.z * 0.45
+                var fwd = R * V3(-sin(ang), 0, -cos(ang))
+                fwd -= n * dot(fwd, n)
+                let lf = length(fwd)
+                if lf > 0.05 {
+                    fwd /= lf
+                    let side = cross(n, fwd)
+                    f -= (fwd * (rollMu * clampf(dot(vt, fwd) / 0.2, -1, 1)) + side * (0.8 * clampf(dot(vt, side) / 0.3, -1, 1))) * N
+                }
+            } else {
+                let s = length(vt)
+                if s > 1e-4 { f -= vt * (N * (crashed ? 0.7 : cp.mu) * min(1, s / 0.2) / s) }
+            }
+            fw += f
+            tb += Rt * cross(rw, f)
+        }
+        onGround = touching
+        if touching && !crashed && (R * V3(0, 1, 0)).y < -0.2 { crashed = true }
+
+        // Integrate
+        vel += (fw + R * fb) / spec.mass * dt
+        pos += vel * dt
+        let I = spec.inertia
+        omega += (tb - cross(omega, I * omega)) / I * dt
+        let wm = length(omega)
+        if wm > 80 { omega *= 80 / wm }
+        if wm > 1e-7 { q = simd_normalize(q * simd_quatf(angle: min(wm, 80) * dt, axis: omega / wm)) }
+    }
+}
