@@ -42,6 +42,8 @@ struct AeroSurface {
     var postStall: Float = 1.0      // lift retained once fully stalled
     var downwash: Float = 0         // 1 for a tailplane sitting in the wing's downwash
     var swirl: Float = 0            // 1 for a fin in the propeller's spiral slipstream
+    var elevGain: Float = 0         // elevons: extra change of effective alpha (rad) at full elevator
+    var cm0: Float = 0              // section pitching moment (reflexed sections are positive: nose-up)
 }
 
 struct Propulsor {
@@ -101,6 +103,7 @@ extension AircraftSpec {
         case "Trainers & Sport": return name.contains("Racer") ? 3 : 1
         case "Scale Civil": return 2
         case "Gliders": return 2
+        case "Wings": return name.contains("Ho 229") || name.contains("Race") ? 4 : (name.contains("Delta") ? 3 : 2)
         case "Aerobatic", "Foam 3D": return 3
         case "Warbirds", "Jets": return 4
         case "Helicopters": return name.contains("Sparrow") ? 4 : 5
@@ -113,6 +116,7 @@ extension AircraftSpec {
         if hasFlaps { f.append("Flaps") }
         if hasRetracts { f.append("Retractable gear") }
         if hasFloats { f.append("Floats") }
+        if category == "Wings" { f.append("Elevons") }
         if handLaunch { f.append("Hand launch") }
         if props.count > 1 { f.append("Twin engine") }
         if kind == .helicopter { f.append("Collective pitch"); f.append("Autorotation") }
@@ -247,7 +251,15 @@ final class Aircraft {
     }
 
     /// Animation input for hinged parts: 0-2 control surfaces, 3 flaps, 4 landing gear.
-    func animValue(_ ch: Int) -> Float { ch < 3 ? servo[ch] : (ch == 3 ? flap : gear) }
+    func animValue(_ ch: Int) -> Float {
+        switch ch {
+        case 0...2: return servo[ch]
+        case 3: return flap
+        case 4: return gear
+        case 5: return clampf(servo.x + servo.y, -1, 1)      // right elevon
+        default: return clampf(servo.y - servo.x, -1, 1)     // left elevon
+        }
+    }
 
     /// Section lift and drag. Below the stall the lift is linear; above it the section behaves like a
     /// flat plate. `i` selects the surface's stall state, which lags behind the airflow and has hysteresis.
@@ -345,10 +357,14 @@ final class Aircraft {
                 var alpha = atan2(-vn, vf) + s.alpha0 - s.downwash * eps
                 // control surfaces lose their bite in separated flow
                 if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.6 * stallT[i]) }
+                let dElev = s.elevGain * servo[1] * (1 - 0.6 * stallT[i])
+                alpha += dElev
                 alpha += s.flapsGain * flap
                 var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
                 let qS = 0.5 * rho * sp2 * s.area
-                if s.flapsGain != 0 { cd += 0.07 * flap; tb.x -= qS * s.chord * 0.18 * flap }      // flaps drag, and pitch the nose down
+                if s.flapsGain != 0 { cd += 0.07 * flap; tb.x -= qS * s.chord * 0.18 * flap }
+                // a tailless wing is trimmed and pitched by its own section: reflex, and elevons moving the centre of lift
+                if s.cm0 != 0 || dElev != 0 { tb.x += qS * s.chord * (s.cm0 * (1 - stallT[i]) - 0.3 * s.liftSlope * dElev) }      // flaps drag, and pitch the nose down
                 if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp

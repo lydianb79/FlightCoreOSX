@@ -457,7 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         // aircraft grouped into submenus by category
         var acItems: [NSMenuItem] = []
-        let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Jets", "Gliders", "Helicopters", "Multirotors"]
+        let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Wings", "Jets", "Gliders", "Helicopters", "Multirotors"]
         let cats = order + Set(AircraftLibrary.all.map { $0.category }).subtracting(order).sorted()
         for cat in cats {
             let sub = NSMenu(title: cat)

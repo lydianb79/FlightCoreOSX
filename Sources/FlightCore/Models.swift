@@ -328,7 +328,7 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
             m.translate(-pivot)
             parts.append(Part(mesh: m, pivot: pivot, axis: normalize(le(f1) + V3(0, 0, chord(f1) * k) - pivot) * side, anim: anim))
         }
-        surface(max(a0, fRoot) + 0.005, 0.995, .hinge(0, -side * g.ailThrow * deg))
+        surface(max(a0, fRoot) + 0.005, 0.995, g.flyingWing ? .hinge(side > 0 ? 5 : 6, -max(g.ailThrow, g.elevThrow) * deg) : .hinge(0, -side * g.ailThrow * deg))
         if hasFlap { surface(0.095, a0 - 0.005, .hinge(3, 38 * deg)) }
         if g.struts && wg.y > h * 0.5 {
             // lift struts from the lower fuselage to the wing
@@ -351,28 +351,40 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
 
     // --- tail
     let tailThick: Float = g.profile ? 0.03 : 0.085
-    let sk = 1 - g.elevFrac
-    var em = MeshBuilder()
-    let eh = V3(0, stabY, g.stabZ + g.stabChord * sk)
-    for side in [Float(-1), 1] {
-        func sle(_ f: Float) -> V3 { V3(side * g.stabSpan / 2 * f, stabY, g.stabZ + 0.18 * g.stabChord * f) }
-        func sch(_ f: Float) -> Float { g.stabChord * (1 - 0.18 * f) }
-        b.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0, f1: 1, c1: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
-        em.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0.02, f1: 0.99, c0: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+    if !g.flyingWing {
+        let sk = 1 - g.elevFrac
+        var em = MeshBuilder()
+        let eh = V3(0, stabY, g.stabZ + g.stabChord * sk)
+        for side in [Float(-1), 1] {
+            func sle(_ f: Float) -> V3 { V3(side * g.stabSpan / 2 * f, stabY, g.stabZ + 0.18 * g.stabChord * f) }
+            func sch(_ f: Float) -> Float { g.stabChord * (1 - 0.18 * f) }
+            b.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0, f1: 1, c1: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+            em.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0.02, f1: 0.99, c0: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+        }
+        em.translate(-eh)
+        parts.append(Part(mesh: em, pivot: eh, axis: V3(1, 0, 0), anim: .hinge(1, -g.elevThrow * deg)))
     }
-    em.translate(-eh)
-    parts.append(Part(mesh: em, pivot: eh, axis: V3(1, 0, 0), anim: .hinge(1, -g.elevThrow * deg)))
-    let rk = 1 - g.rudFrac
-    func fle(_ f: Float) -> V3 { V3(0, finY + g.finH * f, g.finZ + 0.32 * g.finChord * f) }
-    func fch(_ f: Float) -> Float { g.finChord * (1 - 0.32 * f) }
-    b.wingPanel(le: fle, chord: fch, thick: tailThick, camber: 0, up: V3(1, 0, 0), f0: 0, f1: 1, c1: rk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
-    // dorsal fillet blending the fin into the fuselage
-    if !g.profile { b.tri(V3(0, finY, g.finZ - g.finChord * 0.45), V3(0, finY, g.finZ + 0.02), V3(0, finY + g.finH * 0.3, g.finZ + 0.1 * g.finChord), tailPaint(0.1, 0.3, true)) }
-    let rr = fle(0) + V3(0, 0, fch(0) * rk)
-    var rm = MeshBuilder()
-    rm.wingPanel(le: fle, chord: fch, thick: tailThick, camber: 0, up: V3(1, 0, 0), f0: 0.01, f1: 0.99, c0: rk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
-    rm.translate(-rr)
-    parts.append(Part(mesh: rm, pivot: rr, axis: normalize(fle(1) + V3(0, 0, fch(1) * rk) - rr), anim: .hinge(2, g.rudThrow * deg)))
+    if g.flyingWing {
+        // fixed fins: on the wingtips, on the body, or none at all
+        let tipY = g.wingY + hs * tan(dih)
+        let bases: [V3] = g.noFin ? [] : (g.winglets ? [V3(hs, tipY, g.wingLE + g.sweep + 0.2 * g.tipChord), V3(-hs, tipY, g.wingLE + g.sweep + 0.2 * g.tipChord)] : [V3(0, finY, g.finZ)])
+        for base in bases {
+            b.wingPanel(le: { base + V3(0, g.finH * $0, 0.45 * g.finChord * $0) }, chord: { g.finChord * (1 - 0.4 * $0) }, thick: 0.07, camber: 0, up: V3(1, 0, 0),
+                        f0: 0, f1: 1, strips: 3, roundTip: true, paint: tailPaint)
+        }
+    } else {
+        let rk = 1 - g.rudFrac
+        func fle(_ f: Float) -> V3 { V3(0, finY + g.finH * f, g.finZ + 0.32 * g.finChord * f) }
+        func fch(_ f: Float) -> Float { g.finChord * (1 - 0.32 * f) }
+        b.wingPanel(le: fle, chord: fch, thick: tailThick, camber: 0, up: V3(1, 0, 0), f0: 0, f1: 1, c1: rk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+        // dorsal fillet blending the fin into the fuselage
+        if !g.profile { b.tri(V3(0, finY, g.finZ - g.finChord * 0.45), V3(0, finY, g.finZ + 0.02), V3(0, finY + g.finH * 0.3, g.finZ + 0.1 * g.finChord), tailPaint(0.1, 0.3, true)) }
+        let rr = fle(0) + V3(0, 0, fch(0) * rk)
+        var rm = MeshBuilder()
+        rm.wingPanel(le: fle, chord: fch, thick: tailThick, camber: 0, up: V3(1, 0, 0), f0: 0.01, f1: 0.99, c0: rk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+        rm.translate(-rr)
+        parts.append(Part(mesh: rm, pivot: rr, axis: normalize(fle(1) + V3(0, 0, fch(1) * rk) - rr), anim: .hinge(2, g.rudThrow * deg)))
+    }
 
     // --- propulsion
     if g.ducted {
@@ -392,11 +404,12 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
                            x: pp.x, exp: 2.2, seg: 12, paint: { t, _, _ in t < 0.18 ? cTail : cFuse })
             }
             var hub = MeshBuilder()
-            spinner(&hub, base: .zero, radius: sr, length: sr * 1.5, color: g.spinnerColor.map { gl($0, film) } ?? cTail)
+            if g.pusher { hub.cylinder(from: V3(0, 0, -0.03), to: V3(0, 0, 0.012), r0: 0.013, r1: 0.013, seg: 10, color: V4(0.75, 0.3, 0.1, 0.8)) }
+            else { spinner(&hub, base: .zero, radius: sr, length: sr * 1.5, color: g.spinnerColor.map { gl($0, film) } ?? cTail) }
             let pr = makePropeller(diameter: g.propDia, blades: g.blades)
             parts.append(Part(mesh: hub, pivot: pp, axis: V3(0, 0, 1), anim: .spin(i)))
-            parts.append(Part(mesh: pr.blades, pivot: pp + V3(0, 0, -sr * 0.45), axis: V3(0, 0, 1), anim: .spin(i), blur: 1))
-            parts.append(Part(mesh: pr.disc, pivot: pp + V3(0, 0, -sr * 0.45), axis: V3(0, 0, 1), anim: .spin(i), blur: 2))
+            parts.append(Part(mesh: pr.blades, pivot: pp + V3(0, 0, g.pusher ? 0.014 : -sr * 0.45), axis: V3(0, 0, 1), anim: .spin(i), blur: 1))
+            parts.append(Part(mesh: pr.disc, pivot: pp + V3(0, 0, g.pusher ? 0.014 : -sr * 0.45), axis: V3(0, 0, 1), anim: .spin(i), blur: 2))
         }
     }
 

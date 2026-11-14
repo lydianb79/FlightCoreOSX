@@ -293,7 +293,7 @@ struct AircraftBrowser: View {
     @State private var search = ""
     @State private var selected = 0
 
-    private static let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Jets", "Gliders", "Helicopters", "Multirotors"]
+    private static let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Wings", "Jets", "Gliders", "Helicopters", "Multirotors"]
     private var all: [AircraftSpec] { AircraftLibrary.all }
     private var shown: [Int] {
         all.indices.filter { i in

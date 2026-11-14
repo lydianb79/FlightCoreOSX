@@ -6,7 +6,7 @@ A radio-control line-of-sight flight simulator for macOS, written in Swift and r
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 93 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 99 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Download
 
@@ -51,7 +51,7 @@ The last aircraft and site are remembered between launches. The interface uses t
 
 ## Aircraft
 
-Ninety-three aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
+Ninety-nine aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
 | Category | Count | Examples |
 |---|---|---|
@@ -60,6 +60,7 @@ Ninety-three aircraft, grouped by category in the aircraft browser and the Aircr
 | Warbirds | 17 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel |
 | Aerobatic | 11 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7 |
 | Foam 3D | 9 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty |
+| Wings | 6 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Horten Ho 229, Race Wing 600 |
 | Jets | 9 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros |
 | Gliders | 8 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M |
 | Helicopters | 3 | Kestrel 550, Sparrow 450, Condor 700 |
@@ -172,6 +173,7 @@ Press **H** in the app for this list.
   - **Propulsion:** an electric motor whose torque falls with speed, a propeller that unloads in flight, and a battery that sags under load and drains with use (Simulation ▸ Unlimited Battery turns that off). Propeller effects are modelled: torque reaction, P-factor, spiral slipstream on the fin, and gyroscopic precession, so single-engine aircraft swing on take-off and need rudder.
   - **Near the ground:** ground effect adds lift and cuts induced drag within about half a wingspan of the surface, so aircraft float in the flare. Flaps add drag and pitch the nose down.
   - **Balance and inertia:** the centre of gravity is placed a set static margin ahead of the computed neutral point, and the moments of inertia are computed from where the wing, fuselage, tail, motor and battery sit.
+- **Flying wings** have no tailplane. Pitch and roll both come from elevons, the wing is balanced by a reflexed section (or, for the delta, by its shape), and stability comes from sweep and a small static margin. Fins are on the wingtips, on the body, or absent (the Horten, which is loose in yaw).
 - **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
 - **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
 - **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.

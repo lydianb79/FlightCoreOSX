@@ -14,6 +14,8 @@ enum Airfoil {
     case glider         // high-lift, low-drag sailplane sections
     case slatted        // leading-edge slats: stalls late and gently
     case plate          // flat foam sheet: no real stall break
+    case reflex         // tailless-wing section with an upturned trailing edge
+    case delta          // low aspect ratio delta: vortex lift to very high angles
     var params: (camber: Float, stall: Float, width: Float, hyst: Float, post: Float, cd0: Float) {
         switch self {
         case .flatBottom: return (3.5, 15, 0.16, 0.035, 1.0, 0.016)
@@ -24,6 +26,8 @@ enum Airfoil {
         case .glider: return (3.5, 13.5, 0.09, 0.05, 0.9, 0.008)
         case .slatted: return (3.5, 19, 0.2, 0.03, 1.0, 0.018)
         case .plate: return (0, 11, 0.25, 0, 1.1, 0.02)
+        case .reflex: return (0.8, 12.5, 0.12, 0.04, 0.95, 0.012)
+        case .delta: return (0, 24, 0.3, 0.02, 1.1, 0.014)
         }
     }
 }
@@ -143,6 +147,11 @@ struct PlaneGeom {
     var flaps = false
     var retracts = false
     var airfoil: Airfoil? = nil     // nil = chosen by category
+    var flyingWing = false          // tailless: elevons on the wing, no tailplane
+    var winglets = false            // fins on the wingtips instead of on the fuselage
+    var noFin = false
+    var pusher = false              // propeller at the tail
+    var trimCL: Float = 0.4         // lift coefficient a tailless wing flies at with the stick centred
     var dataKey: String? = nil      // full-size aircraft to take figures from, when the name differs
     var washout: Float = 1.5        // degrees of twist reducing the tip's incidence
     var margin: Float? = nil        // static margin as a fraction of mean chord; nil = by category
@@ -178,7 +187,7 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     var g = g0
     applyRealData(&g)
     // wing section
-    let af: Airfoil = g.airfoil ?? (g.profile ? .plate : (["Aerobatic": .symmetric, "Gliders": .glider, "Jets": .laminar, "Trainers & Sport": .flatBottom][g.category] ?? .semiSymmetric))
+    let af: Airfoil = g.airfoil ?? (g.profile ? .plate : (["Wings": .reflex, "Aerobatic": .symmetric, "Gliders": .glider, "Jets": .laminar, "Trainers & Sport": .flatBottom][g.category] ?? .semiSymmetric))
     let afp = af.params
     if g.airfoil != nil || !g.profile { g.camber = af == .symmetric || af == .plate ? 0 : afp.camber; g.stall = afp.stall * deg; g.cd0 = afp.cd0 }
     if g.profile || g.category == "Aerobatic" { g.washout = 0 }
@@ -191,11 +200,12 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     let ar = g.span * g.span / area
     let slope = 2 * Float.pi * ar / (ar + 2)
     let downK = 2 / (Float.pi * ar)                       // downwash angle per unit lift coefficient
+    var staticMargin: Float = 0.1
     let taper = g.tipChord / g.rootChord
     let mac = 2.0 / 3.0 * g.rootChord * (1 + taper + taper * taper) / (1 + taper)
     // Tailplane size: keep the tail volume (area x arm relative to wing area x chord) in the range real
     // aircraft use, so reshaping the wing or fuselage does not leave an oversized or feeble tail.
-    if !g.profile {
+    if !g.profile && !g.flyingWing {
         let vh = g.stabSpan * g.stabChord * (g.stabZ + 0.25 * g.stabChord) / (area * nWings * wingEff * mac)
         let hi: Float = g.category == "Aerobatic" ? 0.8 : 0.62, lo: Float = g.category == "Gliders" ? 0.38 : 0.45
         let k = sqrt(clampf(vh, lo, hi) / vh)
@@ -210,10 +220,11 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
         let ybar = (1 + 2 * taper) / (3 * (1 + taper))
         let acOff = g.sweep * ybar + 0.25 * mac + (nWings > 1 ? -0.035 : 0)
         let aW = slope * area * nWings * wingEff
-        let aT = tailSlope * g.stabSpan * g.stabChord * (1 - slope * downK)
+        let aT = g.flyingWing ? 0 : tailSlope * g.stabSpan * g.stabChord * (1 - slope * downK)
         let zT = g.stabZ + 0.25 * g.stabChord
-        let m = g.margin ?? (g.profile ? 0.05 : (["Aerobatic": 0.07, "Warbirds": 0.10, "Jets": 0.10, "Gliders": 0.12, "Scale Civil": 0.14, "Trainers & Sport": 0.16][g.category] ?? 0.12))
+        let m = g.margin ?? (g.profile ? 0.05 : (["Wings": 0.09, "Aerobatic": 0.07, "Warbirds": 0.10, "Jets": 0.10, "Gliders": 0.12, "Scale Civil": 0.14, "Trainers & Sport": 0.16][g.category] ?? 0.12))
         g.wingLE = (m * mac * (aW + aT) - aT * zT) / aW - acOff
+        staticMargin = m
     }
 
     let L = g.fuseLen, nz = g.noseZ, tz = g.noseZ + g.fuseLen
@@ -255,20 +266,37 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
             if f0 >= g.ailStart - 0.01 { s.flapCh = 0; s.flapGain = -side * flapTau(g.ailFrac) * g.ailThrow * deg }
             s.wash = fm < 0.34 ? g.washWing : 0
             if g.flaps && g.ailStart > 0.4 && f0 < g.ailStart - 0.01 { s.flapsGain = 0.14 }
+            if g.flyingWing {
+                // elevons, and enough reflex to balance the wing at its trim lift coefficient
+                if s.flapCh == 0 { s.elevGain = -flapTau(g.ailFrac) * g.elevThrow * deg }
+                s.cm0 = g.trimCL * staticMargin * mac / ch
+            }
             surfaces.append(s)
         }
     } }
-    for side in [Float(-1), 1] {
+    for side in [Float(-1), 1] where !g.flyingWing {
         surfaces.append(AeroSurface(pos: V3(side * g.stabSpan / 4, stabY, g.stabZ + 0.25 * g.stabChord), normal: V3(0, 1, 0),
                                     area: g.stabSpan * g.stabChord / 2, ar: sar, liftSlope: tailSlope,
                                     stall: 0.27, cd0: 0.012, flapCh: 1, flapGain: -flapTau(g.elevFrac) * g.elevThrow * deg, wash: g.washTail,
                                     chord: g.stabChord, downwash: g.tTail ? 0.5 : 1))
     }
     let far = 1.6 * g.finH / g.finChord
-    surfaces.append(AeroSurface(pos: V3(0, finY + g.finH / 2, g.finZ + 0.25 * g.finChord), normal: V3(1, 0, 0),
-                                area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
-                                stall: 0.27, cd0: 0.012, flapCh: 2, flapGain: -flapTau(g.rudFrac) * g.rudThrow * deg, wash: g.washTail,
-                                chord: g.finChord, swirl: g.ducted || g.twin > 0 ? 0 : 1))
+    let tipY0 = g.wingY + hs * tan(dih)
+    let finSpots: [V3] = g.noFin ? [] : (g.winglets
+        ? [V3(hs, tipY0 + g.finH / 2, g.wingLE + g.sweep + 0.5 * g.tipChord), V3(-hs, tipY0 + g.finH / 2, g.wingLE + g.sweep + 0.5 * g.tipChord)]
+        : [V3(0, finY + g.finH / 2, g.finZ + 0.25 * g.finChord)])
+    for fp in finSpots {
+        surfaces.append(AeroSurface(pos: fp, normal: V3(1, 0, 0), area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
+                                    stall: 0.27, cd0: 0.012, flapCh: g.flyingWing ? -1 : 2, flapGain: g.flyingWing ? 0 : -flapTau(g.rudFrac) * g.rudThrow * deg,
+                                    wash: g.flyingWing ? 0 : g.washTail, chord: g.finChord, swirl: g.ducted || g.twin > 0 || g.flyingWing ? 0 : 1))
+    }
+    if g.noFin {
+        // a finless swept wing is kept straight by its tips: the advancing one gains drag
+        for side in [Float(-1), 1] {
+            surfaces.append(AeroSurface(pos: V3(side * hs * 0.9, tipY0, g.wingLE + g.sweep + 0.6 * g.tipChord), normal: V3(1, 0, 0), area: 0.012 * area, ar: 1, liftSlope: 2,
+                                        stall: 0.4, cd0: 0.02, chord: g.tipChord))
+        }
+    }
     for (n, a) in [(V3(1, 0, 0), L * g.fuseH * 0.75), (V3(0, 1, 0), L * g.fuseW * 0.75)] {
         surfaces.append(AeroSurface(pos: V3(0, 0, nz + 0.42 * L), normal: n, area: a, ar: 0.4, liftSlope: 0.9, stall: 0.6, cd0: 0))
     }
@@ -307,7 +335,7 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     contacts = contacts.map { var c = $0; c.crashSpeed *= g.tough; return c }
     contacts.append(Contact(pos: V3(0, max(h, g.wingY) + 0.03, nz + 0.3 * L), crashSpeed: 2.5))
 
-    let engines: [V3] = g.twin > 0 ? [V3(g.twin, g.wingY, g.wingLE - 0.1), V3(-g.twin, g.wingY, g.wingLE - 0.1)] : [V3(0, 0, nz)]
+    let engines: [V3] = g.twin > 0 ? [V3(g.twin, g.wingY, g.wingLE - 0.1), V3(-g.twin, g.wingY, g.wingLE - 0.1)] : [V3(0, 0, g.pusher ? tz : nz)]
 
     let parts = buildAirplaneModel(g, wheels: wheels, engines: engines, wings: wings)
 
@@ -336,12 +364,13 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
         p.momentum = 0.6 * pow(d, 2.5) * d * d / 12 * 1.5 * revs * 2 * .pi
         p.spinDir = g.twin > 0 && i == 1 ? -1 : 1            // twins have handed propellers
         p.pFactor = g.ducted ? 0 : 0.18
+        if g.pusher { p.spinDir = -1 }
         return p
     }
     spec.wingArea = area * nWings
     spec.downwashK = downK * (nWings > 1 ? 1.3 : 1)
     spec.endurance = g.endurance ?? (glider ? 420 : (g.profile ? 200 : 240))
-    if g.ducted { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
+    if g.ducted || g.pusher { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
     spec.contacts = contacts
     spec.cdA = g.cdA
     spec.handLaunch = g.handLaunch
@@ -846,6 +875,48 @@ enum AircraftLibrary {
                 $0.camber = 4; $0.canopyLen = 0.06; $0.gearH = 0.26; $0.track = 0.26; $0.thrust *= 1.1 },
         ]
 
+        // ---- flying wings: no tailplane; pitch and roll both come from elevons on the wing
+        var wingBase = PlaneGeom()
+        wingBase.category = "Wings"; wingBase.flyingWing = true; wingBase.winglets = true; wingBase.pusher = true
+        wingBase.gear = .none; wingBase.handLaunch = true; wingBase.dihedral = 0; wingBase.incidence = 0; wingBase.washout = 0
+        wingBase.noseZ = -0.2; wingBase.fuseLen = 0.48; wingBase.fuseW = 0.11; wingBase.fuseH = 0.085; wingBase.fuseExp = 2.2; wingBase.canopyLen = 0.2
+        wingBase.wingY = 0; wingBase.ailStart = 0.34; wingBase.ailFrac = 0.22; wingBase.ailThrow = 14; wingBase.elevThrow = 16
+        wingBase.finH = 0.13; wingBase.finChord = 0.14; wingBase.stabSpan = 0.01; wingBase.stabChord = 0.01; wingBase.stabZ = 0.2; wingBase.finZ = 0.2
+        wingBase.washTail = 0; wingBase.washWing = 0; wingBase.cdA = 0.004; wingBase.scheme = 9; wingBase.tough = 1.6; wingBase.propDia = 0.2
+        func wing(_ name: String, _ blurb: String, _ edit: (inout PlaneGeom) -> Void) -> PlaneGeom { var g = wingBase; g.name = name; g.blurb = blurb; edit(&g); return g }
+        let flyingWings: [PlaneGeom] = [
+            wing("Sweep 48 Combat Wing", "Tough EPP swept wing: the classic slope and combat machine, quick in roll and hard to break") {
+                $0.span = 1.22; $0.rootChord = 0.33; $0.tipChord = 0.2; $0.sweep = 0.34; $0.mass = 0.72; $0.thrust = 8.5; $0.pitchSpeed = 24
+                $0.thick = 0.1; $0.tough = 2.2; $0.ailThrow = 16; $0.elevThrow = 16; $0.washout = 2
+                $0.fuse = black; $0.wingTop = yellow; $0.wingBottom = black; $0.tail = red; $0.accent = red; $0.sound = 230 },
+            wing("Plank 1.5 Soarer", "Unswept reflexed plank for the slope: pitch-sensitive, with a long flat glide") {
+                $0.span = 1.5; $0.rootChord = 0.22; $0.tipChord = 0.19; $0.sweep = 0; $0.mass = 0.6; $0.thrust = 4.2; $0.pitchSpeed = 15
+                $0.winglets = false; $0.finH = 0.2; $0.finChord = 0.17; $0.finZ = 0.36; $0.fuseLen = 0.72; $0.noseZ = -0.26; $0.pusher = false
+                $0.margin = 0.07; $0.trimCL = 0.5; $0.thick = 0.1; $0.dihedral = 2; $0.elevThrow = 10; $0.ailThrow = 14; $0.airfoil = .reflex; $0.endurance = 420
+                $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.1, 0.5, 0.9); $0.tail = rgb(0.1, 0.5, 0.9); $0.accent = white; $0.sound = 130 },
+            wing("Delta Dart", "Small pusher delta: fast, flies to wild nose-high angles without letting go, sinks fast when slow") {
+                $0.span = 0.8; $0.rootChord = 0.56; $0.tipChord = 0.06; $0.sweep = 0.5; $0.mass = 0.55; $0.thrust = 9; $0.pitchSpeed = 32
+                $0.winglets = false; $0.finH = 0.16; $0.finChord = 0.22; $0.finZ = 0.22; $0.fuseLen = 0.62; $0.noseZ = -0.3; $0.fuseW = 0.08
+                $0.airfoil = .delta; $0.thick = 0.06; $0.margin = 0.08; $0.trimCL = 0.25; $0.ailStart = 0; $0.ailFrac = 0.18; $0.ailThrow = 18; $0.elevThrow = 18
+                $0.fuse = grey; $0.wingTop = grey; $0.wingBottom = orange; $0.tail = orange; $0.accent = black; $0.sound = 280 },
+            wing("Voyager 2.1 FPV Wing", "Big long-range wing: efficient, steady, carries a lot and cruises for an age") {
+                $0.span = 2.1; $0.rootChord = 0.4; $0.tipChord = 0.2; $0.sweep = 0.42; $0.mass = 2.6; $0.thrust = 17; $0.pitchSpeed = 22; $0.propDia = 0.3
+                $0.fuseLen = 0.75; $0.noseZ = -0.32; $0.fuseW = 0.17; $0.fuseH = 0.12; $0.finH = 0.2; $0.finChord = 0.2; $0.washout = 3; $0.thick = 0.12
+                $0.margin = 0.11; $0.ailThrow = 12; $0.elevThrow = 12; $0.endurance = 600; $0.tough = 1.2
+                $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.1, 0.1, 0.12); $0.tail = orange; $0.accent = orange; $0.sound = 150 },
+            wing("Horten Ho 229", "Twin-jet flying wing with no fin at all: elegant, fast, and loose in yaw") {
+                $0.span = 1.5; $0.rootChord = 0.56; $0.tipChord = 0.17; $0.sweep = 0.44; $0.mass = 1.9; $0.thrust = 19; $0.pitchSpeed = 55
+                $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.noFin = true; $0.handLaunch = false; $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.2; $0.wheelR = 0.026
+                $0.retracts = true; $0.fuseLen = 0.62; $0.noseZ = -0.3; $0.fuseW = 0.14; $0.fuseH = 0.1; $0.canopyLen = 0.16; $0.washout = 5; $0.thick = 0.11
+                $0.margin = 0.12; $0.trimCL = 0.3; $0.ailThrow = 12; $0.elevThrow = 13; $0.scheme = 7; $0.tough = 1; $0.airfoil = .reflex
+                $0.fuse = rgb(0.25, 0.3, 0.22); $0.wingTop = rgb(0.25, 0.3, 0.22); $0.accent = rgb(0.17, 0.2, 0.2); $0.wingBottom = rgb(0.5, 0.6, 0.68); $0.tail = rgb(0.25, 0.3, 0.22); $0.sound = 420 },
+            wing("Race Wing 600", "Sixty-centimetre racing wing: tiny, twitchy and very fast") {
+                $0.span = 0.6; $0.rootChord = 0.24; $0.tipChord = 0.13; $0.sweep = 0.19; $0.mass = 0.29; $0.thrust = 6.5; $0.pitchSpeed = 38; $0.propDia = 0.13
+                $0.fuseLen = 0.3; $0.noseZ = -0.13; $0.fuseW = 0.07; $0.fuseH = 0.06; $0.finH = 0.07; $0.finChord = 0.09; $0.thick = 0.09; $0.washout = 1.5
+                $0.margin = 0.07; $0.trimCL = 0.25; $0.ailThrow = 14; $0.elevThrow = 12; $0.tough = 2
+                $0.fuse = black; $0.wingTop = rgb(0.5, 0.95, 0.1); $0.wingBottom = black; $0.tail = rgb(0.9, 0.1, 0.5); $0.accent = rgb(0.9, 0.1, 0.5); $0.sound = 330 },
+        ]
+
         var trainerHeli = rescale(makeHeli(body: rgb(0.95, 0.95, 0.95), canopy: rgb(0.85, 0.1, 0.1)), 0.6)
         trainerHeli.name = "Sparrow 450"; trainerHeli.blurb = "Small, docile helicopter for learning to hover"
         trainerHeli.mass = 0.9; trainerHeli.inertia = V3(0.010, 0.009, 0.004); trainerHeli.cdA = 0.012; trainerHeli.soundBase = 105
@@ -866,6 +937,6 @@ enum AircraftLibrary {
         var quad = makeQuad(); quad.category = "Multirotors"
         return [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane)
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane)
     }()
 }
