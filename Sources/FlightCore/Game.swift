@@ -7,6 +7,7 @@ struct HUDState {
     var alt: Float = 0, speed: Float = 0, dist: Float = 0, climb: Float = 0, throttle: Float = 0
     var wind = "", message = "", camera = "", mode = "", input = "", score = "", time = ""
     var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0
+    var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = ""
     var fps = 0
 }
 
@@ -161,6 +162,7 @@ final class Game {
         case 4: hud.showHelp.toggle()
         case 9: hud.visible.toggle()
         case 17: timeScale = timeScale == 1 ? 0.5 : (timeScale == 0.5 ? 0.25 : 1); say(String(format: "Simulation speed %.0f%%", timeScale * 100))
+        case 37: input.lowRates.toggle(); say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.settings.lowRate * 100) : "High rates")
         case 46: sound.muted.toggle(); say(sound.muted ? "Sound off" : "Sound on")
         case 45: selectSite((siteIndex + 1) % SiteSpec.all.count)
         case 11: toggleChallenge()
@@ -319,8 +321,14 @@ final class Game {
         if aircraft.crashed { s.message = "CRASHED" }
         else if paused { s.message = "PAUSED" }
         else if messageTimer > 0 { s.message = message }
-        s.lx = controls.rudder; s.ly = controls.throttle * 2 - 1
-        s.rx = controls.aileron; s.ry = -controls.elevator
+        let tY = controls.throttle * 2 - 1, eY = -controls.elevator
+        switch input.settings.stickMode {
+        case 1: s.lx = controls.rudder; s.ly = eY; s.rx = controls.aileron; s.ry = tY; s.leftLabel = "ELE / RUD"; s.rightLabel = "THR / AIL"
+        case 3: s.lx = controls.aileron; s.ly = eY; s.rx = controls.rudder; s.ry = tY; s.leftLabel = "ELE / AIL"; s.rightLabel = "THR / RUD"
+        case 4: s.lx = controls.aileron; s.ly = tY; s.rx = controls.rudder; s.ry = eY; s.leftLabel = "THR / AIL"; s.rightLabel = "ELE / RUD"
+        default: s.lx = controls.rudder; s.ly = tY; s.rx = controls.aileron; s.ry = eY
+        }
+        s.rates = input.lowRates ? "Low" : "High"
         s.fps = fps
         hud.s = s
     }
@@ -383,6 +391,7 @@ struct HUDView: View {
                                 row("Distance", String(format: "%.0f m", s.dist))
                                 row("Throttle", String(format: "%.0f %%", s.throttle * 100))
                                 row("Wind", s.wind)
+                                row("Rates", s.rates)
                                 if !s.mode.isEmpty { row("Mode", s.mode) }
                             }
                         }
@@ -399,9 +408,9 @@ struct HUDView: View {
                     }
                     Spacer()
                     HStack(alignment: .bottom) {
-                        StickView(x: s.lx, y: s.ly, label: "THR / RUD")
+                        StickView(x: s.lx, y: s.ly, label: s.leftLabel)
                         Spacer()
-                        StickView(x: s.rx, y: s.ry, label: "ELE / AIL")
+                        StickView(x: s.rx, y: s.ry, label: s.rightLabel)
                     }
                 }
                 .padding(14)
@@ -427,7 +436,7 @@ private struct HelpView: View {
     let keys: [(String, String)] = [
         ("← →", "Aileron (roll)"), ("↑ ↓", "Elevator: ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective up, down"),
         ("X", "Throttle cut"), ("Shift", "Full stick deflection"), ("Space / R", "Reset aircraft"), ("[  ]  1 – 9", "Previous / next aircraft, or pick"),
-        ("N", "Next flying site"), ("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom: auto, keep ground, fixed"), ("F", "Flight mode (quadcopter)"),
+        ("N", "Next flying site"), ("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom: auto, keep ground, fixed"), ("F", "Flight mode (quadcopter)"), ("L", "High / low rates"),
         ("P", "Pause"), ("T", "Slow motion"), (",  .", "Wind less / more"), ("B", "Balloon Burst challenge"),
         ("K", "Demo pilot on / off"), ("M", "Mute sound"), ("V", "Hide / show HUD"), ("H", "This help"),
     ]
@@ -440,7 +449,7 @@ private struct HelpView: View {
                     Text(k.1).font(.system(size: 13))
                 }
             }
-            Text("Gamepads use Mode 2 sticks. USB RC transmitters are picked up automatically;\nassign channels under Controller ▸ Channel Setup.")
+            Text("USB RC transmitters and gamepads are picked up automatically. Calibration, stick mode,\nrates and expo are under Controller ▸ Controller Setup (⌘,).")
                 .font(.system(size: 11)).foregroundColor(.white.opacity(0.7)).padding(.top, 6)
         }
         .padding(22)

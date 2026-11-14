@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         buildMenus()
+        if CommandLine.arguments.contains("--setup") { showSetup() }
 
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [unowned self] e in
             guard e.window === self.window else { return e }
@@ -189,7 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewItems.append(ClosureMenuItem("Toggle Full Screen", key: "f", mods: [.command, .control]) { [unowned self] in self.window.toggleFullScreen(nil) })
         menu("View", viewItems)
         menu("Controller", [
-            ClosureMenuItem("Channel Setup…", key: ",") { [unowned self] in self.showSetup() },
+            ClosureMenuItem("Controller Setup…", key: ",") { [unowned self] in self.showSetup() },
+            ClosureMenuItem("Switch High / Low Rates", key: "l") { g.keyDown(37) },
             ClosureMenuItem("Mute Sound", key: "m") { g.keyDown(46) },
         ])
         NSApp.mainMenu = main
@@ -214,10 +216,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetup() {
         if setupWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 330), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "Controller Channel Setup"
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            w.title = "Controller Setup"
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: SetupView(model: SetupModel(input: game.input)))
+            w.setContentSize(w.contentView!.fittingSize)
             w.center()
             setupWindow = w
         }
@@ -229,41 +232,82 @@ final class SetupModel: ObservableObject {
     let input: InputManager
     @Published var values = [Float](repeating: 0, count: 4)
     @Published var device = ""
-    @Published var map: ChannelMap { didSet { input.map = map } }
+    @Published var connected = false
+    @Published var calibrating = false
+    @Published var s: InputSettings { didSet { input.settings = s } }
     private var timer: Timer?
     init(input: InputManager) {
         self.input = input
-        map = input.map
+        s = input.settings
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let s = self else { return }
-            s.values = (0..<4).map { s.input.channel($0) }
-            s.device = s.input.hid.connected ? s.input.hid.name : "No USB transmitter / joystick detected"
+            guard let m = self else { return }
+            m.values = (0..<4).map { m.input.channel($0) }
+            m.connected = m.input.hid.connected
+            m.device = m.connected ? m.input.hid.name : "No USB transmitter or joystick detected"
         }
     }
+    func calibrate() {
+        if calibrating { input.finishCalibration(); s = input.settings } else { input.startCalibration() }
+        calibrating = input.calibrating
+    }
+    func resetCalibration() { input.resetCalibration(); s = input.settings; calibrating = false }
 }
 
 struct SetupView: View {
     @ObservedObject var model: SetupModel
+
+    private func pct(_ title: String, _ v: Binding<Float>, _ range: ClosedRange<Float>) -> some View {
+        HStack {
+            Text(title).frame(width: 110, alignment: .leading)
+            Slider(value: v, in: range)
+            Text(String(format: "%.0f %%", v.wrappedValue * 100)).monospacedDigit().frame(width: 50, alignment: .trailing)
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(model.device).font(.headline)
-            Text("Move each stick and assign the axis that responds. Throttle should read −1 at idle; elevator +1 with the stick pulled back.")
-                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("USB transmitter").font(.headline)
+            Text(model.device).foregroundColor(model.connected ? .primary : .secondary)
             ForEach(0..<4, id: \.self) { i in
                 HStack {
-                    Text(ChannelMap.channelNames[i]).frame(width: 70, alignment: .leading)
-                    Picker("", selection: $model.map.axis[i]) {
-                        ForEach(0..<9, id: \.self) { Text(ChannelMap.axisNames[$0]).tag($0) }
+                    Text(InputSettings.channelNames[i]).frame(width: 70, alignment: .leading)
+                    Picker("", selection: $model.s.axis[i]) {
+                        ForEach(0..<9, id: \.self) { Text(InputSettings.axisNames[$0]).tag($0) }
                     }.labelsHidden().frame(width: 90)
-                    Toggle("Invert", isOn: $model.map.invert[i])
-                    ProgressView(value: Double(model.values[i] + 1) / 2).frame(width: 120)
+                    Toggle("Reverse", isOn: $model.s.invert[i])
+                    ProgressView(value: Double(model.values[i] + 1) / 2).frame(width: 110)
                     Text(String(format: "%+.2f", model.values[i])).monospacedDigit().frame(width: 48)
                 }
             }
-            Text("Gamepads (Xbox, PlayStation, …) need no setup and use Mode 2 sticks.").font(.caption).foregroundColor(.secondary)
+            HStack {
+                Button(model.calibrating ? "Done — sticks are centred" : "Calibrate…") { model.calibrate() }
+                Button("Reset Calibration") { model.resetCalibration() }.disabled(model.calibrating)
+            }
+            Text(model.calibrating
+                 ? "Move both sticks through their full travel several times, then let them centre (throttle can stay anywhere) and click Done."
+                 : "After calibrating, each bar should reach −1 and +1 at the stick ends. Throttle should read −1 at idle and elevator +1 with the stick pulled back; tick Reverse if not.")
+                .font(.caption).foregroundColor(model.calibrating ? .orange : .secondary).fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            Text("Stick mode").font(.headline)
+            Picker("", selection: $model.s.stickMode) {
+                ForEach(1...4, id: \.self) { Text(InputSettings.modeNames[$0 - 1]).tag($0) }
+            }.labelsHidden()
+            Text("Sets the stick layout for gamepads and the on-screen stick display. A transmitter's mode is fixed by its hardware.")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            Text("Rates and expo").font(.headline)
+            pct("Low rate", $model.s.lowRate, 0.3...1)
+            pct("Aileron expo", $model.s.expo[0], 0...0.8)
+            pct("Elevator expo", $model.s.expo[1], 0...0.8)
+            pct("Rudder expo", $model.s.expo[2], 0...0.8)
+            pct("Stick deadband", $model.s.deadband, 0...0.15)
+            Text("Press L while flying to switch between high and low rates. Set expo to 0 if your transmitter already applies its own.")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 460, height: 330)
+        .frame(width: 520)
     }
 }
 

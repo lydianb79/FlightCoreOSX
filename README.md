@@ -1,3 +1,5 @@
+<img src="Resources/AppIcon.png" width="128" alt="FlightCore icon">
+
 # FlightCore
 
 A radio-control line-of-sight flight simulator for macOS, written in Swift and rendered with Metal.
@@ -89,6 +91,7 @@ Press **H** in the app for this list.
 | C | Camera: pilot, chase, onboard |
 | Z | Zoom: auto, keep ground in view, fixed |
 | F | Flight mode (quadcopters) |
+| L | High / low rates |
 | P | Pause |
 | T | Slow motion |
 | , / . | Less / more wind |
@@ -99,8 +102,15 @@ Press **H** in the app for this list.
 
 ### Controllers
 
-- **Gamepads** (Xbox, PlayStation and similar) work without setup and use Mode 2 sticks.
-- **USB RC transmitters and simulator dongles** are detected automatically. Assign channels and reverse them under **Controller ▸ Channel Setup…**.
+- **Gamepads** (Xbox, PlayStation and similar) work without setup and default to Mode 2 sticks.
+- **USB RC transmitters and simulator dongles** are detected automatically.
+
+**Controller ▸ Controller Setup…** (⌘,) covers:
+
+- channel assignment and reversing for transmitters
+- stick calibration (end points and centre)
+- stick mode 1–4 for gamepads and the on-screen stick display
+- low-rate throw, expo per axis, and stick deadband
 
 ## How it works
 

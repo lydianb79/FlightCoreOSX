@@ -44,42 +44,110 @@ final class HIDJoystick {
     var connected: Bool { deviceCount > 0 }
 }
 
-/// Channel order: aileron, elevator, throttle, rudder
-struct ChannelMap: Codable {
+/// Controller settings, saved in user defaults. Channel order: aileron, elevator, throttle, rudder.
+struct InputSettings: Codable {
     var axis = [0, 1, 2, 3]
     var invert = [false, true, false, false]
+    // per USB axis calibration (raw values are -1...1 from the device's reported range)
+    var calMin = [Float](repeating: -1, count: 9)
+    var calMid = [Float](repeating: 0, count: 9)
+    var calMax = [Float](repeating: 1, count: 9)
+    var stickMode = 2                       // 1-4, for gamepads and the on-screen stick display
+    var lowRate: Float = 0.6                // control throw on low rates
+    var expo: [Float] = [0.25, 0.25, 0.2]   // aileron, elevator, rudder
+    var deadband: Float = 0.03
+
     static let axisNames = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider", "Dial", "Wheel"]
     static let channelNames = ["Aileron", "Elevator", "Throttle", "Rudder"]
+    static let modeNames = ["Mode 1  (left: elevator + rudder, right: throttle + aileron)",
+                            "Mode 2  (left: throttle + rudder, right: elevator + aileron)",
+                            "Mode 3  (left: elevator + aileron, right: throttle + rudder)",
+                            "Mode 4  (left: throttle + aileron, right: elevator + rudder)"]
+
+    var valid: Bool {
+        axis.count == 4 && invert.count == 4 && calMin.count == 9 && calMid.count == 9 && calMax.count == 9 && expo.count == 3 && (1...4).contains(stickMode)
+    }
 }
 
 final class InputManager {
     var keys = Set<UInt16>()
     let hid = HIDJoystick()
-    var map = ChannelMap() { didSet { if let d = try? JSONEncoder().encode(map) { UserDefaults.standard.set(d, forKey: "channelMap") } } }
+    var settings = InputSettings() { didSet { if let d = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(d, forKey: "inputSettings") } } }
+    var lowRates = false
     private var kb = V3.zero
     var kbThrottle: Float = 0
     var source = "Keyboard"
 
+    // calibration recording
+    private(set) var calibrating = false
+    private var recMin = [Float](repeating: 0, count: 9), recMax = [Float](repeating: 0, count: 9)
+
     init() {
-        if let d = UserDefaults.standard.data(forKey: "channelMap"), let m = try? JSONDecoder().decode(ChannelMap.self, from: d), m.axis.count == 4, m.invert.count == 4 {
-            map = m
+        if let d = UserDefaults.standard.data(forKey: "inputSettings"), let m = try? JSONDecoder().decode(InputSettings.self, from: d), m.valid {
+            settings = m
         }
     }
 
     func resetThrottle(_ kind: AircraftKind, launch: Bool) { kbThrottle = kind == .helicopter ? 0.5 : (launch ? 0.75 : 0) }
 
-    private func expo(_ x: Float) -> Float { 0.65 * x + 0.35 * x * x * x }
     private func down(_ k: UInt16) -> Float { keys.contains(k) ? 1 : 0 }
 
+    /// Deadband, expo and dual rate for a centred channel (0 aileron, 1 elevator, 2 rudder).
+    private func shape(_ x: Float, _ i: Int) -> Float {
+        let db = clampf(settings.deadband, 0, 0.3)
+        let m = abs(x)
+        if m <= db { return 0 }
+        let v = (x < 0 ? -1 : 1) * min((m - db) / (1 - db), 1)
+        let k = clampf(settings.expo[i], 0, 1)
+        return ((1 - k) * v + k * v * v * v) * (lowRates ? settings.lowRate : 1)
+    }
+
+    /// Calibrated value of a USB axis: centred channels map min/centre/max to -1/0/+1, throttle maps min/max to -1/+1.
+    private func calibrated(_ a: Int, centred: Bool) -> Float {
+        let v = hid.axes[a], lo = settings.calMin[a], mid = settings.calMid[a], hi = settings.calMax[a]
+        if centred {
+            if v >= mid { return hi - mid > 0.05 ? clampf((v - mid) / (hi - mid), 0, 1) : 0 }
+            return mid - lo > 0.05 ? clampf((v - mid) / (mid - lo), -1, 0) : 0
+        }
+        return hi - lo > 0.05 ? clampf((v - lo) / (hi - lo) * 2 - 1, -1, 1) : 0
+    }
+
+    /// Calibrated transmitter channel (0 aileron, 1 elevator, 2 throttle, 3 rudder), before expo and rates.
     func channel(_ i: Int) -> Float {
-        let v = hid.axes[min(max(map.axis[i], 0), 8)]
-        return map.invert[i] ? -v : v
+        let v = calibrated(min(max(settings.axis[i], 0), 8), centred: i != 2)
+        return settings.invert[i] ? -v : v
+    }
+
+    func startCalibration() {
+        recMin = hid.axes; recMax = hid.axes
+        calibrating = true
+    }
+
+    /// Call with the sticks centred. Axes that were not moved keep their previous calibration.
+    func finishCalibration() {
+        guard calibrating else { return }
+        calibrating = false
+        var s = settings
+        for a in 0..<9 where recMax[a] - recMin[a] > 0.5 {
+            s.calMin[a] = recMin[a]; s.calMax[a] = recMax[a]
+            s.calMid[a] = clampf(hid.axes[a], recMin[a] + 0.1, recMax[a] - 0.1)
+        }
+        settings = s
+    }
+
+    func resetCalibration() {
+        calibrating = false
+        var s = settings
+        s.calMin = [Float](repeating: -1, count: 9); s.calMid = [Float](repeating: 0, count: 9); s.calMax = [Float](repeating: 1, count: 9)
+        settings = s
     }
 
     func poll(dt: Float, kind: AircraftKind) -> Controls {
         var c = Controls()
-        // keyboard: arrows = right stick, A/D = rudder, W/S = throttle
-        let full: Float = keys.contains(56) || keys.contains(60) ? 1 : 0.75
+        if calibrating { for a in 0..<9 { recMin[a] = min(recMin[a], hid.axes[a]); recMax[a] = max(recMax[a], hid.axes[a]) } }
+
+        // keyboard: arrows = elevator / aileron, A/D = rudder, W/S = throttle
+        let full: Float = (keys.contains(56) || keys.contains(60) ? 1 : 0.75) * (lowRates ? settings.lowRate : 1)
         let tgt = V3(down(124) - down(123), down(125) - down(126), down(2) - down(0)) * full
         for i in 0..<3 {
             let rate: Float = tgt[i] == 0 ? 7 : 4.5
@@ -88,17 +156,26 @@ final class InputManager {
         kbThrottle = clampf(kbThrottle + (down(13) - down(1)) * 0.7 * dt, 0, 1)
         if keys.contains(7) { kbThrottle = kind == .helicopter ? 0.5 : 0 }
 
-        var dev = V3.zero
+        var dev = V3.zero       // aileron, elevator, rudder
         var thr = kbThrottle
         if hid.connected {
             source = hid.name
-            dev = V3(channel(0), channel(1), channel(3))
+            dev = V3(shape(channel(0), 0), shape(channel(1), 1), shape(channel(3), 2))
             thr = (channel(2) + 1) / 2
         } else if let gp = GCController.controllers().compactMap({ $0.extendedGamepad }).first {
             source = gp.controller?.vendorName ?? "Gamepad"
-            dev = V3(expo(gp.rightThumbstick.xAxis.value), expo(-gp.rightThumbstick.yAxis.value), expo(gp.leftThumbstick.xAxis.value))
-            let ly = gp.leftThumbstick.yAxis.value
-            thr = kind == .airplane ? max(max(ly, 0), gp.rightTrigger.value) : (ly + 1) / 2
+            let lx = gp.leftThumbstick.xAxis.value, ly = gp.leftThumbstick.yAxis.value
+            let rx = gp.rightThumbstick.xAxis.value, ry = gp.rightThumbstick.yAxis.value
+            var a: Float, e: Float, r: Float, t: Float
+            switch settings.stickMode {
+            case 1: e = -ly; r = lx; t = ry; a = rx
+            case 3: e = -ly; a = lx; t = ry; r = rx
+            case 4: t = ly; a = lx; e = -ry; r = rx
+            default: t = ly; r = lx; e = -ry; a = rx
+            }
+            dev = V3(shape(a, 0), shape(e, 1), shape(r, 2))
+            // sprung throttle stick: airplanes use the upper half (or the right trigger), rotorcraft the full travel
+            thr = kind == .airplane ? max(max(t, 0), gp.rightTrigger.value) : (t + 1) / 2
         } else {
             source = "Keyboard"
         }
