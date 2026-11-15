@@ -162,6 +162,9 @@ final class SoundEngine {
     // one-shots
     private var crashEnv: Float = 0, crashTone: Float = 0, crashPhase: Float = 0, crackle: Float = 0, splashEnv: Float = 0, splashLo: Float = 0
     private var crashPan: Float = 0
+    // flying into a tree: the swish of leaves, twigs snapping one after another; or a knock on something hard
+    private var leafEnv: Float = 0, leafLo: Float = 0, leafBd: Float = 0, leafPan: Float = 0, twigs: Float = 0, twigTimer: Float = 0
+    private var snapEnv: Float = 0, snapLo: Float = 0, snapBd: Float = 0, snapHz: Float = 900, knockEnv: Float = 0, knockPhase: Float = 0
     // touchdown: a thump from the airframe plus the noise of whatever it landed on
     private var thumpEnv: Float = 0, thumpDecay: Float = 0.999, thumpHz: Float = 90, thumpPhase: Float = 0
     private var touchEnv: Float = 0, touchAmp: Float = 1, touchDecay: Float = 0.999, touchFc: Float = 2000, touchQ: Float = 1, touchSweep: Float = 0
@@ -208,6 +211,14 @@ final class SoundEngine {
         engine.attach(n)
         engine.connect(n, to: engine.mainMixerNode, format: fmt)
         try? engine.start()
+    }
+
+    /// The model flies into branches (`woody`) or knocks against something hard such as a goal post.
+    func branches(_ strength: Float, woody: Bool, pan: Float = 0) {
+        let s = 0.4 + 0.6 * min(max(strength, 0), 1)
+        leafPan = pan
+        if woody { leafEnv = max(leafEnv, s); twigs = s; twigTimer = 0 }
+        else { knockEnv = max(knockEnv, s); knockPhase = 0 }
     }
 
     /// Impact: `strength` 0...1; `water` makes it a splash.
@@ -551,6 +562,23 @@ final class SoundEngine {
                 t *= max(sGain, 0.3)
                 L += t * (1 - touchPan) * 0.6; R += t * (1 + touchPan) * 0.6
             }
+            if leafEnv > 0.0005 || twigs > 0.004 || snapEnv > 0.0005 || knockEnv > 0.0005 {
+                leafEnv *= 0.99988; twigs *= 0.99991; snapEnv *= 0.9965; knockEnv *= 0.9988
+                // leaves: a bright swish that dies away in half a second
+                var t = bandpass(n0, 3800 + 1500 * leafEnv, 0.9, &leafLo, &leafBd) * leafEnv * leafEnv * 0.9
+                // twigs: sharp dry snaps, close together at first, then fewer
+                twigTimer -= dt
+                if twigs > 0.03 && twigTimer <= 0 {
+                    snapEnv = twigs * (0.5 + 0.5 * abs(n1)); snapHz = 700 + 1600 * abs(n0)
+                    twigTimer = (0.012 + 0.07 * abs(n1)) / max(twigs, 0.15)
+                }
+                t += bandpass(n1, snapHz, 0.35, &snapLo, &snapBd) * snapEnv * 0.55
+                // a hard knock: a short ring
+                wrap(&knockPhase, 420)
+                t += (sin(twoPi * knockPhase) + 0.5 * sin(twoPi * knockPhase * 2.7)) * knockEnv * knockEnv * 0.5
+                t *= max(sGain, 0.3)
+                L += t * (1 - leafPan) * 0.6; R += t * (1 + leafPan) * 0.6
+            }
             if splashEnv > 0.0005 {
                 splashEnv *= 0.99992
                 let hissy = n0 - splashLo
@@ -617,6 +645,7 @@ func writeSoundTest(to path: String) {
             st.airspeed = 8 + 14 * st.power; st.windSpeed = 3; st.ambience = Ambience.of(SiteSpec.all[kind * 3 % SiteSpec.all.count])
             s.state = st
             if blk == total * 9 / 10 { s.crash(0.8, water: kind % 2 == 1, pan: 0.5) }
+            if blk == total / 4 { s.branches(0.8, woody: kind % 2 == 0, pan: 0.2) }
             if blk == total / 2 { s.touch(0.6, ground: kind, wheel: kind != 4, slide: 9, mass: 1.5, pan: -0.3) }
             s.render(left: l, right: r, count: 512)
             for i in 0..<512 {

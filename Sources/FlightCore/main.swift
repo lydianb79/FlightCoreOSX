@@ -61,6 +61,15 @@ if let i = CommandLine.arguments.firstIndex(of: "--soundtest"), i + 1 < CommandL
     exit(0)
 }
 
+// Test and check runs make no sound: they build many games in a row, each of which would otherwise start playing its
+// idle engine and ambience through the speakers. Screenshots are silent too. (--perf keeps sound: it measures it.)
+do {
+    let quiet = CommandLine.arguments.dropFirst().contains { a in
+        ["test", "check", "list", "stats", "crop"].contains { a.hasPrefix("--") && a.hasSuffix($0) } || ["--shot", "--flightsound", "--treehit"].contains(a)
+    }
+    if quiet && !CommandLine.arguments.contains("--perf") { SoundEngine.offline = true }
+}
+
 if CommandLine.arguments.contains("--hidtest") {
     // report what the controller code detects, then quit
     let input = InputManager()
@@ -672,6 +681,43 @@ if CommandLine.arguments.contains("--panostats") {
     }
     exit(0)
 }
+if let ci = CommandLine.arguments.firstIndex(of: "--maskcheck"), ci + 1 < CommandLine.arguments.count {
+    // every photo site: what counts as an object (red) and what as open sky, with the obstacles outlined
+    let dir = URL(fileURLWithPath: CommandLine.arguments[ci + 1])
+    let only = ci + 2 < CommandLine.arguments.count ? CommandLine.arguments[ci + 2] : ""
+    for site in SiteSpec.all {
+        guard let url = site.panorama, only.isEmpty || url.lastPathComponent.contains(only), let mask = PanoMask(url: url), let img = Panoramas.image(url, maxSize: 4096) else { continue }
+        let W = 2160, top = 0.20, bottom = 0.58                         // the band of the picture around the horizon
+        let H = Int(Double(W) / 2 * (bottom - top))
+        guard let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { continue }
+        let fullH = CGFloat(W) / 2
+        ctx.draw(img, in: CGRect(x: 0, y: -(1 - CGFloat(bottom)) * fullH, width: CGFloat(W), height: fullH))
+        let s = CGFloat(W) / CGFloat(mask.w)
+        ctx.setFillColor(CGColor(srgbRed: 1, green: 0.1, blue: 0.1, alpha: 0.38))
+        for y in Int(top * Double(mask.h))..<Int(bottom * Double(mask.h)) { for x in 0..<mask.w where mask.solid[y * mask.w + x] {
+            ctx.fill(CGRect(x: CGFloat(x) * s, y: CGFloat(H) - (CGFloat(y) - CGFloat(top) * CGFloat(mask.h) + 1) * s, width: s, height: s))
+        } }
+        ctx.setStrokeColor(CGColor(srgbRed: 1, green: 1, blue: 0, alpha: 1)); ctx.setLineWidth(2)
+        for o in site.obstacles {
+            let d = CGFloat(o.distance), hw = asin(min(CGFloat(Panoramas.solidRadius(o, at: 0)) / d, 1)) * 180 / .pi
+            let hi = atan((CGFloat(o.height) - CGFloat(site.eyeHeight)) / d) * 180 / .pi
+            for shift: CGFloat in [-360, 0, 360] {
+                let x0 = (CGFloat(o.bearing) + shift - hw + 180) / 360 * CGFloat(W)
+                let yTop = CGFloat(H) - ((0.5 - (hi + CGFloat(site.horizon)) / 180) - CGFloat(top)) * fullH
+                let yHor = CGFloat(H) - (0.5 - CGFloat(top)) * fullH
+                ctx.stroke(CGRect(x: x0, y: yHor, width: 2 * hw / 360 * CGFloat(W), height: yTop - yHor))
+            }
+        }
+        if let out = ctx.makeImage(), let d = CGImageDestinationCreateWithURL(dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_mask.jpg") as CFURL, "public.jpeg" as CFString, 1, nil) {
+            CGImageDestinationAddImage(d, out, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary); CGImageDestinationFinalize(d)
+        }
+        let band = (Int(0.25 * Double(mask.h))..<mask.h / 2).reduce(0) { n, y in n + (0..<mask.w).filter { mask.solid[y * mask.w + $0] }.count }
+        print(String(format: "%@ %2.0f%% of the 45 degrees above the horizon holds something", url.lastPathComponent.padding(toLength: 30, withPad: " ", startingAt: 0),
+                     Float(band) / Float(mask.w * (mask.h / 2 - Int(0.25 * Double(mask.h)))) * 100))
+    }
+    exit(0)
+}
 if CommandLine.arguments.contains("--obstaclelist") {
     // every photo site: how close the nearest solid thing is to the pilot and to the start, and how tall the tallest is
     for site in SiteSpec.all where site.panorama != nil {
@@ -984,6 +1030,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--gearup") { game.gearUp = true }
         if args.contains("--flaps") { game.flapSetting = 1 }
         if let ff = Float(arg("--ff") ?? "") { for _ in 0..<Int(ff * 60) { game.frame(dt: 1 / 60) } }
+        if args.contains("--treehit") {     // test hook: fly into the first tree of a photo site
+            if let url = game.site.panorama { game.panoMask = PanoMask(url: url) }
+            let eyePos = game.terrain.pilotPos + V3(0, game.site.eyeHeight, 0)
+            if let o = game.site.obstacles.first(where: { $0.height > 6 }) {
+                let c = Panoramas.position(o, north: game.site.north)
+                let away = normalize(V3(c.x, 0, c.y))
+                // approach from the pilot's side at a height where the picture shows the tree
+                var hgt = o.height * 0.5
+                for k in stride(from: Float(0.2), through: 1.2, by: 0.1) {
+                    let probe = V3(c.x, game.terrain.height(c.x, c.y) + o.height * k, c.y) - away * (o.radius * 0.5)
+                    if game.panoMask?.isSolid(probe - eyePos, north: game.site.north, horizon: game.site.horizon) == true { hgt = o.height * k; break }
+                }
+                let from = V3(c.x, game.terrain.height(c.x, c.y) + hgt, c.y) - away * (o.radius * 0.75 + 4)
+                game.aircraft.reset(pos: from, heading: atan2(-away.x, -away.z), speed: 12)
+                var frames = 0
+                while frames < 120 && !game.aircraft.crashed { game.frame(dt: 1 / 60); frames += 1 }
+                print(String(format: "TREEHIT %@: tree %.0f m away, %.0f m tall; %@ after %.2f s at %.1f m up; %d particles", game.site.displayName, o.distance, o.height,
+                             game.aircraft.crashed ? "hit" : "NOT hit", Float(frames) / 60, game.aircraft.pos.y - game.terrain.height(c.x, c.y), game.particles.count))
+                for _ in 0..<18 { game.frame(dt: 1 / 60) }
+            }
+        }
         if args.contains("--crash") {       // test hook: dive into the ground
             game.aircraft.pos.y = game.terrain.height(game.aircraft.pos.x, game.aircraft.pos.z) + 2.5
             game.aircraft.vel = V3(9, -14, 0)

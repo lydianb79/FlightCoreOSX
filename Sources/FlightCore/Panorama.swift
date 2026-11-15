@@ -290,3 +290,92 @@ enum Panoramas {
         return light
     }
 }
+
+/// Which directions of a panorama hold something and which are open sky. A photographed tree or building is only
+/// in the way where it can actually be seen: the model hits an obstacle when, from where the pilot stands, it is
+/// in front of the object in the picture, not merely inside the rough shape that stands in for it.
+final class PanoMask {
+    let w = 1440, h = 720
+    private(set) var solid: [Bool]
+    private var px: [UInt8]
+
+    init?(url: URL) {
+        guard let img = Panoramas.image(url, maxSize: 2048) else { return nil }
+        px = [UInt8](repeating: 0, count: w * h * 4)
+        solid = [Bool](repeating: true, count: w * h)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        findSky()
+    }
+
+    private func findSky() {
+        let w = self.w, h = self.h
+        func lum(_ i: Int) -> Int { (Int(px[i * 4]) * 3 + Int(px[i * 4 + 1]) * 6 + Int(px[i * 4 + 2])) / 10 }
+        // how busy each pixel is: sky is smooth, foliage and masonry are not
+        var busy = [Int](repeating: 0, count: w * h)
+        let limit = h * 62 / 100                               // the sky cannot reach far below the horizon
+        for y in 1..<limit { for x in 0..<w {
+            let i = y * w + x, l = lum(i)
+            let xl = y * w + (x + w - 1) % w, xr = y * w + (x + 1) % w
+            busy[i] = max(abs(l - lum(xl)), abs(l - lum(xr)), abs(l - lum(i - w)), abs(l - lum(i + w)))
+        } }
+        // sky: everything reachable from the top of the picture through smooth, gradual changes of colour
+        var sky = [Bool](repeating: false, count: w * h)
+        var stack: [Int] = []
+        for x in 0..<w { sky[x] = true; stack.append(x) }
+        while let i = stack.popLast() {
+            let x = i % w, y = i / w, l = lum(i)
+            for (nx, ny) in [((x + 1) % w, y), ((x + w - 1) % w, y), (x, y + 1), (x, y - 1)] where ny >= 0 && ny < limit {
+                let j = ny * w + nx
+                if sky[j] || busy[j] > 9 { continue }
+                let dr = abs(Int(px[j * 4]) - Int(px[i * 4])), db = abs(Int(px[j * 4 + 2]) - Int(px[i * 4 + 2]))
+                if abs(lum(j) - l) > 7 || dr > 10 || db > 10 { continue }
+                sky[j] = true; stack.append(j)
+            }
+        }
+        // objects: whatever is not sky and is joined to the ground. Hard-edged clouds, wires and birds hang free
+        // in the sky and do not count.
+        var grounded = [Bool](repeating: false, count: w * h)
+        for i in (limit - 1) * w..<w * h { grounded[i] = true }
+        for x in 0..<w { stack.append((limit - 1) * w + x) }
+        while let i = stack.popLast() {
+            let x = i % w, y = i / w
+            for dy in -1...1 { for dx in -1...1 where dx != 0 || dy != 0 {
+                let ny = y + dy, nx = (x + dx + w) % w
+                if ny < 0 || ny >= limit { continue }
+                let j = ny * w + nx
+                if grounded[j] || sky[j] { continue }
+                grounded[j] = true; stack.append(j)
+            } }
+        }
+        solid = grounded
+    }
+
+    private func pixel(_ dir: V3, north: Float, horizon: Float) -> (x: Int, y: Int) {
+        let d = normalize(dir)
+        var u = atan2(d.x, -d.z) / (2 * .pi) + 0.5 + north / 360
+        u -= floor(u)
+        let v = 0.5 - (asin(clampf(d.y, -1, 1)) + horizon * deg) / .pi
+        return (min(Int(u * Float(w)), w - 1), min(max(Int(v * Float(h)), 0), h - 1))
+    }
+
+    /// Is there something in the photo in this direction (as seen from the camera)? A little generous, so thin
+    /// branches count.
+    func isSolid(_ dir: V3, north: Float, horizon: Float) -> Bool {
+        let p = pixel(dir, north: north, horizon: horizon)
+        var n = 0
+        for dy in -1...1 { for dx in -1...1 {
+            let y = min(max(p.y + dy, 0), h - 1), x = (p.x + dx + w) % w
+            if solid[y * w + x] { n += 1 }
+        } }
+        return n >= 3
+    }
+
+    /// The photo's colour in this direction (linear-ish 0...1), for effects that should match what was hit.
+    func color(_ dir: V3, north: Float, horizon: Float) -> V3 {
+        let p = pixel(dir, north: north, horizon: horizon), i = (p.y * w + p.x) * 4
+        return V3(Float(px[i]), Float(px[i + 1]), Float(px[i + 2])) / 255
+    }
+}

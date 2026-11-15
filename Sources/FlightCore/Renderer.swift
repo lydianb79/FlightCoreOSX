@@ -641,9 +641,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         let corners: [(Float, Float)] = [(-1, -1), (1, -1), (1, 1), (-1, -1), (1, 1), (-1, 1)]
         for p in game.particles {
             let t = p.age / p.life
-            let size = p.size * (1 + 7 * t)
+            let leaf = p.fall > 0
+            let size = leaf ? p.size : p.size * (1 + 7 * t)        // smoke and dust spread; a leaf stays a leaf
             var c = p.color
-            c.w *= (1 - t) * min(1, p.age * 12)
+            c.w *= leaf ? (1 - t * t * t) : (1 - t) * min(1, p.age * 12)
             for (u, v) in corners { b.v(p.pos + (right * u + up * v) * size, V3(u, v, 0), c) }
         }
         return GPUMesh(device, b)

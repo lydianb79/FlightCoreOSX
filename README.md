@@ -130,7 +130,7 @@ For your own photos, the `.json` file next to the image can also set where aircr
 }
 ```
 
-`bearing` is measured in the photo (0° at the image centre, positive to the right). Only the dense core of an obstacle is solid: three quarters of its radius, narrowing toward the top of a tree, so the airy edge of a crown can be brushed past. The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
+`bearing` is measured in the photo (0° at the image centre, positive to the right). An obstacle only says how far away a tree or building is. What is solid is decided by the picture itself: FlightCore works out which parts of the photo are open sky and which hold something, and the model hits an obstacle only where, from the pilot's position, it is in front of the object. Gaps between crowns, the sky beside a pointed treetop and the air above a hedge are open, and a top that reaches higher than the stand-in shape is still solid. (`FlightCore --maskcheck <folder>` writes each photo with the solid parts tinted.) The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
 
 The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
@@ -231,6 +231,7 @@ Press **H** in the app for this list.
   - the engine goes quiet as soon as the throttle is closed, while its pitch winds down with the propeller; an idling engine is much quieter than one at full throttle, and a crashed model is silent.
   `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file; `FlightCore --flightsound out.wav <site> <aircraft>` records what the game plays during a demo flight, a throttle cut and a crash; `--perf` also prints the load of the audio thread.
 - **Touchdowns** sound like what the model lands on: a tyre chirp or a scrape on asphalt, a rustle on grass, a crunch on snow, a hiss on sand, a gritty thud on bare earth and a splash on water, louder the harder it comes down and deeper the heavier the model. On photo sites the ground is taken from the kind of place it is. `FlightCore --touchtest` lists what every 3D site is made of.
+- **Flying into a tree** swishes through the leaves and snaps twigs, and a burst of leaves in the colour of whatever was hit flutters down; a goal post or bin gives a hard knock.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
 - **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
 

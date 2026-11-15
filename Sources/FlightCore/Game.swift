@@ -113,7 +113,7 @@ struct Balloon { var pos: V3; var color: V4; var alive = true }
 struct Debris { var part: Int; var pos: V3; var q: simd_quatf; var vel: V3; var omega: V3; var offset: V3 }
 
 /// Smoke / dust puff, drawn as a camera-facing quad.
-struct Particle { var pos: V3; var vel: V3; var age: Float; var life: Float; var size: Float; var color: V4 }
+struct Particle { var pos: V3; var vel: V3; var age: Float; var life: Float; var size: Float; var color: V4; var fall: Float = 0 }      // fall > 0: a leaf, which drops and flutters
 
 struct Lighting { var sunDir: V3; var sun: V3; var ambient: V3; var zenith: V3; var horizon: V3 }
 
@@ -147,6 +147,18 @@ final class Game {
     var controls = Controls()
     var siteVersion = 0, aircraftVersion = 0
     var panoLight: Lighting?
+    /// Where the current photo site's picture holds something and where it is open sky; made in the background.
+    var panoMask: PanoMask?
+    private var maskToken = 0
+    private func loadMask() {
+        panoMask = nil; maskToken += 1
+        guard let url = site.panorama else { return }
+        let token = maskToken
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let m = PanoMask(url: url)
+            DispatchQueue.main.async { if let s = self, s.maskToken == token { s.panoMask = m } }
+        }
+    }
 
     var eye = V3(0, 1.7, 14), target = V3(0, 1, 0), upVec = V3(0, 1, 0)
     var fov: Float = 50 * deg
@@ -196,6 +208,7 @@ final class Game {
         newSession()
         resetAircraft()
         hud.game = self
+        loadMask()
         DispatchQueue.main.async { [weak self] in self?.hud.warmSitePreviews() }
     }
 
@@ -297,6 +310,7 @@ final class Game {
         env.configure(site)
         env.obstacles = terrain.windObstacles
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
+        loadMask()
         if site.panorama != nil { cameraMode = 0 } else { timeOfDay = Game.time(forSite: site.defaultTime) }
         siteVersion += 1
         if challenge { spawnBalloons() }
@@ -476,20 +490,34 @@ final class Game {
             for t in terrain.trees {
                 let dx = p.x - t.p.x, dz = p.z - t.p.z
                 if abs(dx) < 6 && abs(dz) < 6 && dx * dx + dz * dz < pow(t.h * 0.3, 2) && p.y < t.p.y + t.h && p.y > t.p.y {
-                    aircraft.crashed = true; aircraft.vel *= 0.25
+                    hitFoliage(at: p, color: V3(site.pal.bush.x, site.pal.bush.y, site.pal.bush.z), woody: true)
+                    aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.25
                     break
                 }
             }
         }
         if !aircraft.crashed {
+            let eyePos = terrain.pilotPos + V3(0, site.eyeHeight, 0)
             for o in site.obstacles {
                 let c = Panoramas.position(o, north: site.north)
                 let dx = p.x - c.x, dz = p.z - c.y
-                let rs = Panoramas.solidRadius(o, at: p.y - terrain.height(c.x, c.y))
-                if rs > 0 && dx * dx + dz * dz < rs * rs {
-                    aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
-                    break
+                let above = p.y - terrain.height(c.x, c.y)
+                if o.height > 3, let mask = panoMask {
+                    // The stand-in shape only says how far away the tree is. What is solid is decided by the picture:
+                    // the model hits where it is in front of the tree as the pilot sees it. Gaps between crowns, the
+                    // sky beside a pointed top and the air above a hedge are open, and a top that reaches higher
+                    // than the stand-in is still solid.
+                    let r = o.radius * 0.75
+                    guard above >= 0, above <= o.height * 1.6, dx * dx + dz * dz < r * r else { continue }
+                    if !mask.isSolid(p - eyePos, north: site.north, horizon: site.horizon) { continue }
+                } else {
+                    let rs = Panoramas.solidRadius(o, at: above)
+                    guard rs > 0 && dx * dx + dz * dz < rs * rs else { continue }
                 }
+                let col = panoMask?.color(p - eyePos, north: site.north, horizon: site.horizon) ?? V3(0.25, 0.35, 0.15)
+                hitFoliage(at: p, color: col, woody: o.height > 3)
+                aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
+                break
             }
         }
         if terrain.overWater(aircraft.pos) {
@@ -521,6 +549,31 @@ final class Game {
     }
 
     /// Called once when the aircraft crashes: parts break off, dust flies, and there is a thud.
+    /// The model flies into a tree, hedge or other photographed object: branches crack, and leaves and twigs in the
+    /// colour of whatever it hit burst out and flutter down.
+    private func hitFoliage(at p: V3, color: V3, woody: Bool) {
+        let speed = length(aircraft.vel)
+        let sev = clampf(speed / 14, 0.3, 1)
+        sound.branches(sev, woody: woody, pan: sound.state.pan)
+        guard woody else { return }
+        let dirv = speed > 0.5 ? aircraft.vel / speed : V3(0, 0, -1)
+        // torn leaves show their pale undersides and catch the light: lighter than the tree they came from
+        let color = simd_clamp(color * 1.1 + V3(0.07, 0.1, 0.03), V3(repeating: 0.06), V3(repeating: 0.8))
+        for _ in 0..<Int(60 + 70 * sev) {
+            let shade = rng.range(0.65, 1.25)
+            let c = simd_clamp(color * shade + V3(rng.range(-0.04, 0.04), rng.range(-0.03, 0.05), rng.range(-0.03, 0.02)), V3(repeating: 0.02), V3(repeating: 1))
+            let size = rng.range(0.05, 0.12) * max(aircraft.spec.span, 0.6)
+            particles.append(Particle(pos: p + V3(rng.range(-0.4, 0.4), rng.range(-0.3, 0.3), rng.range(-0.4, 0.4)) * max(aircraft.spec.span, 0.6),
+                                      vel: dirv * speed * rng.range(0.05, 0.45) + V3(rng.range(-3, 3), rng.range(-1, 3.5), rng.range(-3, 3)) * sev,
+                                      age: 0, life: rng.range(1.6, 3.6), size: size, color: V4(c.x, c.y, c.z, 0.95), fall: rng.range(1.2, 3.2)))
+        }
+        // a puff of torn foliage that hangs for a moment, so the hit shows from far away
+        for _ in 0..<8 {
+            particles.append(Particle(pos: p + V3(rng.range(-0.3, 0.3), rng.range(-0.2, 0.2), rng.range(-0.3, 0.3)), vel: dirv * speed * 0.12 + V3(rng.range(-1, 1), rng.range(0, 1), rng.range(-1, 1)),
+                                      age: 0, life: rng.range(0.9, 1.7), size: rng.range(0.14, 0.24) * max(aircraft.spec.span, 0.6), color: V4(color.x, color.y, color.z, 0.26)))
+        }
+    }
+
     private func breakUp() {
         let ac = aircraft
         let sev = clampf(ac.crashImpact / 10, 0.25, 1)
@@ -577,6 +630,15 @@ final class Game {
         }
         for i in particles.indices {
             particles[i].age += dt
+            if particles[i].fall > 0 {
+                // a leaf: falls, soon at its own slow pace, and sideslips to and fro on the way down
+                particles[i].vel.y -= gravity * 0.5 * dt
+                particles[i].vel *= 1 - min(2.2 * dt, 1)
+                particles[i].vel.y = max(particles[i].vel.y, -particles[i].fall)
+                let ph = particles[i].age * 7 + particles[i].size * 400
+                particles[i].vel.x += sin(ph) * 2.2 * dt; particles[i].vel.z += cos(ph * 0.8) * 2.2 * dt
+                if particles[i].pos.y < terrain.height(particles[i].pos.x, particles[i].pos.z) + 0.02 { particles[i].vel = .zero }
+            }
             particles[i].vel *= 1 - min(0.8 * dt, 1)
             particles[i].pos += particles[i].vel * dt
         }
