@@ -18,7 +18,7 @@ The app is not signed with an Apple developer certificate or notarised, so macOS
 xattr -dr com.apple.quarantine /Applications/FlightCore.app
 ```
 
-The release is built for Apple silicon Macs running macOS 13 or later.
+The release is built for Apple silicon Macs running macOS 13 or later. This page describes the current source, which can be ahead of the latest release; build from source to get everything listed here.
 
 ## Build from source
 
@@ -42,12 +42,12 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 - **Splash screen** at launch; any key or click continues, or it moves on by itself after a few seconds.
 - **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
-- **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures.
-- **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama.
+- **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures. **Select** takes the aircraft and returns to the main menu.
+- **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama. **Select** takes the site and returns to the main menu.
 - **Weather panel** (wind button in the top bar): wind speed and direction, turbulence, thermals and time of day, applied live.
 - **In flight:** a top bar with the current aircraft and site, and a telemetry strip with altitude, airspeed, climb, distance, throttle and wind. Press V to hide it.
 
-The last aircraft and site are remembered between launches. The interface uses the red, cream and black of the splash artwork.
+The last aircraft and site are remembered between launches, and both browsers reopen on the category or filter you last used. The interface uses the red, cream and black of the splash artwork.
 
 ## Aircraft
 
@@ -106,7 +106,6 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 - Choose **Flying Site ▸ Add 360° Panorama Photo…** (⌘O), or drop images into `~/Library/Application Support/FlightCore/Panoramas`.
 - The sun direction and ambient light are estimated from the photo, so the model is lit to match and casts a shadow on the photographed ground.
 - The **Photo:** items in the Flying Site menu rotate the panorama, shift its horizon and set the camera height. The settings are saved in a `.json` file next to the image.
-
 - A photo taken on a hillside can have sloping ground: `"slope"` (degrees) and `"uphill"` (the bearing in the photo that the ground rises toward) in the `.json` file. On a slope the model is held until you open the throttle.
 - **Photo: Show / Hide Obstacles** draws the invisible ground as rings at 5, 10, 20 … 320 m together with the solid obstacles, to check them against the photo. `FlightCore --panocheck <folder>` writes the same overlay for every photo as an image, and `FlightCore --parktest` checks that the model sits still on the ground at every photo site.
 
@@ -114,9 +113,9 @@ Photos are shown as they are, without added sharpening; `FlightCore --panostats`
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Thirty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dreifaltigkeitsberg`, `immenstadter_horn`, `hausdorf_meadow`, `lago_disola`, `camdeboo_road`, `montorfano`, `evening_meadow`, `steinbach_field`, `stierberg_sunrise`, `countrytrax_midday`, `spaichingen_hill`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `horn-koppe_spring`, `limpopo_golf_course`, `poolbeg`, `rural_asphalt_road`, `snow_field`, `snowy_hillside_02`, `suburban_football_field` and `wildflower_field`.
+Thirty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction, wind, ambience and, where the photo calls for it, obstacles and sloping ground) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dreifaltigkeitsberg`, `immenstadter_horn`, `hausdorf_meadow`, `lago_disola`, `camdeboo_road`, `montorfano`, `evening_meadow`, `steinbach_field`, `stierberg_sunrise`, `countrytrax_midday`, `spaichingen_hill`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `horn-koppe_spring`, `limpopo_golf_course`, `poolbeg`, `rural_asphalt_road`, `snow_field`, `snowy_hillside_02`, `suburban_football_field` and `wildflower_field`.
 
-The site list keeps a small preview of every photo in the caches folder and makes missing ones in the background, so it opens at once; both the site list and the aircraft list reopen on the filter you last used.
+The site list keeps a small preview of every photo in the caches folder and makes missing ones in the background, so it opens at once.
 
 For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
 
@@ -129,7 +128,7 @@ For your own photos, the `.json` file next to the image can also set where aircr
 
 `bearing` is measured in the photo (0° at the image centre, positive to the right). **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
 
-Photo sites have a flat, invisible ground plane and use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
+The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
 ## Controls
 
@@ -198,7 +197,7 @@ Press **H** in the app for this list.
   - **Propeller blast** is worked out from each aircraft's geometry: every wing panel, tailplane half and fin gets the share of its area that lies inside the slipstream tube behind a propeller ahead of it. Inboard ailerons on a 3D model are blown, outboard ailerons are not, a twin's fin sits between the two streams, and ducted fans and pushers blow on nothing.
   - **Hovering:** the wing's downwash on the tail is taken from the lift the wing is really making, so a model hanging on its propeller has none. The flat or slab-sided fuselage of a 3D model works as a keel in the blast ahead of the centre of gravity and offsets the fin, so a sideways slide does not swing the tail round. 3D and aerobatic models are balanced close to neutral, so they need almost no trim.
   - **Control rates** are calibrated when the app starts: each airplane is test-flown and its control throws scaled until it rolls, pitches and yaws at the rate its category is set up for (for example 150°/s of roll for a trainer, 380°/s for an aerobat, 95°/s for a glider).
-- **Flying wings** have no tailplane. Pitch and roll both come from elevons, the wing is balanced by a reflexed section (or, for the delta, by its shape), and stability comes from sweep and a small static margin. Fins are on the wingtips, on the body, or absent (the Horten, which is loose in yaw).
+- **Flying wings** have no tailplane. Pitch and roll both come from elevons, the wing is balanced by a reflexed section (or, for the delta, by its shape), and stability comes from sweep and a small static margin. Fins are on the wingtips, on the body, or absent (the Horten and the B-2, which are loose in yaw). The five tailless jets are listed under Jets.
 - **Multirotors** command motor speed, and thrust goes with speed squared, so a powerful quad hovers around a quarter to a third of the stick. The mixer gives attitude priority over throttle and the motors idle in flight, so flips and dives with the throttle closed stay under control. Acro uses a rate curve (gentle at the centre, steep at the ends) with a full-stick rate set per model, from 260°/s for the hexacopter to 900°/s for the five-inch racer. Propellers lose thrust as air speeds up through them and gain it when pushed against the air, the battery sags under load, and sinking through its own downwash brings propwash: lost lift and a wobble, milder with ducts.
 - **Helicopters** have two flight modes, Stabilized (the cyclic stick commands a lean angle and the machine levels itself) and Acro (the cyclic commands a rate). In both, the throttle stick is collective pitch, symmetric about mid stick, so they fly inverted on negative pitch. Rotor speed is a separate three-position setting (80, 90 or 100 % head speed, key I), as on a transmitter's idle-up switch.
 - **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
@@ -261,7 +260,7 @@ swift run -c release FlightCore --selftest
 - Aircraft and airport editors
 - Flight recording and playback
 - Flight-instructor lessons
-- Sloping ground and occlusion by photographed objects on photo sites
+- Uneven ground (anything other than one level or tilted plane) and occlusion by photographed objects on photo sites
 
 ## Credits
 
