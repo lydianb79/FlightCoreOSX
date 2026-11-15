@@ -26,6 +26,7 @@ final class HUDModel: ObservableObject {
     unowned var game: Game!
     var thumbnailer: ((AircraftSpec) -> NSImage?)?      // provided by the renderer
     var addPanorama: (() -> Void)?
+    var choosePanoramaFolder: (() -> Void)?
     var openControllerSetup: (() -> Void)?
     private var thumbs: [String: NSImage] = [:]
     private var sitePreviews: [String: NSImage] = [:]
@@ -38,6 +39,8 @@ final class HUDModel: ObservableObject {
     }
 
     private var previewsPending = Set<String>()
+    /// Forget the photo-site previews held in memory (the photo folder changed) and prepare them again.
+    func clearSitePreviews() { sitePreviews = [:]; warmSitePreviews() }
     private static let previewQueue = DispatchQueue(label: "flightcore.previews", qos: .userInitiated)
 
     /// Where the small preview of a photo site is kept, so the big photograph is decoded once, not on every launch.

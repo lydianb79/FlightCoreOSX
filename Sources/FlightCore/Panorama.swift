@@ -43,6 +43,18 @@ enum Panoramas {
         return dir
     }
 
+    /// A folder of the user's own choosing that is searched for panoramas as well (Flying Site ▸ Choose Panoramas Folder…).
+    static var customDir: URL? {
+        get {
+            guard let p = UserDefaults.standard.string(forKey: "panoramaFolder"), !p.isEmpty else { return nil }
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: p, isDirectory: &isDir) && isDir.boolValue ? URL(fileURLWithPath: p, isDirectory: true) : nil
+        }
+        set { UserDefaults.standard.set(newValue?.path ?? "", forKey: "panoramaFolder") }
+    }
+    /// Where new photos go and what "Show Panoramas Folder" opens.
+    static var activeDir: URL { customDir ?? userDir }
+
     static func site(for url: URL) -> SiteSpec {
         let pretty = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
         var s = SiteSpec(name: pretty.capitalized, style: 0, seed: 1, runwayLen: 100, runwayWid: 0, runwayType: 3, flatCenterZ: 0, flatHalfZ: 100,
@@ -70,13 +82,17 @@ enum Panoramas {
     }
 
     static func discover() -> [SiteSpec] {
-        var dirs = [userDir, URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Panoramas")]
+        var dirs = [customDir, userDir].compactMap { $0 } + [URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Panoramas")]
+        // a chosen folder may hold the photos one level down, as an unzipped download does
+        if let c = customDir, let subs = try? FileManager.default.contentsOfDirectory(at: c, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+            dirs.insert(contentsOf: subs.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }.sorted { $0.path < $1.path }, at: 1)
+        }
         dirs.append(Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Panoramas"))
         var seen = Set<String>(), out: [SiteSpec] = []
         for dir in dirs {
             let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             for f in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where extensions.contains(f.pathExtension.lowercased()) {
-                if seen.insert(f.standardizedFileURL.path).inserted { out.append(site(for: f)) }
+                if seen.insert(f.lastPathComponent.lowercased()).inserted { out.append(site(for: f)) }      // the same photo in two folders is one site
             }
         }
         return out

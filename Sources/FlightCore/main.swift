@@ -877,6 +877,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if interactive || CommandLine.arguments.contains("--splash") { game.hud.overlay = .splash }
         if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu, "splash": .splash][o] ?? .none }
         game.hud.addPanorama = { [unowned self] in self.addPanorama() }
+        game.hud.choosePanoramaFolder = { [unowned self] in self.choosePanoramaFolder() }
         game.hud.openControllerSetup = { [unowned self] in self.showSetup() }
         if let c = Int(arg("--cam") ?? "") { game.cameraMode = c }
         if let z = Int(arg("--zoom") ?? "") { game.zoomMode = z }
@@ -1042,7 +1043,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         siteItems.insert(.separator(), at: 1)
         siteItems.append(.separator())
         siteItems.append(ClosureMenuItem("Add 360° Panorama Photo…", key: "o") { [unowned self] in self.addPanorama() })
-        siteItems.append(ClosureMenuItem("Show Panoramas Folder") { NSWorkspace.shared.open(Panoramas.userDir) })
+        siteItems.append(ClosureMenuItem("Choose Panoramas Folder…") { [unowned self] in self.choosePanoramaFolder() })
+        if Panoramas.customDir != nil {
+            siteItems.append(ClosureMenuItem("Use the Default Panoramas Folder") { [unowned self] in Panoramas.customDir = nil; self.reloadSites(); self.game.say("Using the default panoramas folder") })
+        }
+        siteItems.append(ClosureMenuItem("Show Panoramas Folder") { NSWorkspace.shared.open(Panoramas.activeDir) })
         siteItems.append(.separator())
         siteItems.append(ClosureMenuItem("Photo: Rotate Left 5°", key: String(UnicodeScalar(NSLeftArrowFunctionKey)!), mods: [.command, .option]) { g.adjustPanorama(north: -5) })
         siteItems.append(ClosureMenuItem("Photo: Rotate Right 5°", key: String(UnicodeScalar(NSRightArrowFunctionKey)!), mods: [.command, .option]) { g.adjustPanorama(north: 5) })
@@ -1104,13 +1109,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard panel.runModal() == .OK else { return }
         var last: URL?
         for src in panel.urls {
-            let dst = Panoramas.userDir.appendingPathComponent(src.lastPathComponent)
+            let dst = Panoramas.activeDir.appendingPathComponent(src.lastPathComponent)
             if !FileManager.default.fileExists(atPath: dst.path) { try? FileManager.default.copyItem(at: src, to: dst) }
             if FileManager.default.fileExists(atPath: dst.path) { last = dst }
         }
+        reloadSites()
+        if let l = last, let i = SiteSpec.all.firstIndex(where: { $0.panorama?.lastPathComponent == l.lastPathComponent }) { game.selectSite(i); game.hud.overlay = .none }
+    }
+
+    /// Look for photo sites again, keeping the current site selected if it is still there.
+    private func reloadSites() {
+        let current = game.site.name
         SiteSpec.all = SiteSpec.builtIn + Panoramas.discover()
         buildMenus()
-        if let l = last, let i = SiteSpec.all.firstIndex(where: { $0.panorama?.lastPathComponent == l.lastPathComponent }) { game.selectSite(i); game.hud.overlay = .none }
+        game.hud.clearSitePreviews()
+        game.selectSite(SiteSpec.all.firstIndex { $0.name == current } ?? 0)
+        game.hud.objectWillChange.send()
+    }
+
+    /// Let the user point FlightCore at any folder of panoramas, for example an unzipped download.
+    private func choosePanoramaFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.message = "Choose the folder that holds your 360° panorama photos"
+        panel.prompt = "Use This Folder"
+        if let c = Panoramas.customDir { panel.directoryURL = c }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let before = SiteSpec.all.filter { $0.panorama != nil }.count
+        Panoramas.customDir = url
+        reloadSites()
+        let n = SiteSpec.all.filter { $0.panorama != nil }.count
+        game.say(n > before ? "\(n - before) photo sites added from \(url.lastPathComponent)" : (n == 0 ? "No panorama photos found in \(url.lastPathComponent)" : "\(n) photo sites; none new in \(url.lastPathComponent)"), 5)
     }
 
     private func showSetup() {
