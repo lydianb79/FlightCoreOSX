@@ -254,16 +254,15 @@ struct PlaneGeom {
 
 private func flapTau(_ frac: Float) -> Float { min(0.9 * sqrt(frac), 0.8) }
 
-/// Build an airplane and check its balance by test: if the simulated aircraft turns out less nose-heavy than
-/// intended (biplanes and other shapes the estimate misjudges), move the wing back to put the centre of gravity right.
+/// Build an airplane and check its balance by test: the estimate of where the lift acts misjudges biplanes, long
+/// tails and slender wings, so the simulated aircraft is measured and the wing moved until the centre of gravity
+/// sits the intended distance ahead of the neutral point. Corrected both ways: too far forward makes a model
+/// nose-heavy and in need of constant up elevator, too far back makes it twitchy.
 func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     var spec = buildAirplane(g)
-    for _ in 0..<2 {
+    for _ in 0..<4 {
         let actual = measuredMargin(spec, throttle: 0.3)
-        // 3D and aerobatic models are balanced close to neutral on purpose: one that came out nose-heavy needs up
-        // trim to fly level, and in a hover that trim, blown by the propeller, keeps pitching it over
-        let neutral = g.profile || g.category == "Foam 3D" || g.category == "Aerobatic"
-        if actual >= spec.designMargin - 0.01 && !(neutral && actual > spec.designMargin + 0.01) { break }
+        if abs(actual - spec.designMargin) <= 0.008 { break }
         spec = buildAirplane(g, cgShift: spec.cgShift + (spec.designMargin - actual) * spec.mac)
     }
     return spec
@@ -314,7 +313,7 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
         let aW = slope * area * nWings * wingEff
         let aT = g.flyingWing ? 0 : tailSlope * g.stabSpan * g.stabChord * (1 - slope * downK)
         let zT = g.stabZ + 0.25 * g.stabChord
-        let m = g.margin ?? (g.profile ? 0.07 : (["Wings": 0.10, "Aerobatic": 0.09, "Warbirds": 0.12, "Jets": 0.12, "Gliders": 0.13, "Scale Civil": 0.15, "Trainers & Sport": 0.17][g.category] ?? 0.12))
+        let m = g.margin ?? (g.profile ? 0.07 : (["Wings": 0.10, "Aerobatic": 0.09, "Warbirds": 0.10, "Jets": 0.10, "Gliders": 0.11, "Scale Civil": 0.13, "Trainers & Sport": 0.15][g.category] ?? 0.11))
         g.wingLE = (m * mac * (aW + aT) - aT * zT) / aW - acOff + cgShift
         staticMargin = m
     }
@@ -719,7 +718,10 @@ func trimForCruise(_ spec0: AircraftSpec) -> AircraftSpec {
     var spec = spec0
     guard spec.kind == .airplane else { return spec }
     let glider = spec.category == "Gliders"
-    let v = spec.stallSpeed * (glider ? 1.45 : 1.8), thr: Float = glider ? 0 : 0.45
+    // near-neutral aerobats and 3D models barely change speed with trim, and fast jets need a margin above the stall
+    let quick = spec.category == "Aerobatic" || spec.category == "Foam 3D"
+    let k: Float = glider ? 1.3 : (quick || spec.category == "Jets" ? 1.8 : 1.5)
+    let v = spec.stallSpeed * k, thr: Float = glider ? 0 : (k > 1.6 ? 0.45 : 0.35)
     let tailless = !spec.surfaces.contains { $0.flapCh == 1 }
     func apply(_ d: Float, to s: inout AircraftSpec) {
         for i in s.surfaces.indices {

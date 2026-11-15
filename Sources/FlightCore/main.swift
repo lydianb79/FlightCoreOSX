@@ -786,6 +786,30 @@ if CommandLine.arguments.contains("--powerlist") {
     for a in AircraftLibrary.all { print("\(a.category.padding(toLength: 17, withPad: " ", startingAt: 0)) \(a.name.padding(toLength: 32, withPad: " ", startingAt: 0)) \(a.powerPlant)") }
     exit(0)
 }
+if CommandLine.arguments.contains("--glidetest") {
+    // every airplane, throttle closed and hands off: the speed it settles at, and the up elevator a slow approach takes
+    let terrain = Terrain(site: SiteSpec.all[0])
+    print("category          name                            margin  hands-off glide   up elevator to hold")
+    print("                                                  (glide)  (x stall)        1.2 x stall  1.1 x stall")
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        ac.reset(pos: V3(0, 400, 0), heading: 0, speed: spec.stallSpeed * 1.5)
+        let c = Controls()
+        var sum: Float = 0, n: Float = 0
+        for i in 0..<14000 { ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0); if i >= 9000 { sum += length(ac.vel); n += 1 } }
+        func elev(_ k: Float) -> Float {
+            let v = spec.stallSpeed * k
+            var lo: Float = -4 * deg, hi: Float = 16 * deg
+            for _ in 0..<12 { let mid = (lo + hi) / 2; if pitchBalance(spec, alpha: mid, speed: v, throttle: 0).lift < spec.mass * gravity { lo = mid } else { hi = mid } }
+            let a = (lo + hi) / 2
+            let m0 = pitchBalance(spec, alpha: a, speed: v, throttle: 0).moment, m1 = pitchBalance(spec, alpha: a, speed: v, throttle: 0, elevator: 0.5).moment
+            return abs(m1 - m0) > 1e-6 ? -m0 / (m1 - m0) * 0.5 : 0
+        }
+        print(String(format: "%@ %@ %4.0f%%     %5.2f          %5.0f%%       %5.0f%%", spec.category.padding(toLength: 17, withPad: " ", startingAt: 0),
+                     spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), measuredMargin(spec, throttle: 0) * 100, sum / n / spec.stallSpeed, elev(1.2) * 100, elev(1.1) * 100))
+    }
+    exit(0)
+}
 if CommandLine.arguments.contains("--parktest") {
     // every photo site: the model must sit still on the ground where it starts, clear of every obstacle
     var bad = 0, keep: [Game] = []
