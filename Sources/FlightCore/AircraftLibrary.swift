@@ -787,7 +787,7 @@ enum AircraftLibrary {
                 $0.gear = .tricycle; $0.gearH = 0.17; $0.retracts = false; $0.tipChord = $0.rootChord; $0.mass *= 0.75; $0.thrust *= 0.6; $0.pitchSpeed = 24; $0.blades = 2; $0.canopyLen = 0.14; $0.spinnerColor = white; $0.camber = 3 },
             mk(warbird, 1.6, "Beechcraft Bonanza", "Scale Civil", "Fast retractable tourer with slippery lines", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: navy) {
                 $0.gear = .tricycle; $0.gearH = 0.17; $0.mass *= 0.85; $0.thrust *= 0.75; $0.pitchSpeed = 28; $0.blades = 3; $0.canopyLen = 0.15; $0.spinnerColor = grey },
-            mk(warbird, 1.65, "Cirrus SR22", "Scale Civil", "Modern composite tourer: sleek, quick, fixed spatted gear", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: grey) {
+            mk(warbird, 1.65, "Cirrus SR22", "Scale Civil", "Modern composite tourer: sleek, quick, fixed spatted gear", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.05, 0.35, 0.55)) {
                 $0.gear = .tricycle; $0.gearH = 0.17; $0.retracts = false; $0.pants = true; $0.mass *= 0.82; $0.thrust *= 0.7; $0.pitchSpeed = 28; $0.blades = 3; $0.canopyLen = 0.16; $0.spinnerColor = grey; $0.tipChord *= 0.85 },
             mk(warbird, 1.75, "Diamond DA40", "Scale Civil", "Long-winged T-tail trainer that glides like a sailplane", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: red) {
                 $0.gear = .tricycle; $0.gearH = 0.17; $0.retracts = false; $0.pants = true; $0.tTail = true; $0.mass *= 0.7; $0.thrust *= 0.55; $0.pitchSpeed = 24; $0.blades = 3

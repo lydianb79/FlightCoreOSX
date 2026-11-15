@@ -205,28 +205,51 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
     let cFuse = gl(g.fuse, film), cTop = gl(g.wingTop, film), cBot = gl(g.wingBottom, film), cTail = gl(g.tail, film), cAcc = gl(g.accent, film)
     let dark = V4(0.06, 0.06, 0.07, film), white = V4(0.96, 0.96, 0.95, film)
 
+    // engine layout seen from outside: a blunt open cowl with cylinders for radials, exhaust stacks for inlines
+    let scaleType = ["Warbirds", "Scale Civil", "Aerobatic"].contains(g.category) && realData[g.dataKey ?? g.name] != nil
+    let radialEngine = scaleType && !g.ducted && g.twin == 0 && g.spinnerScale < 0.33 && g.fuseExp <= 2.4 && g.sound < 165
+    let inlineEngine = scaleType && !g.ducted && g.twin == 0 && !radialEngine && g.category == "Warbirds" && g.upperWingY == nil
+    let ks = g.span / 1.5            // size of small fittings relative to a 1.5 m model
+
     // --- trim schemes
+    let yellowID = V4(0.9, 0.75, 0.08, film), walk = V4(0.07, 0.07, 0.08, 0.05), olive = V4(0.2, 0.24, 0.14, 0.05), metal = V4(0.3, 0.3, 0.32, 0.6)
+    let lowWing = g.upperWingY == nil && g.wingY < g.fuseH * 0.2
+    // fabric-covered wings show their ribs as faint alternating bands
+    let fabric = g.scheme == 5 || (g.upperWingY != nil && g.scheme == 8) || g.name.contains("Storch") || g.name.contains("Cub")
     func wingPaint(_ f: Float, _ x: Float, _ top: Bool) -> V4 {
+        let c = wingBase(f, x, top)
+        return fabric && Int(f * 34) % 2 == 0 ? dim(c, 0.93) : c
+    }
+    func wingBase(_ f: Float, _ x: Float, _ top: Bool) -> V4 {
+        // a non-slip walkway at the root of low wings
+        if top && lowWing && !g.profile && !g.flyingWing && [2, 4, 7, 8].contains(g.scheme) && f < 0.13 && x > 0.3 && x < 0.78 { return walk }
         switch g.scheme {
         case 1:     // aerobatic: tapering stripes on top, checkerboard underneath
             if top { return (f > 0.22 && f < 0.36 && x < 0.75) || (f > 0.5 && f < 0.62 && x < 0.6) || (f > 0.78 && f < 0.88 && x < 0.45) ? cAcc : (x < 0.1 ? white : cTop) }
             return (Int(f * 8) + (x > 0.5 ? 1 : 0)) % 2 == 0 ? cBot : dark
         case 2:     // warbird: invasion stripes
             if f > 0.36 && f < 0.66 { return Int((f - 0.36) / 0.06) % 2 == 0 ? white : dark }
+            if f > 0.93 { return cTail }
             return top ? cTop : cBot
         case 3:     // glider: coloured tips, bold underside
-            if top { return f > 0.82 ? cTail : cTop }
+            if top { return f > 0.82 || (f > 0.74 && f < 0.77) ? cTail : cTop }
             return f > 0.82 || (f > 0.3 && f < 0.5) ? cBot : white
         case 4:     // jet: leading-edge and tip accents
             if x < 0.1 || f > 0.93 { return cAcc }
+            if !top && f > 0.4 && f < 0.56 { return cAcc }
             return top ? cTop : cBot
         case 5:     // vintage: single colour with dark leading edge
             return top ? (x < 0.06 ? dark : cTop) : cBot
-        case 6:     // civil: coloured tips
-            return f > 0.9 ? cAcc : (top ? cTop : cBot)
+        case 6:     // civil: coloured tips with a pinstripe, de-icing boots, bands underneath for orientation
+            if boots && x < 0.05 && f < 0.92 { return matte }
+            if f > 0.9 || (f > 0.82 && f < 0.86) { return cAcc }
+            if !top && f > 0.3 && f < 0.48 { return cAcc }
+            return top ? cTop : cBot
         case 7:     // two-tone camouflage above, light below
+            if top && x < 0.05 && f > 0.55 && f < 0.95 { return yellowID }          // identification strip on the outer leading edge
             return top ? (camo(f * 1.6, x * 0.9) ? cAcc : cTop) : cBot
-        case 8:     // plain
+        case 8:     // plain, with coloured tips
+            if f > 0.93 { return cAcc }
             return top ? cTop : cBot
         case 9:     // printed foam
             if top { return f > 0.86 ? cTail : ((f > 0.3 && f < 0.52 && x > 0.12) ? cAcc : (x < 0.12 ? dark : cTop)) }
@@ -239,34 +262,80 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
     func tailPaint(_ f: Float, _ x: Float, _ top: Bool) -> V4 {
         switch g.scheme {
         case 1: return (Int(f * 4) % 2 == 0) == (x < 0.5) ? cTail : cAcc
-        case 2: return f > 0.8 ? cTail : (top ? cTop : cBot)
-        case 6: return f > 0.72 ? cAcc : cTail
+        case 2: return f > 0.8 ? cTail : (x > 0.62 ? dim(top ? cTop : cBot, 0.82) : (top ? cTop : cBot))
+        case 4: return x < 0.07 ? metal : (f > 0.78 || (f > 0.6 && f < 0.68) ? cAcc : cTail)
+        case 6:
+            if boots && x < 0.07 && f < 0.9 { return matte }
+            return f > 0.72 || (f > 0.52 && f < 0.62) ? cAcc : cTail
         case 7: return top ? (camo(f * 0.8 + 3, x * 0.6) ? cAcc : cTop) : (g.tTail ? cBot : cBot)
-        case 8: return cTail
-        case 9: return f > 0.7 ? cAcc : cTail
-        default: return f > 0.78 ? cAcc : (top ? cTail : (g.scheme == 3 ? cBot : cTail))
+        case 8: return f > 0.82 ? cAcc : (x > 0.62 && Int(f * 8) % 2 == 0 && g.upperWingY != nil ? dim(cTail, 0.9) : cTail)
+        case 9: return f > 0.7 ? cAcc : ((Int(f * 6) + (x > 0.5 ? 1 : 0)) % 2 == 0 ? cTail : dim(cTail, 0.55))
+        case 3: return f > 0.78 || (f > 0.62 && f < 0.68) ? cAcc : (top ? cTail : cBot)
+        default:
+            // sport: striped control surfaces
+            if x > 0.62 && f < 0.78 && Int(f * 7) % 2 == 0 { return white }
+            return f > 0.78 ? cAcc : cTail
         }
     }
     func fusePaint(_ t: Float, _ sx: Float, _ sy: Float) -> V4 {
+        let stain = inlineEngine && t > 0.1 && t < 0.4 && abs(sy) < 0.2        // exhaust staining along the nose
         switch g.scheme {
         case 1:
             if t < 0.14 { return cTail }
+            if t > 0.5 && t < 0.8 && sy > 0.12 { return (Int(t * 14) + (sy > 0.6 ? 1 : 0)) % 2 == 0 ? cAcc : cFuse }     // checkers behind the cockpit
             return sy > -0.3 && sy < 0.12 ? cTail : (sy < -0.3 ? white : cFuse)
-        case 2: return t < 0.07 ? cTail : (sy < -0.35 ? cBot : (t > 0.72 && t < 0.78 ? white : cFuse))
-        case 3: return t < 0.1 ? cTail : (abs(sy) < 0.16 && t < 0.6 ? cAcc : cFuse)
-        case 4: return sy < -0.3 ? cBot : (abs(sy - 0.05) < 0.16 ? cAcc : cFuse)
-        case 5: return abs(sy + 0.05) < 0.14 && t > 0.03 ? cTail : cFuse
-        case 6: return abs(sy + 0.02) < 0.13 || (sy > -0.42 && sy < -0.3) ? cAcc : cFuse
-        case 7: return sy < -0.35 ? cBot : (camo(t * 2.2, sy * 0.5 + sx * 0.3) ? cAcc : cTop)
-        case 8: return t < 0.1 ? cAcc : cFuse
+        case 2:
+            if t < 0.07 { return cTail }
+            if t < 0.3 && sy > 0.9 { return olive }                                  // anti-glare panel
+            if stain { return dim(cFuse, 0.8) }
+            if t > 0.5 && t < 0.8 { return t < 0.64 ? white : dark }                 // invasion stripes round the rear fuselage
+            return sy < -0.35 ? cBot : cFuse
+        case 3:
+            if t < 0.1 { return cTail }
+            if sy < -0.75 && t < 0.55 { return cTail }
+            return abs(sy) < 0.16 && t < 0.6 ? cAcc : cFuse
+        case 4:
+            if t < 0.05 { return walk }                                              // radome
+            if t > 0.93 { return metal }                                             // jet pipe
+            return sy < -0.3 ? cBot : (abs(sy - 0.05) < 0.16 ? cAcc : cFuse)
+        case 5:
+            if t < 0.035 { return dark }
+            return abs(sy + 0.05) < 0.14 && t > 0.03 ? cTail : (sy < -0.8 ? dim(cFuse, 0.8) : cFuse)
+        case 6:
+            if cabinWindows > 0 && t > 0.12 && t < 0.23 && sy > 0.25 { return glass }            // windscreen
+            if t < 0.12 && sy > 0.9 { return matte }                                             // anti-glare panel
+            if t < 0.03 { return cAcc }                                                          // cowl ring
+            if abs(sy) < 0.2 && t < 0.94 { return cAcc }                                         // cheatline
+            return sy < -0.75 ? cBelly : cFuse
+        case 7:
+            if sy < -0.35 { return cBot }
+            if stain { return dim(cTop, 0.72) }
+            if t > 0.8 && t < 0.93 { return cBot }                                               // rear fuselage band
+            return camo(t * 2.2, sy * 0.5 + sx * 0.3) ? cAcc : cTop
+        case 8:
+            if t < 0.1 { return cAcc }
+            if t < 0.3 && sy > 0.9 && g.upperWingY == nil { return walk }                        // anti-glare panel
+            if stain { return dim(cFuse, 0.8) }
+            return t > 0.8 && t < 0.93 ? cAcc : cFuse
         case 9:
             if t > 0.2 && t < 0.4 && sy > 0.45 { return V4(0.08, 0.1, 0.14, film) }
             return abs(sy + 0.1) < 0.2 && t > 0.05 && t < 0.9 ? cAcc : (t < 0.05 ? dark : cFuse)
         default:
             if t < 0.11 { return cTail }
+            if sy < -0.75 { return cTail }
             return abs(sy) < 0.2 && t < 0.86 ? cTail : (abs(sy) < 0.3 && t < 0.86 ? white : cFuse)
         }
     }
+
+    // Extra detail for the civil (mostly white) scheme: cabin windows and a windscreen in place of a
+    // bubble canopy, de-icing boots on turboprops, a dark anti-glare panel, and bolder trim.
+    let civil = g.scheme == 6
+    let cabinWindows: Int = !civil || g.canopyLen >= 0.16 ? 0
+        : (["Cessna 208 Caravan": 6, "Pilatus PC-12": 6, "DHC-6 Twin Otter": 7, "Twin Otter Floatplane": 7, "Beechcraft King Air": 5, "Pilatus PC-6 Porter": 4,
+            "DHC-2 Beaver": 3, "Beaver Floatplane": 3, "Beechcraft Bonanza": 3][g.name] ?? 2)
+    let boots = civil && (g.sound >= 165 || g.twin > 0)
+    let cBelly = V4(g.accent.x * 0.75, g.accent.y * 0.75, g.accent.z * 0.75, film)
+    let matte = V4(0.1, 0.1, 0.11, 0.08)
 
     var parts: [Part] = []
     var b = MeshBuilder()
@@ -287,11 +356,65 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
         let prof: [(Float, Float, Float, Float)] = (g.ducted && !g.noseIntake) || g.twin > 0
             ? [(0, 0.06, 0.06, -0.1), (0.03, 0.3, 0.3, -0.08), (0.1, 0.62, 0.62, -0.04), (0.2, 0.86, 0.88, 0), (0.32, 1, 1, 0), (0.45, 1, 1, 0), (0.6, 0.86, 0.88, 0.04), (0.78, 0.58, 0.64, 0.12), (0.92, 0.34, 0.44, 0.22), (1, 0.16, 0.3, 0.3)]
             : [(0, 0.44, 0.46, 0), (0.012, 0.66, 0.68, 0), (0.05, 0.88, 0.88, 0), (0.12, 0.98, 0.98, 0), (0.22, 1, 1, 0), (0.36, 1, 1, 0), (0.5, 0.92, 0.94, 0.02), (0.64, 0.74, 0.8, 0.08), (0.8, 0.5, 0.6, 0.16), (0.93, 0.28, 0.42, 0.25), (1, 0.14, 0.3, 0.3)]
-        b.fuselage(prof.map { (z: nz + $0.0 * L, w: w * $0.1, h: h * $0.2, y: h * $0.3) }, exp: g.fuseExp, soft: g.scheme == 7, paint: fusePaint)
+        var stations = prof
+        if radialEngine { stations[0] = (0, 0.86, 0.86, 0); stations[1] = (0.012, 0.97, 0.97, 0); stations[2] = (0.05, 1, 1, 0); stations[3] = (0.12, 1, 1, 0) }
+        b.fuselage(stations.map { (z: nz + $0.0 * L, w: w * $0.1, h: h * $0.2, y: h * $0.3) }, exp: g.fuseExp, soft: g.scheme == 7, paint: fusePaint)
+        if radialEngine {
+            // open cowl: a dark opening with the cylinders of the radial engine showing round the crankcase
+            b.ellipsoid(center: V3(0, 0, nz - 0.001), radii: V3(w * 0.8, h * 0.8, 0.004), color: walk, seg: 16, rings: 3)
+            b.ellipsoid(center: V3(0, 0, nz - 0.006), radii: V3(w * 0.26, h * 0.26, 0.012), color: metal, seg: 12, rings: 4)
+            for i in 0..<9 {
+                let a = Float(i) / 9 * 2 * .pi
+                b.cylinder(from: V3(cos(a) * w * 0.24, sin(a) * h * 0.24, nz - 0.005), to: V3(cos(a) * w * 0.72, sin(a) * h * 0.72, nz - 0.005), r0: w * 0.085, r1: w * 0.07, seg: 7, color: V4(0.45, 0.45, 0.47, 0.5))
+            }
+        }
+        if inlineEngine {
+            // a row of exhaust stacks down each side of the nose
+            for side in [Float(-1), 1] { for i in 0..<6 {
+                let z = nz + L * (0.085 + 0.022 * Float(i))
+                b.cylinder(from: V3(side * w * 0.9, h * 0.12, z), to: V3(side * (w * 1.0 + 0.008 * ks), h * 0.1, z + 0.012 * ks), r0: 0.006 * ks, r1: 0.005 * ks, seg: 6, color: V4(0.2, 0.17, 0.15, 0.3))
+            } }
+        }
+        if g.name.contains("Cub") {
+            // the Cub's cylinders stick out through the cowl
+            for side in [Float(-1), 1] { for z in [nz + L * 0.045, nz + L * 0.085] {
+                b.cylinder(from: V3(side * w * 0.7, -h * 0.05, z), to: V3(side * (w + 0.016 * ks), -h * 0.05, z), r0: 0.013 * ks, r1: 0.013 * ks, seg: 8, color: V4(0.12, 0.12, 0.13, 0.3))
+            } }
+        }
         // canopy glass with a frame
-        let cl = L * g.canopyLen, cz = nz + L * 0.3
-        b.ellipsoid(center: V3(0, h * 0.78, cz), radii: V3(w * 0.7, h * 0.62, cl), color: glass, seg: 16, rings: 8)
-        b.ellipsoid(center: V3(0, h * 0.74, cz), radii: V3(w * 0.74, h * 0.52, cl * 1.04), color: gl(g.fuse, film), seg: 16, rings: 4)
+        if cabinWindows > 0 {
+            // a row of cabin windows down each side, following the fuselage's taper
+            func at(_ t: Float) -> (w: Float, h: Float, y: Float) {
+                var i = 0
+                while i < prof.count - 2 && prof[i + 1].0 < t { i += 1 }
+                let k = (t - prof[i].0) / (prof[i + 1].0 - prof[i].0)
+                return (w * lerp(prof[i].1, prof[i + 1].1, k), h * lerp(prof[i].2, prof[i + 1].2, k), h * lerp(prof[i].3, prof[i + 1].3, k))
+            }
+            let t0: Float = 0.26, t1: Float = cabinWindows > 3 ? 0.66 : 0.26 + 0.09 * Float(cabinWindows)
+            let step = (t1 - t0) / Float(cabinWindows)
+            for i in 0..<cabinWindows {
+                let t = t0 + (Float(i) + 0.5) * step
+                let sec = at(t)
+                let yr: Float = 0.42
+                let xs = sec.w * pow(1 - pow(yr, g.fuseExp), 1 / g.fuseExp)
+                for side in [Float(-1), 1] {
+                    b.ellipsoid(center: V3(side * (xs + 0.0005), sec.y + sec.h * yr, nz + t * L), radii: V3(0.004, sec.h * 0.17, step * L * 0.34), color: glass, seg: 10, rings: 4)
+                }
+            }
+            // cabin door outline on the left
+            let d = at(0.3)
+            b.box(center: V3(-d.w * 0.985, d.y - d.h * 0.1, nz + (t0 - 0.025) * L), size: V3(0.002, d.h * 1.1, 0.003), color: V4(0.3, 0.3, 0.32, 0.3))
+        } else {
+            let cl = L * g.canopyLen, cz = nz + L * 0.3
+            b.ellipsoid(center: V3(0, h * 0.78, cz), radii: V3(w * 0.7, h * 0.62, cl), color: glass, seg: 16, rings: 8)
+            b.ellipsoid(center: V3(0, h * 0.74, cz), radii: V3(w * 0.74, h * 0.52, cl * 1.04), color: gl(g.fuse, film), seg: 16, rings: 4)
+            // canopy frame hoops
+            let frame = [3, 9].contains(g.scheme) ? walk : dim(gl(g.fuse, 0.3), 0.6)
+            for d in (g.canopyLen > 0.15 ? [Float(-0.45), 0, 0.45] : [Float(-0.32), 0.32]) {
+                let k = sqrt(1 - d * d) * 1.025
+                b.ellipsoid(center: V3(0, h * 0.78, cz + d * cl), radii: V3(w * 0.7 * k, h * 0.62 * k, 0.0035 * ks), color: frame, seg: 16, rings: 6)
+            }
+        }
         if g.noseIntake {
             b.ellipsoid(center: V3(0, 0, nz + 0.002), radii: V3(w * 0.34, h * 0.36, 0.01), color: black, seg: 12, rings: 3)
         } else if !g.ducted && g.twin == 0 {
@@ -312,24 +435,39 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
         let fRoot: Float = 0.5 * w / hs       // start just inside the fuselage side
         var wm = MeshBuilder()
         if a0 > 0.01 {
-            wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: fRoot, f1: hasFlap ? 0.09 : a0, strips: hasFlap ? 1 : 6, roundTip: false, soft: g.scheme == 7, paint: wingPaint)
-            if hasFlap { wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: 0.09, f1: a0, c1: k, strips: 5, roundTip: false, soft: g.scheme == 7, paint: wingPaint) }
+            wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: fRoot, f1: hasFlap ? 0.09 : a0, strips: hasFlap ? 1 : (fabric ? 18 : 6), roundTip: false, soft: g.scheme == 7, paint: wingPaint)
+            if hasFlap { wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: 0.09, f1: a0, c1: k, strips: fabric ? 14 : 5, roundTip: false, soft: g.scheme == 7, paint: wingPaint) }
         }
-        wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: max(a0, fRoot), f1: 1, c1: k, strips: a0 > 0.01 ? 7 : 12, roundTip: false, soft: g.scheme == 7, paint: wingPaint)
+        wm.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: max(a0, fRoot), f1: 1, c1: k, strips: (a0 > 0.01 ? 7 : 12) * (fabric ? 3 : 1), roundTip: false, soft: g.scheme == 7, paint: wingPaint)
         // wing tip block spanning the full chord, with a navigation-colour marker: green right, red left
         let tipCol = side > 0 ? V4(0.05, 0.6, 0.15, film) : V4(0.8, 0.05, 0.05, film)
         wm.wingPanel(le: { le(1) + normalize(le(1) - le(0.5)) * ($0 * g.tipChord * 0.05) }, chord: { _ in g.tipChord }, thick: g.thick, camber: g.camber * 0.006, up: up,
                      f0: 0, f1: 1, strips: 1, roundTip: true, paint: { _, x, t in x < 0.3 ? tipCol : wingPaint(0.99, x, t) })
-        parts.append(Part(mesh: wm, detach: true, center: le(0.5) + V3(0, 0, chord(0.5) * 0.5)))
         func surface(_ f0: Float, _ f1: Float, _ anim: Anim) {
             let pivot = le(f0) + V3(0, 0, chord(f0) * k)
             var m = MeshBuilder()
-            m.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: f0, f1: f1, c0: k, strips: 6, roundTip: false, soft: g.scheme == 7, paint: wingPaint)
+            m.wingPanel(le: le, chord: chord, thick: g.thick, camber: g.camber * 0.006, up: up, f0: f0, f1: f1, c0: k, strips: fabric ? 16 : 6, roundTip: false, soft: g.scheme == 7, paint: wingPaint)
+            // control horn under the surface, with its pushrod and the servo set into the wing
+            let fm = f0 + (f1 - f0) * 0.3
+            let hp = le(fm) + V3(0, 0, chord(fm) * k) - up * (0.004 * ks)
+            let tip = hp + V3(0, 0, 0.012 * ks) - up * (0.022 * ks)
+            m.tri(hp, hp + V3(0, 0, 0.03 * ks), tip, white05)
+            m.tri(hp + V3(0, 0, 0.03 * ks), hp, tip, white05)
+            let sv = le(fm) + V3(0, 0, chord(fm) * (k - 0.3)) - up * (g.thick * chord(fm) * 0.42)
+            wm.box(center: sv, size: V3(0.022, 0.006, 0.034) * ks, color: black)
+            wm.cylinder(from: sv - up * (0.012 * ks), to: tip, r0: 0.0012 * ks, r1: 0.0012 * ks, seg: 4, color: alu)
             m.translate(-pivot)
             parts.append(Part(mesh: m, pivot: pivot, axis: normalize(le(f1) + V3(0, 0, chord(f1) * k) - pivot) * side, anim: anim))
         }
         surface(max(a0, fRoot) + 0.005, 0.995, g.flyingWing ? .hinge(side > 0 ? 5 : 6, -max(g.ailThrow, g.elevThrow) * deg) : .hinge(0, -side * g.ailThrow * deg))
         if hasFlap { surface(0.095, a0 - 0.005, .hinge(3, 38 * deg)) }
+        if side < 0 && !g.profile && wg.y == g.wingY {
+            // pitot tube under the left wing
+            let pp = le(0.62) - up * (g.thick * chord(0.62) * 0.4) + V3(0, 0, chord(0.62) * 0.1)
+            wm.cylinder(from: pp, to: pp - up * (0.012 * ks), r0: 0.0015 * ks, r1: 0.0015 * ks, seg: 4, color: alu)
+            wm.cylinder(from: pp - up * (0.012 * ks), to: pp - up * (0.012 * ks) + V3(0, 0, -0.06 * ks), r0: 0.0018 * ks, r1: 0.0012 * ks, seg: 5, color: alu)
+        }
+        parts.append(Part(mesh: wm, detach: true, center: le(0.5) + V3(0, 0, chord(0.5) * 0.5)))
         if g.struts && wg.y > h * 0.5 {
             // lift struts from the lower fuselage to the wing
             for dz in [Float(0.22), 0.62] {
@@ -361,6 +499,11 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
             b.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0, f1: 1, c1: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
             em.wingPanel(le: sle, chord: sch, thick: tailThick, camber: 0, up: V3(0, 1, 0), f0: 0.02, f1: 0.99, c0: sk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
         }
+        // elevator horn and pushrod
+        let ehp = eh + V3(0.035 * ks, -0.003, 0)
+        em.tri(ehp, ehp + V3(0, 0, 0.03 * ks), ehp + V3(0, -0.022 * ks, 0.012 * ks), white05)
+        em.tri(ehp + V3(0, 0, 0.03 * ks), ehp, ehp + V3(0, -0.022 * ks, 0.012 * ks), white05)
+        b.cylinder(from: V3(0.02 * ks, stabY - 0.01, g.stabZ - 0.22 * L), to: ehp + V3(0, -0.022 * ks, 0.012 * ks), r0: 0.0012 * ks, r1: 0.0012 * ks, seg: 4, color: alu)
         em.translate(-eh)
         parts.append(Part(mesh: em, pivot: eh, axis: V3(1, 0, 0), anim: .hinge(1, -g.elevThrow * deg)))
     }
@@ -382,6 +525,15 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
         let rr = fle(0) + V3(0, 0, fch(0) * rk)
         var rm = MeshBuilder()
         rm.wingPanel(le: fle, chord: fch, thick: tailThick, camber: 0, up: V3(1, 0, 0), f0: 0.01, f1: 0.99, c0: rk, strips: 4, roundTip: true, soft: g.scheme == 7, paint: tailPaint)
+        // rudder horn and pushrod, and a beacon on top of the fin
+        let rhp = rr + V3(-0.003, g.finH * 0.12, 0)
+        rm.tri(rhp, rhp + V3(0, 0, 0.03 * ks), rhp + V3(-0.022 * ks, 0, 0.012 * ks), white05)
+        rm.tri(rhp + V3(0, 0, 0.03 * ks), rhp, rhp + V3(-0.022 * ks, 0, 0.012 * ks), white05)
+        b.cylinder(from: V3(-0.02 * ks, rhp.y, g.finZ - 0.22 * L), to: rhp + V3(-0.022 * ks, 0, 0.012 * ks), r0: 0.0012 * ks, r1: 0.0012 * ks, seg: 4, color: alu)
+        if !g.profile {
+            let ft = fle(1) + V3(0, 0.004 * ks, fch(1) * 0.45)
+            b.ellipsoid(center: ft, radii: V3(0.006, 0.006, 0.008) * ks, color: V4(0.9, 0.08, 0.05, 1), seg: 8, rings: 4)
+        }
         rm.translate(-rr)
         parts.append(Part(mesh: rm, pivot: rr, axis: normalize(fle(1) + V3(0, 0, fch(1) * rk) - rr), anim: .hinge(2, g.rudThrow * deg)))
     }
@@ -436,6 +588,10 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
             }
         }
         if g.retracts {
+            // gear door riding on the leg
+            let mid = (c + top) / 2
+            gm.box(center: mid + V3(nose ? 0 : (wp.x > 0 ? 1 : -1) * 0.012 * ks, 0, nose ? -0.012 * ks : 0),
+                   size: nose ? V3(rw * 1.3, abs(top.y - c.y) * 0.9, 0.003) : V3(0.003, abs(top.y - c.y) * 0.9, rw * 1.9), color: cBot)
             gm.translate(-top)
             parts.append(Part(mesh: gm, pivot: top, axis: nose ? V3(1, 0, 0) : V3(0, 0, 1), anim: .hinge(4, (nose ? -88 : (wp.x > 0 ? -84 : 84)) * deg)))
         } else {
@@ -499,10 +655,26 @@ func buildHeliModel(rotorR R: Float, body: V4, accent: V4) -> [Part] {
     for s in [Float(-1), 1] {
         b.wingPanel(le: { V3(s * 0.11 * $0, 0.035, 0.63) }, chord: { 0.065 - 0.02 * $0 }, thick: 0.06, camber: 0, up: V3(0, 1, 0), f0: 0, f1: 1, strips: 2, roundTip: true) { _, _, _ in cBody }
     }
+    // boom bands, fin stripes and lights
+    for (i, z) in [Float(0.3), 0.45, 0.6, 0.75].enumerated() {
+        b.cylinder(from: V3(0, 0.035, z), to: V3(0, 0.035, z + 0.06), r0: 0.0135, r1: 0.0133, seg: 10, color: i % 2 == 0 ? white05 : cAcc)
+    }
+    b.box(center: V3(0, 0.13, 0.955), size: V3(0.009, 0.025, 0.05), color: white05)
+    b.ellipsoid(center: V3(0, 0.225, 0.995), radii: V3(0.006, 0.006, 0.006), color: V4(0.9, 0.08, 0.05, 1), seg: 8, rings: 4)
+    for sd in [Float(-1), 1] {
+        b.ellipsoid(center: V3(sd * 0.083, 0.0, -0.1), radii: V3(0.004, 0.006, 0.012), color: sd > 0 ? V4(0.05, 0.7, 0.2, 1) : V4(0.9, 0.08, 0.05, 1), seg: 8, rings: 4)
+        // canopy vents and mounting grommets
+        b.ellipsoid(center: V3(sd * 0.078, 0.03, -0.02), radii: V3(0.004, 0.012, 0.03), color: black, seg: 8, rings: 3)
+        b.cylinder(from: V3(sd * 0.07, -0.05, 0.02), to: V3(sd * 0.088, -0.05, 0.02), r0: 0.006, r1: 0.006, seg: 7, color: alu)
+    }
+    // landing light and receiver antenna
+    b.ellipsoid(center: V3(0, -0.07, -0.33), radii: V3(0.012, 0.012, 0.006), color: V4(0.95, 0.95, 0.85, 1), seg: 8, rings: 4)
+    b.cylinder(from: V3(0.03, -0.06, 0.12), to: V3(0.05, -0.16, 0.2), r0: 0.001, r1: 0.001, seg: 4, color: black)
     // skids with upturned tips
     for x in [Float(-0.125), 0.125] {
         let pts = [V3(x, -0.15, -0.3), V3(x, -0.19, -0.25), V3(x, -0.195, -0.18), V3(x, -0.195, 0.2)]
         for i in 0..<3 { b.cylinder(from: pts[i], to: pts[i + 1], r0: 0.0065, r1: 0.0065, seg: 7, color: white05) }
+        for z in [Float(-0.3), 0.2] { b.ellipsoid(center: V3(x, z < 0 ? -0.15 : -0.195, z), radii: V3(0.009, 0.009, 0.012), color: cAcc, seg: 7, rings: 4) }
         for z in [Float(-0.13), 0.1] {
             b.cylinder(from: V3(x, -0.195, z), to: V3(x * 0.75, -0.13, z), r0: 0.006, r1: 0.006, seg: 6, color: black)
             b.cylinder(from: V3(x * 0.75, -0.13, z), to: V3(0, -0.115, z), r0: 0.006, r1: 0.006, seg: 6, color: black)
@@ -556,6 +728,12 @@ func buildQuadModel(motors: [V3], shell: V4, front: V4, rear: V4) -> [Part] {
     // camera
     b.box(center: V3(0, 0.0, -0.115), size: V3(0.04, 0.036, 0.03), color: black)
     b.cylinder(from: V3(0, 0.0, -0.13), to: V3(0, 0.0, -0.142), r0: 0.012, r1: 0.011, seg: 10, color: glass)
+    // GPS puck on a mast, shell stripe, tail light and landing-gear feet
+    b.cylinder(from: V3(0, 0.05, 0.05), to: V3(0, 0.1, 0.05), r0: 0.003, r1: 0.003, seg: 6, color: carbon)
+    b.cylinder(from: V3(0, 0.1, 0.05), to: V3(0, 0.108, 0.05), r0: 0.022, r1: 0.02, seg: 12, color: black)
+    b.box(center: V3(0, 0.0845, -0.01), size: V3(0.012, 0.004, 0.13), color: V4(0.95, 0.95, 0.95, 0.8))
+    b.box(center: V3(0, 0.02, 0.102), size: V3(0.05, 0.008, 0.004), color: V4(1, 0.1, 0.05, 1))
+    for sd in [Float(-1), 1] { b.box(center: V3(sd * 0.05, 0.03, 0), size: V3(0.003, 0.02, 0.12), color: carbon) }
     // antennas
     for s in [Float(-1), 1] { b.cylinder(from: V3(s * 0.02, 0.03, 0.09), to: V3(s * 0.05, 0.1, 0.12), r0: 0.0015, r1: 0.0015, seg: 4, color: black) }
     var parts: [Part] = []
