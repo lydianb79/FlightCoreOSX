@@ -988,6 +988,25 @@ final class ClosureMenuItem: NSMenuItem {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
+    private var windowedFrame = NSRect(x: 0, y: 0, width: 1280, height: 800)
+
+    /// Cover the whole screen, or go back to a normal window. Instant: no system animation.
+    func setFullScreen(_ on: Bool) {
+        guard let w = window as? FlightWindow, on != w.covers else { return }
+        if on {
+            windowedFrame = w.frame
+            NSApp.presentationOptions = [.autoHideMenuBar, .autoHideDock]
+            w.covers = true
+            w.setFrame((w.screen ?? NSScreen.main)?.frame ?? windowedFrame, display: true)
+        } else {
+            w.covers = false
+            NSApp.presentationOptions = []
+            w.setFrame(windowedFrame, display: true)
+        }
+        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(b)?.isHidden = on }
+        w.isMovable = !on
+        game.hud.fullscreen = on
+    }
     var game: Game!
     var renderer: Renderer!
     var setupWindow: NSWindow?
@@ -1058,7 +1077,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
-        window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = FlightWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "FlightCore"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -1067,7 +1086,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.backgroundColor = NSColor(srgbRed: 0.76, green: 0.13, blue: 0.1, alpha: 1)
         window.minSize = NSSize(width: 1000, height: 640)
         window.center()
-        window.collectionBehavior = [.fullScreenPrimary]
+        window.collectionBehavior = [.fullScreenNone]
         let container = NSView(frame: frame)
         container.wantsLayer = true
         let mtk = MTKView(frame: frame)
@@ -1088,11 +1107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.autoresizingMask = [.width, .height]
         container.addSubview(hud)
         window.contentView = container
+        // Full screen without macOS's own full-screen mode: that one slides the whole screen sideways into a new
+        // Space, which takes a second and is what made opening the app slow. Here the window simply covers the
+        // screen, with the menu bar and Dock tucked away, at once.
+        game.hud.splashGo = true
         window.makeKeyAndOrderFront(nil)
-        NotificationCenter.default.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [unowned self] _ in self.game.hud.fullscreen = true }
-        NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [unowned self] _ in self.game.hud.fullscreen = false }
-        // start in full screen (⌃⌘F leaves it); test command lines stay windowed unless asked
-        if interactive || CommandLine.arguments.contains("--fullscreen") { window.toggleFullScreen(nil) }
+        if interactive || CommandLine.arguments.contains("--fullscreen") { setFullScreen(true) }
         NSApp.activate(ignoringOtherApps: true)
         buildMenus()
         if CommandLine.arguments.contains("--setup") { showSetup() }
@@ -1261,7 +1281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewItems.append(.separator())
         viewItems.append(ClosureMenuItem("Show / Hide HUD") { g.hud.visible.toggle() })
         viewItems.append(ClosureMenuItem("Keyboard Controls") { g.cameFromMenu = g.hud.overlay == .menu; g.hud.overlay = g.hud.overlay == .help ? .none : .help })
-        viewItems.append(ClosureMenuItem("Toggle Full Screen", key: "f", mods: [.command, .control]) { [unowned self] in self.window.toggleFullScreen(nil) })
+        viewItems.append(ClosureMenuItem("Toggle Full Screen", key: "f", mods: [.command, .control]) { [unowned self] in self.setFullScreen(!((self.window as? FlightWindow)?.covers ?? false)) })
         menu("View", viewItems)
         menu("Controller", [
             ClosureMenuItem("Controller Setup…", key: ",") { [unowned self] in self.showSetup() },
@@ -1455,3 +1475,10 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.regular)
 app.run()
+
+/// The flight window. When it covers the screen it may sit over the menu bar area, which a titled window is
+/// normally kept out of.
+final class FlightWindow: NSWindow {
+    var covers = false
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { covers ? frameRect : super.constrainFrameRect(frameRect, to: screen) }
+}

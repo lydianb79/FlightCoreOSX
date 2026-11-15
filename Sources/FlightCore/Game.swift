@@ -23,6 +23,8 @@ final class HUDModel: ObservableObject {
     @Published var visible = true
     @Published var overlay = Overlay.none
     @Published var fullscreen = false
+    /// Set once the window is in place (full screen reached), so the splash animation starts on a still picture.
+    @Published var splashGo = false
     unowned var game: Game!
     var thumbnailer: ((AircraftSpec) -> NSImage?)?      // provided by the renderer
     var addPanorama: (() -> Void)?

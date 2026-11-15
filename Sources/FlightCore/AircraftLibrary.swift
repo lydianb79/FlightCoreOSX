@@ -659,12 +659,17 @@ func sized(_ base: PlaneGeom, span: Float, _ edit: (inout PlaneGeom) -> Void = {
     return g
 }
 
-/// Flat, empty ground for test flights made while the library is being built.
-private let calibrationGround: Terrain = {
+/// Flat, empty ground for test flights made while the library is being built. One per thread: the library is built
+/// on all cores, and a single shared object would have every core fighting over its reference count.
+private var calibrationGround: Terrain {
+    let key = "FlightCore.calibrationGround"
+    if let t = Thread.current.threadDictionary[key] as? Terrain { return t }
     var s = SiteSpec.builtIn[0]
     s.panorama = URL(fileURLWithPath: "/"); s.treeCount = 0; s.waterLevel = nil
-    return Terrain(site: s)
-}()
+    let t = Terrain(site: s)
+    Thread.current.threadDictionary[key] = t
+    return t
+}
 
 /// Peak roll, pitch and yaw rate (deg/s) at full stick from level flight at 1.6 times the stall speed.
 func measureRates(_ spec: AircraftSpec) -> (roll: Float, pitch: Float, yaw: Float) {
@@ -674,12 +679,13 @@ func measureRates(_ spec: AircraftSpec) -> (roll: Float, pitch: Float, yaw: Floa
         let ac = Aircraft(spec); ac.unlimitedBattery = true
         ac.reset(pos: V3(0, 200, 0), heading: 0, speed: spec.stallSpeed * 1.6)
         var c = Controls(); c.throttle = 0.5
-        for _ in 0..<150 { ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0) }
+        let ground = calibrationGround
+        for _ in 0..<150 { ac.step(dt: 0.001, c: c, terrain: ground, wind: .zero, rollMu: 0) }
         let base = pick(ac)
         set(&c)
         var peak: Float = 0
         for i in 0..<(early ? 200 : 450) {
-            ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0)
+            ac.step(dt: 0.001, c: c, terrain: ground, wind: .zero, rollMu: 0)
             peak = early ? (i == 199 ? abs(pick(ac) - base) : 0) : max(peak, abs(pick(ac)))
         }
         return peak / deg
@@ -697,9 +703,10 @@ func pitchBalance(_ spec: AircraftSpec, alpha: Float, speed: Float, throttle: Fl
     let v = V3(0, -speed * sin(alpha), -speed * cos(alpha))
     let q0 = ac.q
     // hold the attitude and speed while the motor, downwash and stall state settle
-    for _ in 0..<230 { ac.vel = v; ac.omega = .zero; ac.q = q0; ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0) }
+    let ground = calibrationGround
+    for _ in 0..<230 { ac.vel = v; ac.omega = .zero; ac.q = q0; ac.step(dt: 0.001, c: c, terrain: ground, wind: .zero, rollMu: 0) }
     ac.vel = v; ac.omega = .zero; ac.q = q0
-    ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0)
+    ac.step(dt: 0.001, c: c, terrain: ground, wind: .zero, rollMu: 0)
     return (ac.omega.x / 0.001 * spec.inertia.x, ((ac.vel.y - v.y) / 0.001 + gravity) * spec.mass)
 }
 
@@ -1508,7 +1515,22 @@ enum AircraftLibrary {
         var quad = makeQuad(); quad.category = "Multirotors"
         let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane) + more2.map(makeAirplane) + rotorcraft + moreWings.map(makeAirplane)
-        return everything.map { defaultRates(calibrateRates(trimForCruise($0))) }
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.pmap(makeAirplane) + foamies.pmap(makeAirplane) + more.pmap(makeAirplane) + seaplanes.pmap(makeAirplane) + flyingWings.pmap(makeAirplane) + more2.pmap(makeAirplane) + rotorcraft + moreWings.pmap(makeAirplane)
+        return everything.pmap { defaultRates(calibrateRates(trimForCruise($0))) }
     }()
+}
+
+extension Array {
+    /// `map` on all processor cores. Building and test-flying 175 aircraft at launch is independent work per
+    /// aircraft, and doing it one after another kept the app from opening for seconds.
+    func pmap<U>(_ f: (Element) -> U) -> [U] {
+        guard count > 1 else { return map(f) }
+        return [U](unsafeUninitializedCapacity: count) { buf, n in
+            let base = buf.baseAddress!
+            withoutActuallyEscaping(f) { f in
+                DispatchQueue.concurrentPerform(iterations: count) { i in (base + i).initialize(to: f(self[i])) }
+            }
+            n = count
+        }
+    }
 }

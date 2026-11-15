@@ -42,7 +42,7 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 ## Interface
 
-- **Splash screen** at launch; any key or click continues, or it moves on by itself after a few seconds.
+- **Splash screen** at launch: the artwork flies in and settles, then gives way to the main menu. Any key or click continues, or it moves on by itself after a few seconds.
 - **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures, including what powers the model: a brushless electric motor, an electric ducted fan, a piston engine or a turboprop. **Select** takes the aircraft and returns to the main menu.
 - **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama. **Select** takes the site and returns to the main menu.
@@ -219,7 +219,7 @@ Press **H** in the app for this list.
   - bloom, filmic tone mapping, a light colour grade, vignette and dithering are applied in a final pass.
   The sky and clouds are procedural and rendered at half resolution; grass and trees are frustum-culled in chunks. Render resolution adjusts automatically to hold the frame rate, up to a ceiling set by the Graphics quality level (Low, Medium, High). Shaders are compiled from source at launch.
 - **Frame pacing:** the simulation advances by exact display refresh periods, and the aircraft is drawn at its physics state carried forward by the fraction of a step not yet simulated, so motion is even from frame to frame. `FlightCore --perf` prints frame-pacing and motion statistics once a second.
-- **The app starts in full screen.** Press ⌃⌘F to switch to a window. The mouse pointer hides after five seconds without the mouse being touched and returns when it moves.
+- **The app starts in full screen.** Press ⌃⌘F to switch to a window. It covers the screen directly instead of using macOS's full-screen Spaces, so it opens at once with no sliding animation. The mouse pointer hides after five seconds without the mouse being touched and returns when it moves.
 - **Sound** is synthesized in stereo, with nothing sampled:
   - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle; every cylinder fires with its own strength in a repeating pattern, through a silencer that opens up with the throttle), ducted fans, turboprops, helicopter rotor with blade slap that follows the blade count, tail rotor and gear whine, and four separate multirotor motors that warble as the flight controller corrects;
   - propeller and motor tones brighten and harshen with load, each blade tears the air as it passes, ducted fans howl, and piston engines lope at idle;

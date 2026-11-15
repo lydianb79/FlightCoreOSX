@@ -234,15 +234,19 @@ struct HUDView: View {
                 }
                 .allowsHitTesting(false)
             }
-            switch m.overlay {
-            case .menu: MainMenu(m: m)
-            case .aircraft: AircraftBrowser(m: m)
-            case .sites: SiteBrowser(m: m)
-            case .environment: EnvironmentPanel(m: m)
-            case .help: HelpView(m: m)
-            case .splash: SplashView(m: m)
-            case .none: EmptyView()
+            Group {
+                switch m.overlay {
+                // the main menu rises into place as the splash flies past the viewer and fades
+                case .menu: MainMenu(m: m).transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .opacity))
+                case .aircraft: AircraftBrowser(m: m)
+                case .sites: SiteBrowser(m: m)
+                case .environment: EnvironmentPanel(m: m)
+                case .help: HelpView(m: m)
+                case .splash: SplashView(m: m).transition(.asymmetric(insertion: .identity, removal: .scale(scale: 1.35).combined(with: .opacity)))
+                case .none: EmptyView()
+                }
             }
+            .animation(.easeInOut(duration: 0.35), value: m.overlay == .splash)
         }
         .preferredColorScheme(.dark)
         .tint(Theme.red)
@@ -549,29 +553,60 @@ struct SiteBrowser: View {
 /// Full-screen title card shown at launch; any key or click continues.
 struct SplashView: View {
     @ObservedObject var m: HUDModel
+    @State private var arrived = false      // the artwork has flown in
+    @State private var pulse = false
     @State private var progress: CGFloat = 0
     private static let image: NSImage? = resourceURL("Splash.jpg").flatMap { NSImage(contentsOf: $0) }
+    private static let hold: Double = 3.0
+
     var body: some View {
-        ZStack {
-            Theme.red.ignoresSafeArea()
-            if let img = Self.image {
-                GeometryReader { g in
-                    Image(nsImage: img).resizable().scaledToFill().frame(width: g.size.width, height: g.size.height).clipped()
+        GeometryReader { g in
+            ZStack {
+                Theme.red
+                if let img = Self.image {
+                    // the artwork rushes toward the viewer and settles, then keeps drifting very slowly
+                    Image(nsImage: img).resizable().scaledToFill().frame(width: g.size.width, height: g.size.height)
+                        .scaleEffect(arrived ? 1.0 : 1.12)
+                        .blur(radius: arrived ? 0 : 8)
+                        .opacity(arrived ? 1 : 0)
+                        .scaleEffect(1 + 0.035 * progress)
+                        .clipped()
+                } else {
+                    Text("FLIGHT CORE OSX").font(.system(size: 90, weight: .black)).foregroundColor(Theme.cream)
+                        .scaleEffect(arrived ? 1 : 1.3).opacity(arrived ? 1 : 0)
                 }
-                .ignoresSafeArea()
-            } else {
-                Text("FLIGHT CORE OSX").font(.system(size: 90, weight: .black)).foregroundColor(Theme.cream)
+                // a soft dark edge that eases off as the picture arrives
+                RadialGradient(colors: [.clear, .black.opacity(arrived ? 0.28 : 0.75)], center: .center, startRadius: g.size.height * 0.35, endRadius: g.size.height * 1.05)
+                    .allowsHitTesting(false)
+                VStack(spacing: 12) {
+                    Spacer()
+                    Text("PRESS ANY KEY").font(.system(size: 11, weight: .heavy)).tracking(3)
+                        .foregroundColor(Theme.cream.opacity(pulse ? 0.95 : 0.4))
+                        .opacity(arrived ? 1 : 0)
+                    // how long until it moves on by itself
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.cream.opacity(0.18))
+                        Capsule().fill(Theme.cream.opacity(0.85)).frame(width: 220 * progress)
+                    }
+                    .frame(width: 220, height: 3).opacity(arrived ? 1 : 0)
+                    .padding(.bottom, 22)
+                }
             }
-            VStack {
-                Spacer()
-                Text("PRESS ANY KEY").font(.system(size: 11, weight: .heavy)).tracking(3).foregroundColor(Theme.cream.opacity(0.75)).padding(.bottom, 18)
-            }
+            .frame(width: g.size.width, height: g.size.height)
         }
+        .ignoresSafeArea()
         .contentShape(Rectangle())
         .onTapGesture { m.overlay = .menu }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { if m.overlay == .splash { withAnimation(.easeOut(duration: 0.5)) { m.overlay = .menu } } }
-        }
+        .onChange(of: m.splashGo) { go in if go { start() } }
+        .onAppear { if m.splashGo { start() } }
+    }
+
+    private func start() {
+        guard !arrived else { return }
+        withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.7)) { arrived = true }
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true).delay(0.5)) { pulse = true }
+        withAnimation(.linear(duration: Self.hold)) { progress = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.hold) { if m.overlay == .splash { m.overlay = .menu } }
     }
 }
 
