@@ -148,6 +148,26 @@ extension AircraftSpec {
         if modes.count > 1 { f.append(modes.joined(separator: " / ")) }
         return f
     }
+    /// True when the model burns fuel (piston engine or turbine) rather than running on a battery.
+    var burnsFuel: Bool { kind == .airplane && (engineSound == 1 || engineSound == 3) }
+    /// What drives it: a brushless electric motor, or an engine and of what kind.
+    var powerPlant: String {
+        func count(_ n: Int, _ one: String, _ many: String) -> String { n > 1 ? "\(n) \(many)" : one }
+        switch kind {
+        case .helicopter: return "Brushless electric motor"
+        case .multirotor: return count(multi?.motors.count ?? 4, "Brushless electric motor", "brushless electric motors")
+        case .airplane:
+            let n = props.count
+            if n == 0 || props.allSatisfy({ $0.staticThrust <= 0 }) { return "None (unpowered)" }
+            switch engineSound {
+            case 1:
+                return count(n, "Piston engine", "piston engines")
+            case 2: return count(n, "Electric ducted fan", "electric ducted fans") + " (brushless motor)"
+            case 3: return count(n, "Turboprop engine", "turboprop engines")
+            default: return count(n, "Brushless electric motor", "brushless electric motors")
+            }
+        }
+    }
     var sizeLabel: String { kind == .airplane ? "Wingspan" : (kind == .helicopter ? "Rotor diameter" : "Motor to motor") }
 }
 

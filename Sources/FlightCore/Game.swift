@@ -414,7 +414,7 @@ final class Game {
         if site.slope != 0, site.panorama != nil, aircraft.onGround, controls.throttle < 0.06, length(aircraft.vel) < 2 { controls.brake = 1 }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
         aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
-        if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say("Battery low — land soon", 4) }
+        if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say(aircraft.spec.burnsFuel ? "Fuel low — land soon" : "Battery low — land soon", 4) }
 
         if !paused && !hud.overlay.pausesSim {
             let h: Float = 0.001
@@ -695,7 +695,7 @@ final class Game {
         var cfg: [String] = []
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
-        if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: "Battery %.0f%%", aircraft.battery * 100)) }
+        if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: spec.burnsFuel ? "Fuel %.0f%%" : "Battery %.0f%%", aircraft.battery * 100)) }
         if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround { cfg.append("STALL") }
         if spec.kind == .helicopter && aircraft.vortexRing > 0.3 { cfg.append("VORTEX RING") }
         if controls.brake > 0.5 && aircraft.onGround { cfg.append("Brakes") }

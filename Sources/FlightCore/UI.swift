@@ -378,6 +378,7 @@ struct AircraftBrowser: View {
                     Text(spec.blurb).font(.system(size: 13)).foregroundColor(Theme.cream.opacity(0.82)).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
                     VStack(spacing: 0) {
                         specRow(spec.sizeLabel, String(format: "%.2f m", spec.span))
+                        specRow("Power", spec.powerPlant)
                         specRow("Flying weight", spec.mass < 1 ? String(format: "%.0f g", spec.mass * 1000) : String(format: "%.1f kg", spec.mass))
                         if spec.kind == .airplane {
                             specRow("Construction", spec.construction)

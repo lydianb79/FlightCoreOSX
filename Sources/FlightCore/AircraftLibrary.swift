@@ -536,7 +536,7 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
     let roundCowl = g.spinnerScale < 0.33 && g.fuseExp <= 2.4
     if g.ducted { spec.engineSound = 2 }
     else if original || g.profile { spec.engineSound = 0 }
-    else if (g.category == "Scale Civil" || g.category == "Aerobatic") && g.sound >= 165 { spec.engineSound = 3 }
+    else if (g.category == "Scale Civil" || g.category == "Aerobatic") && (g.sound >= 165 || ["Twin Otter", "King Air"].contains { g.name.contains($0) }) { spec.engineSound = 3 }
     else if g.category == "Warbirds" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 12 }
     else if g.category == "Scale Civil" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 4 }
     else if g.category == "Aerobatic" { spec.engineSound = 1; spec.radial = roundCowl; spec.cylinders = roundCowl ? 9 : 6 }

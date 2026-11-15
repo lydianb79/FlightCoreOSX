@@ -781,6 +781,11 @@ if let ci = CommandLine.arguments.firstIndex(of: "--flightsound"), ci + 3 < Comm
     writeWav(pcm, sampleRate: 44100, to: CommandLine.arguments[ci + 1])
     exit(0)
 }
+if CommandLine.arguments.contains("--powerlist") {
+    // what drives every aircraft, as shown in the aircraft browser
+    for a in AircraftLibrary.all { print("\(a.category.padding(toLength: 17, withPad: " ", startingAt: 0)) \(a.name.padding(toLength: 32, withPad: " ", startingAt: 0)) \(a.powerPlant)") }
+    exit(0)
+}
 if CommandLine.arguments.contains("--parktest") {
     // every photo site: the model must sit still on the ground where it starts, clear of every obstacle
     var bad = 0, keep: [Game] = []
