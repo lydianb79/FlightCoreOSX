@@ -396,7 +396,7 @@ final class Terrain {
             let f = url.deletingPathExtension().lastPathComponent.lowercased()
             if f.contains("asphalt") || f.contains("airfield") || f.contains("parking") || f.contains("tarmac") { return 0 }
             if f.contains("snow") || f.contains("lago_disola") || site.category == "Winter" { return 2 }
-            if f.contains("montorfano") || f.contains("camdeboo") { return 4 }
+            if f.contains("golden_gate") || f.contains("camdeboo") { return 4 }
             if f.contains("poolbeg") || f.contains("beach") || f.contains("dune") || f.contains("sand") { return 3 }
             if f.contains("cracked") || f.contains("farm_field") || f.contains("road") || site.category == "Desert" { return 4 }
             return 1

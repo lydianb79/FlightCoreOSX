@@ -93,7 +93,7 @@ struct Ambience {
         case "hausdorf_meadow": a.birds = 0.6; a.crows = 0.4; a.bells = 0.3; a.leaves = 0.3
         case "lago_disola": a.howl = 0.6; a.crows = 0.3; a.leaves = 0.3
         case "camdeboo_road": a.cicadas = 0.5; a.crickets = 0.6; a.birds = 0.3; a.howl = 0.2
-        case "montorfano": a.howl = 0.8; a.crows = 0.3; a.birds = 0.2
+        case "golden_gate_hills": a.howl = 0.35; a.grass = 0.6; a.birds = 0.3; a.crickets = 0.3
         case "evening_meadow": a.crickets = 0.8; a.birds = 0.6; a.grass = 0.6
         case "steinbach_field": a.crickets = 0.7; a.birds = 0.5; a.leaves = 0.3
         case "stierberg_sunrise": a.crows = 0.5; a.howl = 0.3
