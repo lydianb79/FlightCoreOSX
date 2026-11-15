@@ -159,6 +159,10 @@ struct AircraftSpec {
     var hasRetracts = false
     var hasFloats = false
     var construction = "Balsa and film"
+    var mac: Float = 0.25           // mean aerodynamic chord
+    var cgShift: Float = 0          // how far the wing was moved back to reach that margin when test-flown
+    var trimSetting: Float = 0      // tailplane incidence (rad) or reflex chosen for level cruise
+    var designMargin: Float = 0.1   // static margin the balance was set for, as a fraction of the mean chord
     var wingArea: Float = 0.4
     var downwashK: Float = 0        // downwash angle at the tail per unit wing lift coefficient
     var endurance: Float = 240      // seconds of full-throttle running on a fresh battery
@@ -199,6 +203,7 @@ final class Aircraft {
     var stallT: [Float]             // per surface: 0 attached flow ... 1 fully stalled
     var stalled: [Bool]
     private var eps: Float = 0      // downwash angle at the tail
+    private var wingStallNow: Float = 0     // stalled fraction of the wing, from the previous step
     private var groundPhi: Float = 1   // 1 in free air, falling toward 0 as the wing nears the ground
     private var buffet: Float = 0
     var vortexRing: Float = 0       // helicopter: 0...1 how deep in vortex ring state
@@ -305,6 +310,7 @@ final class Aircraft {
         switch spec.kind {
         case .airplane:
             var washV: Float = 0, swirlV: Float = 0, draw: Float = 0
+            var washZ: Float = 0, washR: Float = 0.1         // where the slipstream starts, and its radius
             let vfwd = -va.z
             // inflow angle at the propeller: nose-up attitude and sideslip tilt the disc to the airflow
             let aoa = vfwd > 1 ? clampf(atan2(-va.y, vfwd), -0.6, 0.6) : 0
@@ -334,6 +340,7 @@ final class Aircraft {
                     let A = Float.pi * p.diameter * p.diameter / 4
                     let v0 = max(vfwd, 0)
                     let w = -v0 + sqrt(v0 * v0 + 2 * T / (rho * A))
+                    if w > washV { washZ = p.pos.z; washR = p.diameter / 2 }
                     washV = max(washV, w)
                     if abs(p.pos.x) < 0.01 { swirlV = 0.04 * w * p.spinDir }          // spiral slipstream
                 }
@@ -352,25 +359,40 @@ final class Aircraft {
                 groundPhi = r * r / (1 + r * r)
             }
             var wingCl: Float = 0, wingArea: Float = 0
+            var stallSum: Float = 0, stallArea: Float = 0
             for (i, s) in spec.surfaces.enumerated() {
                 var v = va + cross(omega, s.pos)
-                v.z -= s.wash * washV
-                v.x -= s.swirl * s.wash * swirlV
+                // The slipstream is a narrow tube that trails straight back from the propeller. A surface moving
+                // across it (a tail swinging in a fast pitch or yaw, or the whole aircraft sliding sideways) has
+                // left the tube by the time the air arrives, so it loses the blast.
+                var inWash = s.wash
+                if inWash > 0 && washV > 0.5 {
+                    let drift = abs(dot(v, s.normal)) * abs(s.pos.z - washZ) / (washV + max(-va.z, 0))
+                    let d = drift / (2 * washR)
+                    inWash /= 1 + d * d
+                }
+                v.z -= inWash * washV
+                v.x -= s.swirl * inWash * swirlV
                 let vf = dot(v, s.chordDir), vn = dot(v, s.normal)
                 let sp2 = vf * vf + vn * vn
                 if sp2 < 1e-6 { continue }
                 let sp = sqrt(sp2)
                 var alpha = atan2(-vn, vf) + s.alpha0 - s.downwash * eps
                 // control surfaces lose their bite in separated flow
-                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.3 * stallT[i]) }
+                // and a hinged surface turns the flow less and less as its deflection grows: past about 25 degrees
+                // of effective camber change the extra throw mostly adds drag
+                if s.flapCh >= 0 { alpha += 0.45 * tanh(s.flapGain * servo[s.flapCh] / 0.45) * (1 - 0.3 * stallT[i]) }
                 let dElev = s.elevGain * servo[1] * (1 - 0.3 * stallT[i])
                 alpha += dElev
                 alpha += s.flapsGain * flap
                 var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
-                let qS = 0.5 * rho * sp2 * s.area
+                if s.isWing { stallSum += stallT[i] * s.area; stallArea += s.area }
+                // a tailplane behind a stalled wing sits in its wake and loses much of its bite, except where the propeller blows on it
+                let blanket: Float = s.downwash > 0 ? 1 - 0.5 * wingStallNow * (1 - 0.7 * inWash) * s.downwash : 1
+                let qS = 0.5 * rho * sp2 * s.area * blanket
                 if s.flapsGain != 0 { cd += 0.07 * flap; tb.x -= qS * s.chord * 0.18 * flap }
                 // a tailless wing is trimmed and pitched by its own section: reflex, and elevons moving the centre of lift
-                if s.cm0 != 0 || dElev != 0 { tb.x += qS * s.chord * (s.cm0 * (1 - stallT[i]) - 0.3 * s.liftSlope * dElev) }      // flaps drag, and pitch the nose down
+                if s.cm0 != 0 || dElev != 0 { tb.x += qS * s.chord * (s.cm0 - 0.3 * s.liftSlope * dElev) * (1 - 0.85 * stallT[i]) }      // flaps drag, and pitch the nose down
                 if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
@@ -379,6 +401,7 @@ final class Aircraft {
                 let cp = s.pos - s.chordDir * (0.25 * s.chord * stallT[i])
                 fb += f; tb += cross(cp, f)
             }
+            if stallArea > 0 { wingStallNow = stallSum / stallArea }
             // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
             if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea * groundPhi - eps) * min(1, dt / 0.15) }
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)

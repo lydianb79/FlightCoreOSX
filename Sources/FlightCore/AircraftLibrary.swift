@@ -21,7 +21,7 @@ enum Construction {
 /// kind of model is set up for. Control throws are scaled until the simulated aircraft matches.
 let rateTargets: [String: (roll: Float, pitch: Float, yaw: Float)] = [
     "Trainers & Sport": (150, 120, 70), "Scale Civil": (110, 100, 60), "Warbirds": (200, 130, 70), "Aerobatic": (380, 240, 150),
-    "Foam 3D": (330, 300, 200), "Wings": (230, 170, 60), "Jets": (240, 120, 60), "Gliders": (95, 85, 60),
+    "Foam 3D": (330, 260, 200), "Wings": (230, 170, 60), "Jets": (240, 120, 60), "Gliders": (95, 85, 60),
 ]
 
 enum GearType { case tricycle, taildragger, none, floats }
@@ -210,9 +210,27 @@ struct PlaneGeom {
 
 private func flapTau(_ frac: Float) -> Float { min(0.9 * sqrt(frac), 0.8) }
 
-func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
+/// Build an airplane and check its balance by test: if the simulated aircraft turns out less nose-heavy than
+/// intended (biplanes and other shapes the estimate misjudges), move the wing back to put the centre of gravity right.
+func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
+    var spec = buildAirplane(g)
+    for _ in 0..<2 {
+        let actual = measuredMargin(spec, throttle: 0.3)
+        if actual >= spec.designMargin - 0.01 { break }
+        spec = buildAirplane(g, cgShift: spec.cgShift + (spec.designMargin - actual) * spec.mac)
+    }
+    return spec
+}
+
+func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
     var g = g0
     applyRealData(&g)
+    // A biplane's weight sits between its wings, not level with the lower one. With the centre of gravity
+    // too low, the upper wing's drag pitches the nose up harder the more the aircraft is pulled.
+    if let uy = g.upperWingY {
+        let shift = -0.38 * (uy - g.wingY) - g.wingY
+        g.wingY += shift; g.upperWingY = uy + shift
+    }
     // wing section
     let af: Airfoil = g.airfoil ?? (g.profile ? .plate : (["Wings": .reflex, "Aerobatic": .symmetric, "Gliders": .glider, "Jets": .laminar, "Trainers & Sport": .flatBottom][g.category] ?? .semiSymmetric))
     let afp = af.params
@@ -249,8 +267,8 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
         let aW = slope * area * nWings * wingEff
         let aT = g.flyingWing ? 0 : tailSlope * g.stabSpan * g.stabChord * (1 - slope * downK)
         let zT = g.stabZ + 0.25 * g.stabChord
-        let m = g.margin ?? (g.profile ? 0.05 : (["Wings": 0.09, "Aerobatic": 0.07, "Warbirds": 0.10, "Jets": 0.10, "Gliders": 0.12, "Scale Civil": 0.14, "Trainers & Sport": 0.16][g.category] ?? 0.12))
-        g.wingLE = (m * mac * (aW + aT) - aT * zT) / aW - acOff
+        let m = g.margin ?? (g.profile ? 0.07 : (["Wings": 0.10, "Aerobatic": 0.09, "Warbirds": 0.12, "Jets": 0.12, "Gliders": 0.13, "Scale Civil": 0.15, "Trainers & Sport": 0.17][g.category] ?? 0.12))
+        g.wingLE = (m * mac * (aW + aT) - aT * zT) / aW - acOff + cgShift
         staticMargin = m
     }
 
@@ -408,6 +426,7 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     spec.wingArea = area * nWings
     spec.downwashK = downK * (nWings > 1 ? 1.3 : 1)
     spec.construction = construction.label
+    spec.mac = mac; spec.designMargin = staticMargin; spec.cgShift = cgShift
     spec.endurance = g.endurance ?? (glider ? 420 : (g.profile ? 200 : 240))
     if g.ducted || g.pusher { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
     spec.contacts = contacts
@@ -526,7 +545,65 @@ func measureRates(_ spec: AircraftSpec) -> (roll: Float, pitch: Float, yaw: Floa
         }
         return peak / deg
     }
-    return (rate({ $0.aileron = 1 }, { $0.omega.z }), rate({ $0.elevator = 1 }, { $0.omega.x }, early: true), rate({ $0.rudder = 1 }, { $0.omega.y }))
+    // in pitch, also count two thirds of the peak, so an aircraft whose rate runs away after the first moment gets less throw
+    let pitch = max(rate({ $0.elevator = 1 }, { $0.omega.x }, early: true), rate({ $0.elevator = 1 }, { $0.omega.x }) * 0.67)
+    return (rate({ $0.aileron = 1 }, { $0.omega.z }), pitch, rate({ $0.rudder = 1 }, { $0.omega.y }))
+}
+
+/// Pitching moment (N m, nose-up positive) and lift (N) with the aircraft held at a fixed angle of attack and speed.
+func pitchBalance(_ spec: AircraftSpec, alpha: Float, speed: Float, throttle: Float, elevator: Float = 0) -> (moment: Float, lift: Float) {
+    let ac = Aircraft(spec); ac.unlimitedBattery = true
+    ac.reset(pos: V3(0, 300, 0), heading: 0)
+    var c = Controls(); c.throttle = throttle; c.elevator = elevator
+    let v = V3(0, -speed * sin(alpha), -speed * cos(alpha))
+    let q0 = ac.q
+    // hold the attitude and speed while the motor, downwash and stall state settle
+    for _ in 0..<230 { ac.vel = v; ac.omega = .zero; ac.q = q0; ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0) }
+    ac.vel = v; ac.omega = .zero; ac.q = q0
+    ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0)
+    return (ac.omega.x / 0.001 * spec.inertia.x, ((ac.vel.y - v.y) / 0.001 + gravity) * spec.mass)
+}
+
+/// The static margin the simulated aircraft actually has: how far the centre of gravity sits ahead of the point
+/// where lift changes act, as a fraction of the mean chord. Positive is nose-heavy and stable.
+func measuredMargin(_ spec: AircraftSpec, throttle: Float) -> Float {
+    let v = spec.stallSpeed * 1.7
+    let a = pitchBalance(spec, alpha: 1.5 * deg, speed: v, throttle: throttle), b = pitchBalance(spec, alpha: 4 * deg, speed: v, throttle: throttle)
+    let dL = b.lift - a.lift
+    return abs(dL) > 1e-4 ? -(b.moment - a.moment) / dL / spec.mac : 0
+}
+
+/// Set the tailplane's incidence (or a tailless wing's reflex) so the aircraft flies level, hands off, at its
+/// cruising speed. Without this a model balanced for slow flight pitches up as soon as it gathers speed.
+func trimForCruise(_ spec0: AircraftSpec) -> AircraftSpec {
+    var spec = spec0
+    guard spec.kind == .airplane else { return spec }
+    let glider = spec.category == "Gliders"
+    let v = spec.stallSpeed * (glider ? 1.45 : 1.8), thr: Float = glider ? 0 : 0.45
+    let tailless = !spec.surfaces.contains { $0.flapCh == 1 }
+    func apply(_ d: Float, to s: inout AircraftSpec) {
+        for i in s.surfaces.indices {
+            if tailless { if s.surfaces[i].isWing { s.surfaces[i].cm0 += d } }
+            else if s.surfaces[i].flapCh == 1 { s.surfaces[i].alpha0 += d }
+        }
+    }
+    // angle of attack that carries the weight at cruise, from two test points
+    func momentAt1g(_ s: AircraftSpec) -> Float {
+        let a = pitchBalance(s, alpha: 1 * deg, speed: v, throttle: thr), b = pitchBalance(s, alpha: 5 * deg, speed: v, throttle: thr)
+        let w = s.mass * gravity
+        let k = clampf((w - a.lift) / max(b.lift - a.lift, 1e-4), -1, 2.5)
+        return a.moment + (b.moment - a.moment) * k
+    }
+    let m0 = momentAt1g(spec)
+    var probe = spec
+    let step: Float = tailless ? 0.01 : 0.02
+    apply(step, to: &probe)
+    let slope = (momentAt1g(probe) - m0) / step
+    guard abs(slope) > 1e-6 else { return spec }
+    let d = clampf(-m0 / slope, tailless ? -0.04 : -0.12, tailless ? 0.08 : 0.12)
+    apply(d, to: &spec)
+    spec.trimSetting = d
+    return spec
 }
 
 /// Scale the control throws so the aircraft rolls, pitches and yaws at the rates its category is set up for.
@@ -1038,6 +1115,6 @@ enum AircraftLibrary {
         let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
                 makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane)
-        return everything.map(calibrateRates)
+        return everything.map { calibrateRates(trimForCruise($0)) }
     }()
 }

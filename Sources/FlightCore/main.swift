@@ -125,8 +125,9 @@ func runPhysicsTest() {
         let spinRate = abs(ac.q.act(ac.omega).y) / deg, sink = -ac.vel.y
         startY = ac.pos.y
         var recovered: Float = -1
+        let spinSign: Float = ac.q.act(ac.omega).y < 0 ? -1 : 1
         fly(ac, 6, { _ in var c = Controls(); c.rudder = -0.6; c.elevator = -0.2; return c },
-            each: { t in if recovered < 0 && ac.wingStall < 0.1 && abs(ac.q.act(ac.omega).y) < 0.4 && t > 0.3 { recovered = t } })
+            each: { t in if recovered < 0 && ac.wingStall < 0.1 && ac.q.act(ac.omega).y * spinSign < 0.4 && t > 0.3 { recovered = t } })     // the rotation has stopped (the held rudder may then yaw it the other way)
         print(String(format: "   spin: turned %.1f times in 5 s, %.0f°/s, sinking %.0f m/s; recovery %@, height lost recovering %.0f m",
                      yawTurned / (2 * .pi), spinRate, sink, recovered < 0 ? "not within 6 s" : String(format: "%.1f s", recovered), startY - ac.pos.y))
         // 3. take-off run with the controls untouched: how far does it swing?
@@ -339,6 +340,54 @@ if let i = CommandLine.arguments.firstIndex(of: "--pitchdebug"), i + 2 < Command
             print(String(format: "t=%.2f pitch rate %6.0f deg/s  alpha %5.1f  speed %4.1f  wing stall %.2f  pitch %5.1f", Float(k) / 1000, ac.omega.x / deg, atan2(-va.y, -va.z) / deg, ac.airspeed, ac.wingStall, ac.pitch / deg))
         }
     }
+    exit(0)
+}
+
+/// Balance and elevator check for every airplane.
+func runBalanceTest() {
+    let terrain = Terrain(site: SiteSpec.all[0])
+    print("name                            design  actual margin      trim speed   full up elevator from cruise (1.7 x stall)   ...from fast (2.8 x stall)")
+    print("                                margin  glide   60% power  (x stall)    peak rate  peak angle  peak g                peak rate  peak angle  peak g")
+    var low: [String] = []
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let m0 = measuredMargin(spec, throttle: 0), m1 = measuredMargin(spec, throttle: 0.6)
+        if min(m0, m1) < 0.04 { low.append(spec.name) }
+        // speed at which it flies level hands-off: where the pitching moment is zero with lift equal to weight
+        var trim: Float = 0
+        for k in stride(from: Float(1.05), through: 4, by: 0.05) {
+            let v = spec.stallSpeed * k
+            // angle of attack for 1 g at this speed, by bisection
+            var lo: Float = -4 * deg, hi: Float = 14 * deg
+            for _ in 0..<12 { let mid = (lo + hi) / 2; if pitchBalance(spec, alpha: mid, speed: v, throttle: 0.4).lift < spec.mass * gravity { lo = mid } else { hi = mid } }
+            if pitchBalance(spec, alpha: (lo + hi) / 2, speed: v, throttle: 0.4).moment >= 0 { trim = k; break }
+        }
+        func pull(_ k: Float) -> (Float, Float, Float) {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 300, 0), heading: 0, speed: spec.stallSpeed * k)
+            var c = Controls(); c.throttle = 0.5
+            for _ in 0..<300 { ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0) }
+            c.elevator = 1
+            var rate: Float = 0, ang: Float = 0, g: Float = 0
+            for _ in 0..<1200 {
+                let v0 = ac.vel
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+                let va = simd_float3x3(ac.q).transpose * ac.vel
+                rate = max(rate, ac.omega.x / deg); ang = max(ang, atan2(-va.y, -va.z) / deg)
+                let acc = (ac.vel - v0) / 0.001 + V3(0, gravity, 0)
+                g = max(g, dot(acc, ac.up) / gravity)
+            }
+            return (rate, ang, g)
+        }
+        let p1 = pull(1.7), p2 = pull(2.8)
+        print(String(format: "%@ %5.0f%%  %5.0f%%  %5.0f%%     %@       %6.0f     %6.0f°    %5.1f                %6.0f     %6.0f°    %5.1f",
+                     spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), spec.designMargin * 100, m0 * 100, m1 * 100,
+                     trim > 0 ? String(format: "%4.2f", trim) : "none", p1.0, p1.1, p1.2, p2.0, p2.1, p2.2))
+    }
+    print("MARGIN BELOW 4%: " + (low.isEmpty ? "none" : low.joined(separator: ", ")))
+}
+
+if CommandLine.arguments.contains("--balancetest") {
+    runBalanceTest()
     exit(0)
 }
 
