@@ -18,10 +18,114 @@ struct SoundState {
     var airspeed: Float = 0
     var groundRoll: Float = 0   // rolling speed while on the ground, m/s
     var windSpeed: Float = 0    // ambient wind at the pilot, m/s
-    var ambience = 0            // 0 countryside (birds), 1 water (waves), 2 open / desert, 3 winter
+    var ambience = Ambience()   // what can be heard at the pilot's position besides the aircraft
     var reflect: Float = 0      // extra travel time of the sound that bounces off the ground on its way to the pilot (s)
     var reflectGain: Float = 0  // strength of that reflection, 0 = none
     var paused = false
+}
+
+/// The background sounds of a place, each 0 (absent) ... 1 (plenty).
+struct Ambience {
+    var birds: Float = 0        // songbirds
+    var cuckoo: Float = 0
+    var crows: Float = 0
+    var gulls: Float = 0
+    var frogs: Float = 0
+    var crickets: Float = 0     // chirping, strongest in the evening
+    var cicadas: Float = 0      // the steady buzz of a hot day
+    var bells: Float = 0        // cowbells on a mountain pasture
+    var surf: Float = 0         // sea swell breaking
+    var lapping: Float = 0      // small waves on a lake shore
+    var stream: Float = 0       // running water
+    var leaves: Float = 0       // trees in the wind
+    var grass: Float = 0        // long dry grass in the wind
+    var sand: Float = 0         // blown sand
+    var howl: Float = 0         // wind whistling over ridges and rock
+    var town: Float = 0         // distant traffic
+
+    /// The ambience of a flying site, from its landscape or, for a photo, from the kind of place it shows.
+    static func of(_ site: SiteSpec) -> Ambience {
+        var a = Ambience()
+        let key = site.panorama?.deletingPathExtension().lastPathComponent.lowercased() ?? site.key
+        switch key {
+        // 3D sites
+        case "meadow": a.birds = 1; a.cuckoo = 0.6; a.leaves = 0.4; a.crickets = 0.3
+        case "desert": a.sand = 0.6; a.howl = 0.2; a.crickets = 0.15
+        case "alpine": a.bells = 0.8; a.stream = 0.5; a.howl = 0.4; a.birds = 0.3
+        case "coast": a.surf = 1; a.gulls = 0.8; a.grass = 0.3
+        case "lake": a.lapping = 0.8; a.birds = 0.7; a.frogs = 0.25; a.leaves = 0.3
+        case "snow": a.crows = 0.6; a.howl = 0.3
+        case "canyon": a.howl = 0.7; a.sand = 0.3; a.crows = 0.3
+        case "savanna": a.cicadas = 0.8; a.crickets = 0.5; a.birds = 0.3; a.grass = 0.5
+        case "island": a.surf = 0.9; a.gulls = 0.3; a.cicadas = 0.4; a.leaves = 0.4
+        case "moor": a.howl = 0.8; a.grass = 0.6; a.crows = 0.3
+        case "airport": a.town = 0.7; a.birds = 0.3
+        case "tuscany": a.cicadas = 0.9; a.crickets = 0.4; a.birds = 0.4
+        case "forest": a.leaves = 1; a.birds = 1; a.cuckoo = 0.8; a.stream = 0.2
+        case "fjord": a.stream = 0.8; a.lapping = 0.6; a.gulls = 0.4
+        case "lava": a.howl = 0.6; a.sand = 0.2
+        case "salt": a.sand = 0.5; a.howl = 0.3
+        case "autumn": a.leaves = 0.9; a.crows = 0.6; a.birds = 0.3
+        case "marsh": a.frogs = 1; a.crickets = 0.5; a.birds = 0.5; a.lapping = 0.3; a.grass = 0.4
+        case "dunes": a.sand = 1; a.howl = 0.4
+        case "cliffs": a.surf = 1; a.gulls = 1; a.howl = 0.4; a.grass = 0.4
+        // photo sites
+        case "alps_field": a.bells = 0.7; a.birds = 0.6; a.crickets = 0.3
+        case "belfast_open_field": a.birds = 0.5; a.grass = 0.5; a.crows = 0.3
+        case "derelict_airfield_01", "derelict_airfield_02": a.birds = 0.6; a.leaves = 0.5; a.crows = 0.2
+        case "dry_cracked_lake": a.cicadas = 0.6; a.crickets = 0.4; a.birds = 0.2
+        case "autumn_field": a.grass = 0.7; a.crows = 0.4; a.crickets = 0.3
+        case "dry_hay_field": a.crickets = 0.8; a.birds = 0.5; a.grass = 0.4
+        case "farm_field": a.birds = 0.6; a.crows = 0.3
+        case "hochsal_field": a.birds = 0.8; a.crickets = 0.5; a.bells = 0.3
+        case "limpopo_golf_course": a.birds = 0.8; a.frogs = 0.4; a.cicadas = 0.4; a.lapping = 0.3
+        case "snow_field": a.howl = 0.4; a.crows = 0.3
+        case "suburban_football_field": a.town = 0.7; a.birds = 0.5
+        case "wildflower_field": a.birds = 0.9; a.crickets = 0.5; a.cuckoo = 0.4
+        case "rural_asphalt_road": a.birds = 0.6; a.leaves = 0.4; a.town = 0.25
+        case "goegap_road": a.cicadas = 0.5; a.sand = 0.3; a.birds = 0.2
+        case "grasslands_sunset": a.crickets = 0.9; a.grass = 0.5
+        case "snowy_hillside_02": a.crows = 0.4; a.howl = 0.3
+        case "poolbeg": a.surf = 0.7; a.gulls = 0.7; a.grass = 0.5
+        case "horn-koppe_spring": a.birds = 0.9; a.cuckoo = 0.7; a.leaves = 0.4
+        case "dreifaltigkeitsberg": a.birds = 0.8; a.leaves = 0.5; a.crickets = 0.3
+        case "immenstadter_horn": a.bells = 0.9; a.howl = 0.4; a.birds = 0.4; a.grass = 0.5; a.leaves = 0.3
+        case "hausdorf_meadow": a.birds = 0.6; a.crows = 0.4; a.bells = 0.3; a.leaves = 0.3
+        case "lago_disola": a.howl = 0.6; a.crows = 0.3; a.leaves = 0.3
+        case "camdeboo_road": a.cicadas = 0.5; a.crickets = 0.6; a.birds = 0.3; a.howl = 0.2
+        case "montorfano": a.howl = 0.8; a.crows = 0.3; a.birds = 0.2
+        case "evening_meadow": a.crickets = 0.8; a.birds = 0.6; a.grass = 0.6
+        case "steinbach_field": a.crickets = 0.7; a.birds = 0.5; a.leaves = 0.3
+        case "stierberg_sunrise": a.crows = 0.5; a.howl = 0.3
+        case "countrytrax_midday": a.cicadas = 0.6; a.birds = 0.5; a.grass = 0.3
+        case "spaichingen_hill": a.birds = 0.8; a.crickets = 0.4; a.grass = 0.5; a.town = 0.15
+        default:
+            // a photo the pilot added, or a site without a soundscape of its own: go by what kind of place it is
+            switch site.category {
+            case "Mountains": a.bells = 0.5; a.howl = 0.4; a.birds = 0.4
+            case "Desert": a.cicadas = 0.5; a.sand = 0.4
+            case "Water": a.lapping = 0.6; a.birds = 0.6
+            case "Winter": a.crows = 0.4; a.howl = 0.3
+            case "Airfields": a.town = 0.5; a.birds = 0.4
+            default: a.birds = 0.8; a.crickets = 0.3; a.leaves = 0.3
+            }
+        }
+        return a
+    }
+
+    /// Mornings belong to the birds, evenings to the crickets and frogs. `time` 0 morning, 1 midday, 2 evening.
+    func at(time: Int) -> Ambience {
+        var a = self
+        if time == 0 { a.birds = min(a.birds * 1.4, 1); a.cuckoo = min(a.cuckoo * 1.3, 1); a.cicadas *= 0.3; a.crickets *= 0.5 }
+        if time == 2 { a.birds *= 0.5; a.cuckoo *= 0.3; a.cicadas *= 0.5; a.crickets = min(a.crickets * 1.6, 1); a.frogs = min(a.frogs * 1.5, 1); a.gulls *= 0.6 }
+        return a
+    }
+}
+
+/// One animal calling now and then: a few notes, a pause, a few more.
+private struct Voice {
+    var wait: Float = 1.5, rep = 0, age: Float = 1, dur: Float = 0.1, gap: Float = 0.2
+    var f0: Float = 1000, f1: Float = 1000, vol: Float = 0, pan: Float = 0, ph: Float = 0
 }
 
 /// Procedural stereo sound: engine, propeller, rotor, airframe, ground roll, crashes and ambience.
@@ -49,7 +153,7 @@ final class SoundEngine {
     private var lfo1: Float = 0, lfo2: Float = 0.4, lfo3: Float = 0.7
     // engine detail: slow pitch flutter, exhaust resonance, duct howl, per-motor warble, ground reflection
     private var flutter: Float = 0, lope: Float = 1, lopePrev: Float = 0
-    private var exLo: Float = 0, exBd: Float = 0, howlLo: Float = 0, howlBd: Float = 0, lowLo: Float = 0, lowBd: Float = 0
+    private var exLo: Float = 0, exBd: Float = 0, fanLo: Float = 0, fanBd: Float = 0, lowLo: Float = 0, lowBd: Float = 0
     private var warble = SIMD4<Float>(0, 0, 0, 0)
     private var sReflect: Float = 0, sReflectGain: Float = 0
     private var echo = [Float](repeating: 0, count: 4096), echoPos = 0
@@ -57,9 +161,20 @@ final class SoundEngine {
     // one-shots
     private var crashEnv: Float = 0, crashTone: Float = 0, crashPhase: Float = 0, crackle: Float = 0, splashEnv: Float = 0, splashLo: Float = 0
     private var crashPan: Float = 0
-    // birds
-    private var birdT: Float = 2, birdEnv: Float = 0, birdPhase: Float = 0, birdF0: Float = 3000, birdF1: Float = 4000, birdDur: Float = 0.1, birdAge: Float = 1
-    private var birdRepeat = 0, birdGap: Float = 0, birdPan: Float = 0, birdVol: Float = 0
+    // touchdown: a thump from the airframe plus the noise of whatever it landed on
+    private var thumpEnv: Float = 0, thumpDecay: Float = 0.999, thumpHz: Float = 90, thumpPhase: Float = 0
+    private var touchEnv: Float = 0, touchAmp: Float = 1, touchDecay: Float = 0.999, touchFc: Float = 2000, touchQ: Float = 1, touchSweep: Float = 0
+    private var touchLo: Float = 0, touchBd: Float = 0, touchGrit: Float = 0, touchPan: Float = 0
+    // ambience
+    private var voices = [Voice](repeating: Voice(), count: 7)     // songbird, second songbird, cuckoo, crow, gull, frog, cowbell
+    private var lapLo: Float = 0, lapBd: Float = 0, lap1: Float = 0, lap2: Float = 0.3
+    private var crk1: Float = 0, crk2: Float = 0, crkT: Float = 0
+    private var cicLo: Float = 0, cicBd: Float = 0, cicP: Float = 0
+    private var strLo: Float = 0, strBd: Float = 0, strWalk: Float = 0, strLo2: Float = 0
+    private var leafLoL: Float = 0, leafBdL: Float = 0, leafLoR: Float = 0, leafBdR: Float = 0
+    private var grassLo: Float = 0, sandLo: Float = 0
+    private var howlLo: Float = 0, howlBd: Float = 0, howlLo2: Float = 0, howlBd2: Float = 0
+    private var townLo: Float = 0, townCarLo: Float = 0, townCarBd: Float = 0, townP: Float = 0.6
 
     init(start: Bool = true) {
         guard start, let fmt = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2) else { return }
@@ -80,6 +195,76 @@ final class SoundEngine {
         let s = 0.35 + 0.65 * min(max(strength, 0), 1)
         crashPan = pan
         if water { splashEnv = max(splashEnv, s) } else { crashEnv = max(crashEnv, s); crashTone = s; crackle = s }
+    }
+
+    /// The aircraft touches down. `strength` 0...1 from the speed into the ground; `ground` 0 asphalt, 1 grass, 2 snow,
+    /// 3 sand, 4 bare earth, 5 water; `wheel` whether a tyre or the airframe touched; `slide` speed along the ground.
+    func touch(_ strength: Float, ground: Int, wheel: Bool, slide: Float, mass: Float, pan: Float = 0) {
+        let s = 0.25 + 0.75 * min(max(strength, 0), 1)
+        touchPan = pan
+        if ground == 5 { splashEnv = max(splashEnv, 0.12 + 0.3 * s); return }
+        func decay(_ seconds: Float) -> Float { exp(-1 / (seconds * sampleRate)) }
+        let size = min(max(powf(1.5 / max(mass, 0.03), 0.22), 0.6), 1.9)       // small models tick, big ones thud
+        let skid = min(slide / 12, 1)
+        var thump: (hz: Float, amp: Float, t: Float), fc: Float, q: Float, amp: Float, t: Float, grit: Float = 0
+        touchSweep = 0
+        switch ground {
+        case 0:
+            thump = (wheel ? 105 : 190, wheel ? 0.55 : 0.8, 0.035)
+            if wheel { fc = 1500 + 500 * skid; q = 0.22; amp = 0.5 * skid; t = 0.07 + 0.08 * skid; touchSweep = 0.3 }   // tyre chirp
+            else { fc = 2600; q = 0.9; amp = 0.35 + 0.5 * skid; t = 0.1 + 0.15 * skid; grit = 0.5 }                     // scrape
+        case 2: thump = (70, 0.35, 0.05); fc = 1300; q = 0.8; amp = 0.75; t = 0.16; grit = 0.9                            // crunch
+        case 3: thump = (62, 0.5, 0.06); fc = 4200; q = 1.2; amp = 0.5 + 0.3 * skid; t = 0.2                             // hiss
+        case 4: thump = (95, 0.7, 0.04); fc = 850; q = 0.9; amp = 0.55; t = 0.09 + 0.1 * skid; grit = 0.6                // gritty thud
+        default: thump = (80, 0.55, 0.05); fc = 3300; q = 1.3; amp = 0.55 + 0.25 * skid; t = 0.12 + 0.1 * skid           // rustle
+        }
+        thumpHz = thump.hz * size; thumpDecay = decay(thump.t); thumpEnv = max(thumpEnv, thump.amp * s)
+        touchFc = fc * (0.8 + 0.2 * size); touchQ = q; touchDecay = decay(t)
+        touchAmp = max(amp * s, 0.001); touchEnv = max(touchEnv, touchAmp); touchGrit = max(touchGrit, grit * s)
+    }
+
+    /// Advance one calling animal by a sample and add it to the mix.
+    /// `kind`: 0 songbird, 1 cuckoo, 2 crow, 3 gull, 4 frog, 5 cowbell. `amount` sets how often it calls.
+    @inline(__always) private func call(_ i: Int, _ kind: Int, _ amount: Float, _ dt: Float, _ L: inout Float, _ R: inout Float) {
+        if amount <= 0 && voices[i].rep == 0 { return }
+        var v = voices[i]
+        defer { voices[i] = v }
+        v.wait -= dt
+        if v.wait <= 0 && v.rep == 0 && amount > 0 {
+            let r0 = abs(noise()), r1 = abs(noise()), r2 = abs(noise()), r3 = abs(noise())
+            let often = 1 / max(amount, 0.2)
+            v.pan = noise() * 0.9; v.age = 0; v.ph = 0
+            switch kind {
+            case 1: v.rep = 2 * (1 + Int(r0 * 4)); v.f0 = 640 + r1 * 60; v.f1 = v.f0; v.dur = 0.17; v.gap = 0.3; v.vol = 0.006 + r2 * 0.01; v.wait = (10 + r3 * 22) * often
+            case 2: v.rep = 2 + Int(r0 * 3); v.f0 = 500 + r1 * 150; v.f1 = v.f0 * 0.84; v.dur = 0.2 + r2 * 0.1; v.gap = v.dur + 0.14; v.vol = 0.007 + r3 * 0.012; v.wait = (6 + r3 * 18) * often
+            case 3: v.rep = 3 + Int(r0 * 5); v.f0 = 1450 + r1 * 500; v.f1 = v.f0 * 0.68; v.dur = 0.16 + r2 * 0.14; v.gap = v.dur * 1.25; v.vol = 0.006 + r3 * 0.014; v.wait = (4 + r2 * 11) * often
+            case 4: v.rep = 4 + Int(r0 * 9); v.f0 = 360 + r1 * 380; v.f1 = v.f0 * 1.12; v.dur = 0.07 + r2 * 0.06; v.gap = v.dur * 1.7; v.vol = 0.006 + r3 * 0.012; v.wait = (1 + r2 * 4) * often
+            case 5: v.rep = 1 + Int(r0 * 4); v.f0 = 620 + r1 * 520; v.f1 = v.f0; v.dur = 0.4; v.gap = 0.42 + r2 * 0.6; v.vol = 0.005 + r3 * 0.01; v.wait = (2.5 + r2 * 8) * often
+            default: v.rep = 2 + Int(r0 * 5); v.f0 = 2400 + r1 * 2600; v.f1 = v.f0 * (0.75 + r2 * 0.7); v.dur = 0.05 + r3 * 0.09; v.gap = v.dur * (1.5 + r0); v.vol = 0.012 + r1 * 0.02; v.wait = (2.5 + r2 * 7) * often
+            }
+        }
+        guard v.rep > 0 else { return }
+        let twoPi = 2 * Float.pi
+        v.age += dt
+        if v.age < v.dur {
+            let t = v.age / v.dur
+            v.ph += (v.f0 + (v.f1 - v.f0) * t) / sampleRate
+            if v.ph > 1 { v.ph -= 1 }
+            let w = twoPi * v.ph, env = sin(Float.pi * t)
+            var s: Float
+            switch kind {
+            case 2: s = (sin(w) + 0.7 * sin(2 * w) + 0.6 * sin(3 * w) + 0.45 * sin(4 * w) + 0.3 * sin(5 * w)) * (0.55 + 0.45 * noise()) * 0.5 * env   // hoarse
+            case 3: s = (sin(w) + 0.5 * sin(2 * w) + 0.3 * sin(3 * w)) * 0.6 * sqrt(env)                                                          // wailing
+            case 4: let pulse = 0.5 + 0.5 * sin(twoPi * v.age * 68); s = (sin(w) + 0.5 * sin(2 * w)) * pulse * pulse * 0.8 * env                   // croak
+            case 5: s = (sin(twoPi * v.f0 * v.age) + 0.6 * sin(twoPi * v.f0 * 2.76 * v.age) + 0.35 * sin(twoPi * v.f0 * 5.4 * v.age)) * exp(-v.age * 11) * min(v.age * 400, 1)
+            default: s = sin(w) * env
+            }
+            s *= v.vol
+            L += s * (1 - v.pan) * 0.5; R += s * (1 + v.pan) * 0.5
+        } else if v.age > v.gap {
+            v.age = 0; v.rep -= 1; v.ph = 0
+            if kind == 1 { v.f0 *= v.rep % 2 == 1 ? 0.8 : 1.25; v.f1 = v.f0 }       // "cu-ckoo": the second note a third lower
+        }
     }
 
     @inline(__always) private func noise() -> Float {
@@ -163,7 +348,7 @@ final class SoundEngine {
                 let hiss = bandpass(n0, 1500 + 3200 * sPower, 0.6, &jetLo, &jetBd) * (fan ? 0.36 : 0.14) * (0.2 + 0.8 * sPower)
                 roar += (n1 - roar) * 0.02
                 let low = bandpass(n1, 110 + 190 * sPower, 0.5, &lowLo, &lowBd) * (fan ? 0.5 : 0.2) * sPower * sPower
-                let howl = bandpass(n0, 320 + 22 * hz, 0.12, &howlLo, &howlBd) * (fan ? 0.11 : 0.03) * (0.3 + 0.7 * sPower)
+                let howl = bandpass(n0, 320 + 22 * hz, 0.12, &fanLo, &fanBd) * (fan ? 0.11 : 0.03) * (0.3 + 0.7 * sPower)
                 var s = whine + hiss + low + howl + roar * (fan ? 1.3 : 0.7) * (0.2 + 0.8 * sPower * sPower)
                 if !fan {
                     let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
@@ -237,36 +422,78 @@ final class SoundEngine {
             let wf = 260 + 70 * sWind + 140 * sin(twoPi * lfo2)
             L += bandpass(n0, wf, 0.5, &windLoL, &windBdL) * wAmt
             R += bandpass(n1, wf * 1.07, 0.5, &windLoR, &windBdR) * wAmt
-            if st.ambience == 1 {
+            let am = st.ambience
+            if am.surf > 0 {
                 // surf: slow swells of filtered noise
                 let swell = max(sin(twoPi * lfo1), 0)
                 wave += (n0 - wave) * 0.06
-                let w = wave * (0.05 + 0.22 * swell * swell)
-                L += w; R += w * 0.8 + (n1 - wave) * 0.004 * swell
+                let w = wave * (0.05 + 0.22 * swell * swell) * am.surf
+                L += w; R += w * 0.8 + (n1 - wave) * 0.004 * swell * am.surf
             }
-            if st.ambience == 0 {
-                // songbirds: short rising or falling whistles in little bursts
-                birdT -= dt
-                if birdT <= 0 && birdRepeat == 0 {
-                    birdRepeat = 2 + Int(abs(noise()) * 5)
-                    birdF0 = 2400 + abs(noise()) * 2600; birdF1 = birdF0 * (0.75 + abs(noise()) * 0.7)
-                    birdDur = 0.05 + abs(noise()) * 0.09; birdPan = noise(); birdVol = 0.012 + abs(noise()) * 0.02
-                    birdAge = 0; birdGap = birdDur * (1.5 + abs(noise()))
-                    birdT = 2.5 + abs(noise()) * 7
-                }
-                if birdRepeat > 0 {
-                    birdAge += dt
-                    if birdAge < birdDur {
-                        let t = birdAge / birdDur
-                        birdPhase += (birdF0 + (birdF1 - birdF0) * t) / sampleRate
-                        if birdPhase > 1 { birdPhase -= 1 }
-                        let s = sin(twoPi * birdPhase) * sin(Float.pi * t) * birdVol
-                        L += s * (1 - birdPan) * 0.5; R += s * (1 + birdPan) * 0.5
-                    } else if birdAge > birdGap {
-                        birdAge = 0; birdRepeat -= 1
-                    }
-                }
+            if am.lapping > 0 {
+                // small waves on a shore: quick, uneven washes
+                lap1 += dt * 0.37; if lap1 > 1 { lap1 -= 1 }
+                lap2 += dt * 0.53; if lap2 > 1 { lap2 -= 1 }
+                let wash = max(sin(twoPi * lap1), 0) * (0.5 + 0.5 * sin(twoPi * lap2))
+                let w = bandpass(n0, 650 + 500 * wash, 0.9, &lapLo, &lapBd) * (0.006 + 0.03 * wash * wash) * am.lapping
+                L += w * 0.8; R += w
             }
+            if am.stream > 0 {
+                // running water: a bright rush whose pitch burbles about
+                strWalk += (n1 - strWalk) * 0.0015
+                strLo2 += (n0 - strLo2) * 0.35
+                let w = (bandpass(n0, 1700 + 9000 * strWalk, 0.7, &strLo, &strBd) * 0.016 + (n0 - strLo2) * 0.004) * am.stream
+                L += w; R += w * 0.7
+            }
+            if am.leaves > 0 {
+                // trees: a broad hush that swells with every gust
+                let amt = am.leaves * (0.003 + 0.004 * min(sWind, 12)) * gust
+                L += bandpass(n0, 2300 + 500 * gust, 1.3, &leafLoL, &leafBdL) * amt
+                R += bandpass(n1, 2700 + 500 * gust, 1.3, &leafLoR, &leafBdR) * amt
+            }
+            if am.grass > 0 || am.sand > 0 {
+                // dry grass and blown sand: thin hiss, only there when the wind is
+                grassLo += (n0 - grassLo) * 0.45; sandLo += (n1 - sandLo) * 0.7
+                let w = min(sWind, 14)
+                let g = (n0 - grassLo) * am.grass * (0.001 + 0.0022 * w) * gust
+                let sd = (n1 - sandLo) * am.sand * 0.0016 * w * gust * gust
+                L += g + sd * 0.8; R += g * 0.8 + sd
+            }
+            if am.howl > 0 {
+                // wind finding an edge: two wandering whistles, silent in calm air
+                let amt = am.howl * 0.0011 * min(sWind, 14) * gust * gust
+                L += bandpass(n0, 430 + 150 * sin(twoPi * lfo2) + 60 * sin(twoPi * lfo3), 0.07, &howlLo, &howlBd) * amt
+                R += bandpass(n1, 610 + 190 * sin(twoPi * lfo1) + 50 * sin(twoPi * lfo3), 0.07, &howlLo2, &howlBd2) * amt
+            }
+            if am.town > 0 {
+                // a road somewhere: steady low rumble, and now and then a car going by
+                townLo += (n0 - townLo) * 0.012
+                townP += dt * 0.043; if townP > 1 { townP -= 1 }
+                let car = max(sin(twoPi * townP), 0)
+                let c4 = car * car * car * car
+                let w = (townLo * 0.2 + bandpass(n1, 380 + 260 * car, 0.8, &townCarLo, &townCarBd) * 0.02 * c4) * am.town
+                L += w * (1.1 - 0.5 * car); R += w * (0.6 + 0.5 * car)
+            }
+            if am.crickets > 0 {
+                // crickets: two of them, each a short trill of pulses, never quite in step
+                crkT += dt; if crkT > 60 { crkT -= 60 }
+                wrap(&crk1, 4300); wrap(&crk2, 4750)
+                let c1 = crkT * 2.1 - floor(crkT * 2.1), c2 = crkT * 1.7 + 0.4 - floor(crkT * 1.7 + 0.4)
+                let p1 = c1 < 0.32 ? max(sin(twoPi * crkT * 29), 0) : 0, p2 = c2 < 0.4 ? max(sin(twoPi * crkT * 24), 0) : 0
+                let a1 = sin(twoPi * crk1) * p1 * p1 * 0.007 * am.crickets, a2 = sin(twoPi * crk2) * p2 * p2 * 0.005 * am.crickets
+                L += a1 + a2 * 0.3; R += a1 * 0.3 + a2
+            }
+            if am.cicadas > 0 {
+                // cicadas: a rasping buzz that rises and falls over many seconds
+                wrap(&cicP, 118)
+                let rasp = cicP < 0.5 ? cicP * 2 : 0.15
+                let swell = 0.35 + 0.65 * max(sin(twoPi * lfo2 * 2), 0)
+                let w = bandpass(n0, 5600 + 500 * sin(twoPi * lfo3), 0.35, &cicLo, &cicBd) * rasp * swell * 0.01 * am.cicadas
+                L += w; R += w * 0.75
+            }
+            let levels = (am.birds, am.birds > 0.6 ? am.birds - 0.5 : 0, am.cuckoo, am.crows, am.gulls, am.frogs, am.bells)
+            call(0, 0, levels.0, dt, &L, &R); call(1, 0, levels.1, dt, &L, &R); call(2, 1, levels.2, dt, &L, &R); call(3, 2, levels.3, dt, &L, &R)
+            call(4, 3, levels.4, dt, &L, &R); call(5, 4, levels.5, dt, &L, &R); call(6, 5, levels.6, dt, &L, &R)
 
             // ---- one-shots
             if crashEnv > 0.0005 || crashTone > 0.0005 {
@@ -278,6 +505,15 @@ final class SoundEngine {
                 if abs(n1) > 0.9985 - 0.0012 * crackle { c += n0 * 0.5 * crackle }
                 c *= max(sGain, 0.25)
                 L += c * (1 - crashPan) * 0.6; R += c * (1 + crashPan) * 0.6
+            }
+            if thumpEnv > 0.0005 || touchEnv > 0.0005 || touchGrit > 0.002 {
+                thumpEnv *= thumpDecay; touchEnv *= touchDecay; touchGrit *= 0.9997
+                wrap(&thumpPhase, thumpHz * (0.75 + 0.25 * min(thumpEnv * 2, 1)))
+                var t = sin(twoPi * thumpPhase) * thumpEnv
+                t += bandpass(n0, touchFc * (1 - touchSweep * (1 - touchEnv / touchAmp)), touchQ, &touchLo, &touchBd) * touchEnv
+                if abs(n1) > 0.996 - 0.012 * touchGrit { t += n0 * 0.3 * touchGrit }
+                t *= max(sGain, 0.3)
+                L += t * (1 - touchPan) * 0.6; R += t * (1 + touchPan) * 0.6
             }
             if splashEnv > 0.0005 {
                 splashEnv *= 0.99992
@@ -297,6 +533,28 @@ final class SoundEngine {
 }
 
 /// Render a scripted fly-past of each engine type to a WAV file (used to check the synthesizer without speakers).
+/// Loudness of each site's ambience on its own, with no aircraft: 20 seconds at the site's usual wind.
+func printAmbienceLevels() {
+    let l = UnsafeMutablePointer<Float>.allocate(capacity: 512), r = UnsafeMutablePointer<Float>.allocate(capacity: 512)
+    defer { l.deallocate(); r.deallocate() }
+    for site in SiteSpec.all {
+        let s = SoundEngine(start: false)
+        var st = SoundState(); st.ambience = Ambience.of(site); st.windSpeed = site.windSpeed
+        s.state = st
+        var peak: Float = 0, sumSq: Double = 0, n = 0, bad = false
+        for blk in 0..<(Int(s.sampleRate) * 20 / 512) {
+            s.render(left: l, right: r, count: 512)
+            if blk < 40 { continue }                        // let the levels settle
+            for i in 0..<512 { if !l[i].isFinite || !r[i].isFinite { bad = true }; peak = max(peak, abs(l[i]), abs(r[i])); sumSq += Double(l[i] * l[i] + r[i] * r[i]); n += 2 }
+        }
+        let a = st.ambience
+        let parts = [("birds", a.birds), ("cuckoo", a.cuckoo), ("crows", a.crows), ("gulls", a.gulls), ("frogs", a.frogs), ("crickets", a.crickets), ("cicadas", a.cicadas), ("bells", a.bells),
+                     ("surf", a.surf), ("lapping", a.lapping), ("stream", a.stream), ("leaves", a.leaves), ("grass", a.grass), ("sand", a.sand), ("howl", a.howl), ("town", a.town)]
+        print(String(format: "AMBIENCE %@ wind %2.0f  peak %.3f rms %.4f %@  %@", site.displayName.padding(toLength: 28, withPad: " ", startingAt: 0), site.windSpeed, peak, sqrt(sumSq / Double(n)),
+                     bad ? "NON-FINITE" : "ok", parts.filter { $0.1 > 0 }.map { $0.0 }.joined(separator: ", ")))
+    }
+}
+
 func writeSoundTest(to path: String) {
     let s = SoundEngine(start: false)
     let sr = Int(s.sampleRate)
@@ -320,9 +578,10 @@ func writeSoundTest(to path: String) {
             st.shaftHz = base * (kind == 4 ? 1 : 0.25 + 0.75 * st.power) * st.doppler
             st.motors = SIMD4(st.power, st.power * 0.9, st.power * 1.05, st.power * 0.95)
             st.gain = 1 / (1 + 6 * x * x); st.muffle = min(abs(x) * 0.8, 1); st.pan = x
-            st.airspeed = 8 + 14 * st.power; st.windSpeed = 3; st.ambience = kind % 2
+            st.airspeed = 8 + 14 * st.power; st.windSpeed = 3; st.ambience = Ambience.of(SiteSpec.all[kind * 3 % SiteSpec.all.count])
             s.state = st
             if blk == total * 9 / 10 { s.crash(0.8, water: kind % 2 == 1, pan: 0.5) }
+            if blk == total / 2 { s.touch(0.6, ground: kind, wheel: kind != 4, slide: 9, mass: 1.5, pan: -0.3) }
             s.render(left: l, right: r, count: 512)
             for i in 0..<512 {
                 if !l[i].isFinite || !r[i].isFinite { bad = true }

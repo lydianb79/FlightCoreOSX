@@ -244,6 +244,9 @@ final class Aircraft {
     }
     var gear: Float = 0             // 0 down, 1 retracted
     var crashImpact: Float = 0      // speed of the impact that caused the crash
+    /// Hardest fresh ground contact since the game last looked: speed into the ground (m/s), and what touched what.
+    var touchImpact: Float = 0, touchWheel = false, touchWater = false
+    private var offGround: [Float] = []         // per contact point: time since it last touched
     var detached = Set<Int>()       // parts that have broken off
     let kSpring: Float, cDamp: Float
     let restHeight: Float
@@ -279,7 +282,8 @@ final class Aircraft {
         pos = p; vel = q.act(V3(0, 0, -speed)); omega = .zero; servo = .zero
         for i in levels.indices { levels[i] = 0 }
         vi = 0; yawI = 0; crashed = false; onGround = false
-        flap = 0; gear = 0; crashImpact = 0; detached = []
+        flap = 0; gear = 0; crashImpact = 0; detached = []; touchImpact = 0
+        for i in offGround.indices { offGround[i] = 0 }
         battery = 1; eps = 0; motorLoad = 0; vortexRing = 0; groundPhi = 1
         for i in stallT.indices { stallT[i] = 0; stalled[i] = false }
         if spec.kind == .helicopter { levels[0] = 1 }    // rotor already at speed
@@ -619,7 +623,9 @@ final class Aircraft {
         var touching = false
         let waterLevel = terrain.site.waterLevel
         let kFloat = spec.mass * gravity / (4 * 0.05), cFloat = 0.7 * sqrt(kFloat * spec.mass)
-        for cp in spec.contacts {
+        if offGround.count != spec.contacts.count { offGround = [Float](repeating: 0, count: spec.contacts.count) }
+        for (ci, cp) in spec.contacts.enumerated() {
+            offGround[ci] += dt
             let rw = R * cp.pos
             let pw = pos + rw
             if cp.wheel && gear > 0.5 { continue }
@@ -632,6 +638,12 @@ final class Aircraft {
             let d = ground - pw.y
             if d <= 0 { continue }
             let vp = vel + R * cross(omega, cp.pos)
+            // a point that comes down after being clear of the ground for a moment makes a sound
+            if offGround[ci] > 0.08 && (!water || cp.float || spec.hasFloats) {
+                let hit = water ? -vp.y : -dot(vp, terrain.normal(pw.x, pw.z))
+                if hit > touchImpact { touchImpact = hit; touchWheel = cp.wheel; touchWater = water }
+            }
+            offGround[ci] = 0
             if water {
                 guard cp.float else {
                     // anything but a float digging into the water trips a floatplane over

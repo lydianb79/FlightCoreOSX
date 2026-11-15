@@ -21,6 +21,14 @@ struct SiteSpec {
     var north: Float = 0
     var horizon: Float = 0
     var eyeHeight: Float = 1.7
+    var slope: Float = 0                // photo site on a hillside: steepness of the ground in degrees ...
+    var uphill: Float = 0               // ... and the direction it rises in, as a bearing in the photo
+    /// Height gained per metre along world x and z on a sloping photo site.
+    var groundGradient: SIMD2<Float> {
+        guard panorama != nil, slope != 0 else { return .zero }
+        let a = (uphill - north) * deg
+        return SIMD2(sin(a), -cos(a)) * tan(slope * deg)
+    }
     var startZ: Float = 0
     var startX: Float = -30
     var startHeading: Float = 90        // compass degrees: 0 = away from the pilot, 90 = to the right
@@ -261,7 +269,7 @@ final class Terrain {
     }
 
     private func raw(_ x: Float, _ z: Float) -> Float {
-        if site.panorama != nil { return 0 }
+        if site.panorama != nil { let g = site.groundGradient; return g.x * x + g.y * z }
         let r = sqrt(x * x + z * z), s = site.seed
         var y: Float
         switch site.terrain >= 0 ? site.terrain : site.style {
@@ -380,6 +388,27 @@ final class Terrain {
         if pal == 1 || pal == 5 || pal == 11 || pal == 12 { return (0.07, 0.55, 0.012) }   // desert, lava, salt
         if pal == 15 { return (0.16, 0.45, 0.02) }               // loose sand
         return (0.09, 0.6, 0.02)                                 // long grass
+    }
+
+    /// What the ground is made of, for the sound of touching it: 0 asphalt or concrete, 1 grass, 2 snow, 3 sand, 4 bare earth.
+    func groundKind(_ x: Float, _ z: Float) -> Int {
+        if let url = site.panorama {
+            let f = url.deletingPathExtension().lastPathComponent.lowercased()
+            if f.contains("asphalt") || f.contains("airfield") || f.contains("parking") || f.contains("tarmac") { return 0 }
+            if f.contains("snow") || f.contains("lago_disola") || site.category == "Winter" { return 2 }
+            if f.contains("montorfano") || f.contains("camdeboo") { return 4 }
+            if f.contains("poolbeg") || f.contains("beach") || f.contains("dune") || f.contains("sand") { return 3 }
+            if f.contains("cracked") || f.contains("farm_field") || f.contains("road") || site.category == "Desert" { return 4 }
+            return 1
+        }
+        if abs(x) < site.runwayLen / 2 && abs(z) < site.runwayWid / 2 {
+            switch site.runwayType { case 0: return 0; case 1: return 1; case 3: return 2; case 4: return 3; default: return 4 }
+        }
+        let pal = site.palette >= 0 ? site.palette : site.style
+        if pal == 4 { return 2 }
+        if pal == 15 { return 3 }
+        if pal == 1 || pal == 5 || pal == 11 || pal == 12 { return 4 }
+        return 1
     }
 
     /// A place to start a floatplane: the nearest open water with room to take off into the wind.

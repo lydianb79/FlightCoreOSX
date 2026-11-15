@@ -177,7 +177,7 @@ struct HUDView: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
                             Text(s.camera).font(.system(size: 11, weight: .medium)).foregroundColor(Theme.cream.opacity(0.85))
-                            Text("\(s.input) · \(s.rates) rates · \(s.fps) fps").font(.system(size: 10)).monospacedDigit().foregroundColor(Theme.dim)
+                            Text("\(s.input) · \(s.rates) · \(s.fps) fps").font(.system(size: 10)).monospacedDigit().foregroundColor(Theme.dim)
                         }
                         .padding(.trailing, 4).allowsHitTesting(false)
                         HStack(spacing: 5) {
@@ -289,7 +289,7 @@ private struct Sheet<Content: View>: View {
 
 struct AircraftBrowser: View {
     @ObservedObject var m: HUDModel
-    @State private var category = "All"
+    @AppStorage("aircraftCategory") private var category = "All"
     @State private var search = ""
     @State private var selected = 0
 
@@ -406,7 +406,7 @@ struct AircraftBrowser: View {
 struct SiteBrowser: View {
     @ObservedObject var m: HUDModel
     @State private var selected = 0
-    @State private var filter = "All"
+    @AppStorage("siteFilter") private var filter = "All"       // stays as it was left, also after a restart
     @State private var search = ""
     private static let categories = ["Fields", "Airfields", "Mountains", "Water", "Desert", "Winter"]
     private var all: [SiteSpec] { SiteSpec.all }
@@ -751,7 +751,7 @@ struct HelpView: View {
     @ObservedObject var m: HUDModel
     private let groups: [(String, [(String, String)])] = [
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
-                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("Space", "Reset aircraft")]),
+                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Reset aircraft")]),
         ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Helicopter rotor speed: low, normal, high"),
                       ("F", "Quadcopter flight mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),

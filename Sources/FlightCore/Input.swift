@@ -130,6 +130,8 @@ final class InputManager {
         ControlAction(id: "flaps", title: "Flaps: up / half / full", states: 3, key: 14),
         ControlAction(id: "gear", title: "Landing gear", states: 2, key: 5),
         ControlAction(id: "smoke", title: "Smoke", states: 2, key: 16),
+        ControlAction(id: "trimUp", title: "Pitch trim: nose up", states: 0, key: 24),
+        ControlAction(id: "trimDown", title: "Pitch trim: nose down", states: 0, key: 27),
         ControlAction(id: "brake", title: "Wheel brakes", states: -1, key: 12),
         ControlAction(id: "reset", title: "Reset aircraft", states: 0, key: 49),
         ControlAction(id: "camera", title: "Camera", states: 0, key: 8),

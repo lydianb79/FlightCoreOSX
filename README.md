@@ -107,11 +107,16 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 - The sun direction and ambient light are estimated from the photo, so the model is lit to match and casts a shadow on the photographed ground.
 - The **Photo:** items in the Flying Site menu rotate the panorama, shift its horizon and set the camera height. The settings are saved in a `.json` file next to the image.
 
+- A photo taken on a hillside can have sloping ground: `"slope"` (degrees) and `"uphill"` (the bearing in the photo that the ground rises toward) in the `.json` file. On a slope the model is held until you open the throttle.
+- **Photo: Show / Hide Obstacles** draws the invisible ground as rings at 5, 10, 20 … 320 m together with the solid obstacles, to check them against the photo. `FlightCore --panocheck <folder>` writes the same overlay for every photo as an image, and `FlightCore --parktest` checks that the model sits still on the ground at every photo site.
+
 Photos are shown as they are, without added sharpening; `FlightCore --panostats` lists how much real detail each one holds, which helps to pick sharp ones.
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Twenty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dreifaltigkeitsberg`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `horn-koppe_spring`, `limpopo_golf_course`, `poolbeg`, `rural_asphalt_road`, `snow_field`, `snowy_hillside_02`, `suburban_football_field` and `wildflower_field`.
+Thirty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dreifaltigkeitsberg`, `immenstadter_horn`, `hausdorf_meadow`, `lago_disola`, `camdeboo_road`, `montorfano`, `evening_meadow`, `steinbach_field`, `stierberg_sunrise`, `countrytrax_midday`, `spaichingen_hill`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `horn-koppe_spring`, `limpopo_golf_course`, `poolbeg`, `rural_asphalt_road`, `snow_field`, `snowy_hillside_02`, `suburban_football_field` and `wildflower_field`.
+
+The site list keeps a small preview of every photo in the caches folder and makes missing ones in the background, so it opens at once; both the site list and the aircraft list reopen on the filter you last used.
 
 For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
 
@@ -147,6 +152,8 @@ Press **H** in the app for this list.
 | F | Flight mode: self-level / acro (multirotors), stabilized / acro (helicopters) |
 | I | Helicopter rotor speed: low, normal, high |
 | L | High / low rates |
+| `-` `=` | Pitch trim: nose down / nose up, one click at a time (hold to repeat) |
+| 0 | Centre the pitch trim |
 | E | Flaps: up, half, full (aircraft that have them) |
 | G | Landing gear up / down (aircraft with retractable gear) |
 | Y | Smoke on / off |
@@ -173,6 +180,7 @@ Press **H** in the app for this list.
 - channel assignment and reversing for transmitters
 - stick calibration (end points and centre)
 - stick mode 1–4 for gamepads and the on-screen stick display
+- pitch trim: `-` and `=` (or two assigned buttons) move the elevator neutral in clicks, as the trim lever on a transmitter does; the setting is remembered for each aircraft and shown in the display
 - rates: every aircraft has a low rate and expo of its own, chosen so full stick on low rates gives a roll rate that suits the type (about 65°/s for a sailplane, 95°/s for a trainer, 160°/s for an aerobat), and every flight starts on low rates; you can instead set one low rate and expo for all aircraft
 - stick deadband, and a reverse for the pitch stick on multirotors only
 - switches and buttons: any of the keyboard actions (rates, flight mode, rotor speed, throttle hold, flaps, gear, smoke, brakes, reset, camera, zoom, pause and more) can be assigned to a transmitter switch or controller button. Click Assign and move the switch. A two- or three-position switch sets the state directly; a push button steps through it
@@ -215,9 +223,10 @@ Press **H** in the app for this list.
   - sound reflected off the ground arrives a moment after the direct sound, which gives a fly-past its sweeping, hollow tone;
   - the aircraft is placed left to right by where it is, gets quieter and duller with distance, and is Doppler-shifted;
   - airframe wind noise and tyre rumble on the ground;
-  - ambience at the pilot's position: wind that follows the wind speed, birdsong on green sites, surf on water sites;
+  - ambience at the pilot's position that belongs to the place: every site has its own mix of songbirds, cuckoo, crows, gulls, frogs, crickets, cicadas, cowbells, surf, lapping water, a stream, leaves, dry grass, blown sand, whistling wind and distant traffic. Wind sounds follow the wind speed, and on 3D sites mornings have more birds and evenings more crickets and frogs (`FlightCore --ambiencetest` lists each site's mix and level);
   - crashes (impact, debris) and splashes.
   `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file.
+- **Touchdowns** sound like what the model lands on: a tyre chirp or a scrape on asphalt, a rustle on grass, a crunch on snow, a hiss on sand, a gritty thud on bare earth and a splash on water, louder the harder it comes down and deeper the heavier the model. On photo sites the ground is taken from the kind of place it is. `FlightCore --touchtest` lists what every 3D site is made of.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
 - **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
 

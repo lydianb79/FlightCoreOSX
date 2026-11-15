@@ -644,6 +644,21 @@ func runBalanceTest() {
 
 if CommandLine.arguments.contains("--ruddertest") { runRudderTest(); exit(0) }
 if CommandLine.arguments.contains("--rotortest") { runRotorTest(); exit(0) }
+if CommandLine.arguments.contains("--ambiencetest") { printAmbienceLevels(); exit(0) }
+if CommandLine.arguments.contains("--touchtest") {
+    // drop a trainer from knee height on every 3D site: it must report a touchdown, and the site says what it landed on
+    let names = ["asphalt", "grass", "snow", "sand", "earth"]
+    for site in SiteSpec.all where site.panorama == nil {
+        let terrain = Terrain(site: site)
+        let ac = Aircraft(AircraftLibrary.all[0])
+        ac.reset(pos: V3(0, terrain.height(0, 0) + ac.restHeight + 0.5, 0), heading: 0)
+        var hit: Float = 0, wheel = false
+        for _ in 0..<1500 { ac.step(dt: 0.001, c: Controls(), terrain: terrain, wind: .zero, rollMu: site.rollMu); if ac.touchImpact > hit { hit = ac.touchImpact; wheel = ac.touchWheel } }
+        print(String(format: "TOUCH %@: %.1f m/s on %@, runway %@, beside it %@", site.name.padding(toLength: 22, withPad: " ", startingAt: 0), hit, wheel ? "wheels" : "airframe",
+                     names[terrain.groundKind(0, 0)], names[terrain.groundKind(0, site.runwayWid / 2 + 30)]))
+    }
+    exit(0)
+}
 if CommandLine.arguments.contains("--panostats") {
     // how sharp each installed panorama really is
     for site in SiteSpec.all {
@@ -655,6 +670,114 @@ if CommandLine.arguments.contains("--panostats") {
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
         print(String(format: "%@ %d x %d  detail %.2f", url.lastPathComponent.padding(toLength: 32, withPad: " ", startingAt: 0), w, h, Panoramas.detail(px, width: w, height: h)))
     }
+    exit(0)
+}
+if let ci = CommandLine.arguments.firstIndex(of: "--panocheck"), ci + 1 < CommandLine.arguments.count {
+    // draw each photo site's invisible ground (rings), obstacles and start point onto its photo, to check them by eye
+    let dir = URL(fileURLWithPath: CommandLine.arguments[ci + 1])
+    let only = ci + 2 < CommandLine.arguments.count ? CommandLine.arguments[ci + 2] : ""
+    let W = 1800, ppd = CGFloat(W) / 180, top: CGFloat = 24, bottom: CGFloat = -34
+    let H = Int((top - bottom) * ppd)
+    for site in SiteSpec.all {
+        guard let url = site.panorama, only.isEmpty || url.lastPathComponent.contains(only), let img = Panoramas.image(url, maxSize: 4096) else { continue }
+        guard let ctx = CGContext(data: nil, width: W, height: H * 2, bitsPerComponent: 8, bytesPerRow: W * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { continue }
+        let hor = CGFloat(site.horizon), eye = CGFloat(site.eyeHeight)
+        let grad = site.groundGradient
+        /// Height of the ground at a photo bearing and distance.
+        func ground(_ b: CGFloat, _ d: CGFloat) -> CGFloat {
+            let a = Float(b - CGFloat(site.north)) * deg
+            return CGFloat(grad.x * sin(a) - grad.y * cos(a)) * d
+        }
+        func elev(_ b: CGFloat, _ d: CGFloat, _ h: CGFloat = 0) -> CGFloat { atan((ground(b, d) + h - eye) / d) * 180 / .pi }
+        for half in 0..<2 {
+            ctx.saveGState()
+            // flip to a top-left origin for this half
+            ctx.translateBy(x: 0, y: CGFloat(half == 0 ? H * 2 : H)); ctx.scaleBy(x: 1, y: -1)
+            ctx.clip(to: CGRect(x: 0, y: 0, width: W, height: H))
+            func X(_ b: CGFloat) -> CGFloat { (b - CGFloat(half == 0 ? -180 : 0)) * ppd }
+            func Y(_ el: CGFloat) -> CGFloat { (top - el) * ppd }
+            // the photo: row of elevation el is at (90 - el - hor) degrees from its top
+            ctx.saveGState()
+            let y0 = -(90 - top - hor) * ppd, x0 = CGFloat(half == 0 ? 0 : -W)
+            ctx.translateBy(x: x0, y: y0 + 180 * ppd); ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: CGFloat(2 * W), height: 180 * ppd))
+            ctx.restoreGState()
+            ctx.setLineWidth(1.5)
+            ctx.setStrokeColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.9))
+            ctx.stroke(CGRect(x: 0, y: Y(0), width: CGFloat(W), height: 0))
+            for (k, r) in [5, 10, 20, 40, 80, 160].enumerated() {
+                ctx.setStrokeColor(CGColor(srgbRed: 0.1, green: 0.9, blue: 1, alpha: k % 2 == 0 ? 0.9 : 0.6))
+                ctx.beginPath()
+                for i in 0...180 {
+                    let b = CGFloat(half == 0 ? -180 : 0) + CGFloat(i)
+                    let pt = CGPoint(x: X(b), y: Y(elev(b, CGFloat(r))))
+                    if i == 0 { ctx.move(to: pt) } else { ctx.addLine(to: pt) }
+                }
+                ctx.strokePath()
+            }
+            for o in site.obstacles {
+                let d = CGFloat(o.distance), hw = asin(min(CGFloat(o.radius) / d, 1)) * 180 / .pi
+                let lo = elev(CGFloat(o.bearing), d), hi = elev(CGFloat(o.bearing), d, CGFloat(o.height))
+                for shift: CGFloat in [-360, 0, 360] {
+                    let r = CGRect(x: X(CGFloat(o.bearing) - hw + shift), y: Y(hi), width: 2 * hw * ppd, height: (hi - lo) * ppd)
+                    ctx.setFillColor(CGColor(srgbRed: 1, green: 0.2, blue: 0.1, alpha: 0.3)); ctx.fill(r)
+                    ctx.setStrokeColor(CGColor(srgbRed: 1, green: 0.2, blue: 0.1, alpha: 1)); ctx.stroke(r)
+                }
+            }
+            // start point (yellow) and the direction straight ahead (green)
+            let sx = CGFloat(site.startX), sz = CGFloat(site.startZ), sd = max(hypot(sx, sz), 0.5)
+            var sb = atan2(sx, -sz) * 180 / .pi + CGFloat(site.north)
+            sb = (sb + 540).truncatingRemainder(dividingBy: 360) - 180
+            let fb = (CGFloat(site.north) + 540).truncatingRemainder(dividingBy: 360) - 180
+            ctx.setFillColor(CGColor(srgbRed: 1, green: 0.9, blue: 0, alpha: 1))
+            ctx.fill(CGRect(x: X(sb) - 5, y: Y(elev(sb, sd)) - 5, width: 10, height: 10))
+            // where the model heads from there (orange)
+            let ha = Float(site.startHeading) * deg
+            let ex = sx + CGFloat(sin(ha)) * 12, ez = sz - CGFloat(cos(ha)) * 12, ed = max(hypot(ex, ez), 0.5)
+            var eb = atan2(ex, -ez) * 180 / .pi + CGFloat(site.north)
+            eb = (eb + 540).truncatingRemainder(dividingBy: 360) - 180
+            ctx.setFillColor(CGColor(srgbRed: 1, green: 0.5, blue: 0, alpha: 1))
+            ctx.fill(CGRect(x: X(eb) - 3, y: Y(elev(eb, ed)) - 3, width: 6, height: 6))
+            ctx.setFillColor(CGColor(srgbRed: 0.2, green: 1, blue: 0.2, alpha: 1))
+            ctx.fill(CGRect(x: X(fb) - 2, y: Y(top), width: 4, height: 40))
+            ctx.restoreGState()
+        }
+        guard let out = ctx.makeImage() else { continue }
+        let dst = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".jpg")
+        if let d = CGImageDestinationCreateWithURL(dst as CFURL, "public.jpeg" as CFString, 1, nil) {
+            CGImageDestinationAddImage(d, out, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary); CGImageDestinationFinalize(d)
+        }
+        print(String(format: "%@ north %.0f horizon %.1f eye %.1f start (%.0f, %.0f) hdg %.0f, %d obstacles", url.lastPathComponent, site.north, site.horizon, site.eyeHeight,
+                     site.startX, site.startZ, site.startHeading, site.obstacles.count))
+    }
+    exit(0)
+}
+if CommandLine.arguments.contains("--parktest") {
+    // every photo site: the model must sit still on the ground where it starts, clear of every obstacle
+    var bad = 0, keep: [Game] = []
+    for (i, site) in SiteSpec.all.enumerated() where site.panorama != nil {
+        var worst: Float = 0, note = ""
+        for ac in [0, 20, 60, 110, 150, 170] where ac < AircraftLibrary.all.count {
+            let g = Game(site: i, aircraft: ac); keep.append(g)
+            let p0 = g.aircraft.pos
+            for _ in 0..<360 { g.frame(dt: 1 / 60) }
+            let p = g.aircraft.pos, moved = length(p - p0), above = p.y - g.terrain.height(p.x, p.z)
+            if g.aircraft.spec.handLaunch { continue }
+            worst = max(worst, moved)
+            if g.aircraft.crashed { note += " CRASHED(\(g.aircraft.spec.name))" }
+            if above > g.aircraft.restHeight + 0.3 || above < -0.05 { note += String(format: " height %.2f (%@)", above, g.aircraft.spec.name) }
+            for o in site.obstacles {
+                let c = Panoramas.position(o, north: site.north)
+                let d = hypot(p0.x - c.x, p0.z - c.y) - o.radius
+                if d < 3 { note += String(format: " obstacle %.1f m from start", d) ; break }
+            }
+        }
+        let ok = worst < 0.6 && note.isEmpty
+        if !ok { bad += 1 }
+        print(String(format: "PARK %@ slope %.1f  moved %.2f m %@%@", site.name.padding(toLength: 30, withPad: " ", startingAt: 0), site.slope, worst, ok ? "ok" : "FAIL", note))
+    }
+    print(bad == 0 ? "PARK all ok" : "PARK \(bad) sites failed")
     exit(0)
 }
 if CommandLine.arguments.contains("--balancetest") {
@@ -829,6 +952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if e.modifierFlags.contains(.command) || e.modifierFlags.contains(.control) { return e }
             if e.type == .keyDown {
                 if !e.isARepeat { self.game.input.keys.insert(e.keyCode); self.game.keyDown(e.keyCode) }
+                else if e.keyCode == 24 || e.keyCode == 27 { self.game.keyDown(e.keyCode) }          // trim keys repeat while held
             } else {
                 self.game.input.keys.remove(e.keyCode)
             }

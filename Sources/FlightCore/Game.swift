@@ -37,19 +37,44 @@ final class HUDModel: ObservableObject {
         return img
     }
 
+    private var previewsPending = Set<String>()
+    private static let previewQueue = DispatchQueue(label: "flightcore.previews", qos: .userInitiated)
+
+    /// Where the small preview of a photo site is kept, so the big photograph is decoded once, not on every launch.
+    /// The name changes with the photo's size, date and rotation, which makes a stale preview impossible.
+    private static func previewCache(_ site: SiteSpec, _ url: URL) -> URL? {
+        guard let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("FlightCore/Previews") else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let at = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (at?[.size] as? NSNumber)?.intValue ?? 0, date = Int((at?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
+        return dir.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-\(size)-\(date)-\(Int(site.north.rounded())).jpg")
+    }
+
+    /// The view straight ahead, cut from the middle of the panorama.
+    private static func makePreview(_ site: SiteSpec, _ url: URL) -> CGImage? {
+        guard let full = Panoramas.image(url, maxSize: 2048) else { return nil }
+        let w = full.width, h = full.height
+        let shift = Int(Float(w) * site.north / 360)
+        let cx = ((w / 2 + shift) % w + w) % w
+        let cw = w / 4, ch = Int(Float(cw) * 0.625)
+        let x0 = min(max(cx - cw / 2, 0), w - cw)
+        return full.cropping(to: CGRect(x: x0, y: h / 2 - Int(Float(ch) * 0.62), width: cw, height: ch))
+    }
+
+    /// Preview picture of a site. A photo site's preview comes from a small cached file; if there is none yet it is
+    /// made in the background and the list fills in when it is ready, so opening the list never waits.
     func sitePreview(_ site: SiteSpec) -> NSImage? {
         if let t = sitePreviews[site.name] { return t }
         var img: NSImage?
         if let url = site.panorama {
-            // crop the middle of the panorama (the view straight ahead)
-            if let full = Panoramas.image(url, maxSize: 2048) {
-                let w = full.width, h = full.height
-                let shift = Int(Float(w) * site.north / 360)
-                let cx = ((w / 2 + shift) % w + w) % w
-                let cw = w / 4, ch = Int(Float(cw) * 0.625)
-                let x0 = min(max(cx - cw / 2, 0), w - cw)
-                if let c = full.cropping(to: CGRect(x: x0, y: h / 2 - Int(Float(ch) * 0.62), width: cw, height: ch)) {
-                    img = NSImage(cgImage: c, size: NSSize(width: cw, height: ch))
+            let cache = HUDModel.previewCache(site, url)
+            if let c = cache, let cached = NSImage(contentsOf: c) { img = cached }
+            else if previewsPending.insert(site.name).inserted {
+                HUDModel.previewQueue.async { [weak self] in
+                    guard let c = HUDModel.makePreview(site, url) else { return }
+                    let made = NSImage(cgImage: c, size: NSSize(width: c.width, height: c.height))
+                    if let out = cache, let data = NSBitmapImageRep(cgImage: c).representation(using: .jpeg, properties: [.compressionFactor: 0.85]) { try? data.write(to: out) }
+                    DispatchQueue.main.async { self?.sitePreviews[site.name] = made; self?.objectWillChange.send() }
                 }
             }
         } else if let url = resourceURL("Previews/site_\(site.key).jpg") {
@@ -58,6 +83,9 @@ final class HUDModel: ObservableObject {
         if let i = img { sitePreviews[site.name] = i }
         return img
     }
+
+    /// Get every photo site's preview ready ahead of time.
+    func warmSitePreviews() { for site in SiteSpec.all where site.panorama != nil { _ = sitePreview(site) } }
 }
 
 /// Locate a bundled resource, both inside the .app and when run from the source folder.
@@ -157,6 +185,7 @@ final class Game {
         newSession()
         resetAircraft()
         hud.game = self
+        DispatchQueue.main.async { [weak self] in self?.hud.warmSitePreviews() }
     }
 
     var lighting: Lighting {
@@ -176,7 +205,23 @@ final class Game {
     func say(_ m: String, _ t: Float = 2.5) { message = m; messageTimer = t }
 
     /// A new aircraft: its own rates, and always the low ones to begin with.
+    // MARK: Pitch trim
+
+    /// Pitch trim in clicks, as on a transmitter: each click moves the elevator neutral a little. Kept per aircraft.
+    private(set) var pitchTrim = 0
+    static let trimStep: Float = 0.012, trimMax = 30
+    func trim(_ clicks: Int) {
+        let t = clicks == 0 ? 0 : min(max(pitchTrim + clicks, -Game.trimMax), Game.trimMax)
+        if t == pitchTrim && clicks != 0 { say(String(format: "Pitch trim at its limit (%+d)", t)); return }
+        pitchTrim = t
+        var all = UserDefaults.standard.dictionary(forKey: "pitchTrim") as? [String: Int] ?? [:]
+        all[aircraft.spec.name] = t == 0 ? nil : t
+        UserDefaults.standard.set(all, forKey: "pitchTrim")
+        say(t == 0 ? "Pitch trim centred" : String(format: "Pitch trim %+d (%@)", t, t > 0 ? "nose up" : "nose down"))
+    }
+
     private func newSession() {
+        pitchTrim = (UserDefaults.standard.dictionary(forKey: "pitchTrim") as? [String: Int])?[aircraft.spec.name] ?? 0
         input.aircraftLowRate = aircraft.spec.lowRate; input.aircraftExpo = aircraft.spec.expo
         input.lowRates = true
         rotorSpeed = 1
@@ -192,7 +237,7 @@ final class Game {
             let k: Float = spec.kind == .airplane ? 1 : 0.6
             let hd = -site.startHeading * deg
             if spec.handLaunch { aircraft.reset(pos: V3(2, 1.9, -3), heading: hd, speed: clampf(spec.stallSpeed * 1.7, 4, 9)) }
-            else { aircraft.reset(pos: V3(site.startX * k, aircraft.restHeight + 0.02, site.startZ * k), heading: hd) }
+            else { aircraft.reset(pos: V3(site.startX * k, terrain.height(site.startX * k, site.startZ * k) + aircraft.restHeight + 0.02, site.startZ * k), heading: hd) }
         } else if spec.handLaunch {
             aircraft.reset(pos: terrain.pilotPos + V3(2, 1.9, -3), heading: 0, speed: clampf(spec.stallSpeed * 1.7, 4, 9))
         } else {
@@ -245,6 +290,7 @@ final class Game {
         site.eyeHeight = clampf(site.eyeHeight + eye, 0.3, 30)
         SiteSpec.all[siteIndex] = site
         Panoramas.save(site)
+        if site.slope != 0, north != 0 { terrain = Terrain(site: site); env.obstacles = terrain.windObstacles }
         panoLight = Panoramas.analyze(site)
         say(String(format: "Rotation %.0f°  ·  horizon %+.1f°  ·  eye height %.1f m", site.north, site.horizon, site.eyeHeight))
     }
@@ -286,6 +332,9 @@ final class Game {
         case 37: input.lowRates.toggle(); say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.lowRateInUse * 100) : "High rates")
         case 34:
             if aircraft.spec.kind == .helicopter { rotorSpeed = (rotorSpeed + 1) % 3; say("Rotor speed: " + Game.rotorNames[rotorSpeed]) }
+        case 24: trim(1)
+        case 27: trim(-1)
+        case 29: trim(0)
         case 46: sound.muted.toggle(); say(sound.muted ? "Sound off" : "Sound on")
         case 45: selectSite((siteIndex + 1) % SiteSpec.all.count)
         case 11: toggleChallenge()
@@ -306,6 +355,9 @@ final class Game {
     // MARK: Switches and buttons
 
     private var bindLast: [String: Int] = [:]
+    private var siteAmbience: Ambience { if ambienceFor != site.name { ambienceFor = site.name; ambienceCache = Ambience.of(site) }; return ambienceCache }
+    private var ambienceFor = "", ambienceCache = Ambience()
+    private var touchQuiet: Float = 0           // a short gap between touchdown sounds
 
     /// Act on the controller switches and buttons the pilot has assigned. A switch sets its state when it is
     /// moved; a button steps through the states, or triggers the action, each time it is pressed.
@@ -353,6 +405,9 @@ final class Game {
             controls.mode = flightMode
             controls.rotorSpeed = rotorSpeed
         }
+        if !autopilotOn { controls.elevator = clampf(controls.elevator + Float(pitchTrim) * Game.trimStep, -1, 1) }
+        // on a hillside the model is held until the throttle is opened, so it does not roll away
+        if site.slope != 0, site.panorama != nil, aircraft.onGround, controls.throttle < 0.06, length(aircraft.vel) < 2 { controls.brake = 1 }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
         aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
         if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say("Battery low — land soon", 4) }
@@ -365,6 +420,14 @@ final class Game {
                 aircraft.step(dt: h, c: controls, terrain: terrain, wind: env.wind(at: aircraft.pos, terrain: terrain), rollMu: site.rollMu)
                 acc -= h
             }
+            touchQuiet -= dt
+            if aircraft.touchImpact > 0.3 && !aircraft.crashed && touchQuiet <= 0 {
+                let slide = length(V3(aircraft.vel.x, 0, aircraft.vel.z))
+                sound.touch(aircraft.touchImpact / 2.5, ground: aircraft.touchWater ? 5 : terrain.groundKind(aircraft.pos.x, aircraft.pos.z),
+                            wheel: aircraft.touchWheel, slide: slide, mass: aircraft.spec.mass, pan: sound.state.pan)
+                touchQuiet = 0.12
+            }
+            aircraft.touchImpact = 0
             let sdt = dt * timeScale
             if sdt > 0 { climb += ((aircraft.pos.y - lastY) / sdt - climb) * min(1, dt * 4); lastY = aircraft.pos.y }
             postStep(sdt)
@@ -399,7 +462,7 @@ final class Game {
             for o in site.obstacles {
                 let c = Panoramas.position(o, north: site.north)
                 let dx = p.x - c.x, dz = p.z - c.y
-                if p.y < o.height && dx * dx + dz * dz < o.radius * o.radius {
+                if p.y < terrain.height(c.x, c.y) + o.height && dx * dx + dz * dz < o.radius * o.radius {
                     aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
                     break
                 }
@@ -590,8 +653,7 @@ final class Game {
         st.airspeed = aircraft.airspeed
         st.groundRoll = aircraft.onGround && !aircraft.crashed ? length(V3(aircraft.vel.x, 0, aircraft.vel.z)) : 0
         st.windSpeed = env.windSpeed
-        st.ambience = site.waterLevel != nil ? 1 : (site.pal.flowers ? 0 : (site.palette == 4 ? 3 : 2))
-        if site.panorama != nil { st.ambience = site.category == "Winter" || site.category == "Desert" ? 2 : 0 }
+        st.ambience = site.panorama != nil ? siteAmbience : siteAmbience.at(time: timeOfDay)
         st.paused = paused || hud.overlay.pausesSim
         sound.state = st
     }
@@ -623,6 +685,7 @@ final class Game {
         default: s.lx = controls.rudder; s.ly = tY; s.rx = controls.aileron; s.ry = eY
         }
         s.rates = input.lowRates ? String(format: "Low %.0f%%", input.lowRateInUse * 100) : "High"
+        if pitchTrim != 0 { s.rates += String(format: " rates · Trim %+d", pitchTrim) } else { s.rates += " rates" }
         var cfg: [String] = []
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }

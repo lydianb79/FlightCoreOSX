@@ -453,7 +453,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setFragmentSamplerState(shadowSampler, index: 0)
             enc.setFragmentSamplerState(pointSampler, index: 1)
             if let t = terrainMesh, !Renderer.debugOff.contains("terrain") { drawItems(enc, [DrawItem(mesh: t, model: .identity, material: 1)], fragment: true) }
-            if pano, let c = catcherMesh { drawItems(enc, [DrawItem(mesh: c, model: .identity, material: 2)], fragment: true) }
+            if pano, let c = catcherMesh {
+                // the shadow catcher lies on the photo's ground, which may be a hillside
+                let g = game.site.groundGradient
+                let tilt = M4(columns: (V4(1, g.x, 0, 0), V4(0, 1, 0, 0), V4(0, g.y, 1, 0), V4(0, 0, 0, 1)))
+                drawItems(enc, [DrawItem(mesh: c, model: tilt, material: 2)], fragment: true)
+            }
             drawItems(enc, world, fragment: true)
             drawItems(enc, grassItems, fragment: true)
             drawItems(enc, acItems, fragment: true)
@@ -462,12 +467,22 @@ final class Renderer: NSObject, MTKViewDelegate {
             if let wm = waterMesh { drawItems(enc, [DrawItem(mesh: wm, model: .identity, material: 7)], fragment: true) }
             if let ts = treeShadowMesh { drawItems(enc, [DrawItem(mesh: ts, model: .identity, material: 4)], fragment: true) }
             drawItems(enc, acBlend, fragment: true)
-            if game.showObstacles, !game.site.obstacles.isEmpty {
+            if game.showObstacles, pano {
                 var ob = MeshBuilder()
+                // the invisible ground: rings every doubling of distance, to check it against the photo
+                for r: Float in [5, 10, 20, 40, 80, 160, 320] {
+                    let w = r * 0.012, n = 96
+                    func pt(_ a: Float, _ d: Float) -> V3 { V3(sin(a) * d, game.terrain.height(sin(a) * d, cos(a) * d) + 0.02, cos(a) * d) }
+                    for k in 0..<n {
+                        let a0 = Float(k) / Float(n) * 2 * .pi, a1 = Float(k + 1) / Float(n) * 2 * .pi
+                        ob.quad(pt(a0, r - w), pt(a0, r + w), pt(a1, r + w), pt(a1, r - w), V4(0.1, 0.9, 1, 0.8))
+                    }
+                }
                 for (i, o) in game.site.obstacles.enumerated() {
                     let c = Panoramas.position(o, north: game.site.north)
                     let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
-                    ob.cylinder(from: V3(c.x, 0, c.y), to: V3(c.x, o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
+                    let gy = game.terrain.height(c.x, c.y)
+                    ob.cylinder(from: V3(c.x, gy, c.y), to: V3(c.x, gy + o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
                 }
                 if let om = GPUMesh(device, ob) { drawItems(enc, [DrawItem(mesh: om, model: .identity, material: 4)], fragment: true) }
             }
