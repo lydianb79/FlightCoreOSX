@@ -753,6 +753,34 @@ if let ci = CommandLine.arguments.firstIndex(of: "--panocheck"), ci + 1 < Comman
     }
     exit(0)
 }
+if let ci = CommandLine.arguments.firstIndex(of: "--flightsound"), ci + 3 < CommandLine.arguments.count {
+    // fly the demo pilot for 25 s, then dive in, and record what the game's own sound engine plays: --flightsound out.wav <site> <aircraft>
+    SoundEngine.offline = true
+    let sn = CommandLine.arguments[ci + 2], an = CommandLine.arguments[ci + 3]
+    let g = Game(site: SiteSpec.all.firstIndex { $0.name.contains(sn) } ?? 0, aircraft: AircraftLibrary.all.firstIndex { $0.name.contains(an) } ?? 0)
+    g.autopilotOn = true
+    print("FLIGHTSOUND \(g.site.name), \(g.aircraft.spec.name)")
+    let per = 735
+    let l = UnsafeMutablePointer<Float>.allocate(capacity: per), r = UnsafeMutablePointer<Float>.allocate(capacity: per)
+    var pcm: [Int16] = [], prev: Float = 0
+    for f in 0..<(60 * 34) {
+        if f == 60 * 20 { g.autopilotOn = false }           // throttle closed: glide
+        if f == 60 * 25 { g.aircraft.pos.y = g.terrain.height(g.aircraft.pos.x, g.aircraft.pos.z) + 3; g.aircraft.vel = V3(9, -14, 0) }
+        g.frame(dt: 1 / 60)
+        g.sound.render(left: l, right: r, count: per)
+        var jump: Float = 0, rms: Float = 0
+        for i in 0..<per { jump = max(jump, abs(l[i] - prev)); prev = l[i]; rms += l[i] * l[i]
+            pcm.append(Int16(max(-1, min(1, l[i])) * 32000)); pcm.append(Int16(max(-1, min(1, r[i])) * 32000)) }
+        if f % 30 == 0 || jump > 0.5 {
+            let st = g.sound.state
+            print(String(format: "t=%5.2f agl %5.1f spd %4.1f %@ crashed %d  hz %5.1f power %.2f run %.0f gain %.2f reflect %.4f  touches %d  rms %.3f jump %.2f", Float(f) / 60,
+                         g.aircraft.pos.y - g.terrain.height(g.aircraft.pos.x, g.aircraft.pos.z), length(g.aircraft.vel), g.aircraft.onGround ? "gnd" : "air", g.aircraft.crashed ? 1 : 0,
+                         st.shaftHz, st.power, st.running, st.gain, st.reflect, g.sound.touchCount, (rms / Float(per)).squareRoot(), jump))
+        }
+    }
+    writeWav(pcm, sampleRate: 44100, to: CommandLine.arguments[ci + 1])
+    exit(0)
+}
 if CommandLine.arguments.contains("--parktest") {
     // every photo site: the model must sit still on the ground where it starts, clear of every obstacle
     var bad = 0, keep: [Game] = []
@@ -914,6 +942,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let iv = self.renderer.statIntervals.sorted(), cpu = self.renderer.statCpu.sorted()
                 let pr = self.renderer.statPresented.sorted(); self.renderer.statPresented = []
                 self.renderer.statIntervals = []; self.renderer.statCpu = []
+                print(self.game.sound.stats())
                 guard iv.count > 4, cpu.count > 4 else { return }
                 let med = iv[iv.count / 2]; _ = med
                 let late = iv.filter { $0 > med * 1.5 }.count

@@ -236,6 +236,8 @@ final class Aircraft {
     private var tqPrev = V3.zero            // multirotor: last torque demand, for the controller's lead term
     var vortexRing: Float = 0       // helicopter: 0...1 how deep in vortex ring state
     private var motorLoad: Float = 0
+    /// How hard the motor is working, 0 (throttle closed, propeller windmilling) to about 1.
+    var engineLoad: Float { motorLoad }
     /// Fraction of the main wing that is stalled (for the display and tests).
     var wingStall: Float {
         var a: Float = 0, t: Float = 0

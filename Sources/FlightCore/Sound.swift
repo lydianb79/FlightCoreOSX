@@ -176,12 +176,31 @@ final class SoundEngine {
     private var howlLo: Float = 0, howlBd: Float = 0, howlLo2: Float = 0, howlBd2: Float = 0
     private var townLo: Float = 0, townCarLo: Float = 0, townCarBd: Float = 0, townP: Float = 0.6
 
+    static var offline = false      // tests render the sound themselves
+    private(set) var touchCount = 0
+    private var statLoadMax: Float = 0, statLoadSum: Float = 0, statCalls = 0, statFrames = 0, statGapMax: Float = 0, statLast: UInt64 = 0
+    /// Load of the audio thread since the last call, for --perf.
+    func stats() -> String {
+        let out = engine.outputNode.outputFormat(forBus: 0)
+        let s = String(format: "audio: %d frames per callback, device %.0f Hz, load avg %.0f%% max %.0f%%, longest gap %.1f ms, %d callbacks",
+                       statFrames, out.sampleRate, statCalls > 0 ? statLoadSum / Float(statCalls) * 100 : 0, statLoadMax * 100, statGapMax, statCalls)
+        statLoadMax = 0; statLoadSum = 0; statCalls = 0; statGapMax = 0
+        return s
+    }
+
     init(start: Bool = true) {
-        guard start, let fmt = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2) else { return }
+        guard start, !SoundEngine.offline, let fmt = AVAudioFormat(standardFormatWithSampleRate: Double(sampleRate), channels: 2) else { return }
         let n = AVAudioSourceNode(format: fmt) { [unowned self] _, _, frameCount, abl -> OSStatus in
             let bufs = UnsafeMutableAudioBufferListPointer(abl)
             guard bufs.count >= 2, let l = bufs[0].mData, let r = bufs[1].mData else { return noErr }
+            let t0 = DispatchTime.now().uptimeNanoseconds
             self.render(left: l.assumingMemoryBound(to: Float.self), right: r.assumingMemoryBound(to: Float.self), count: Int(frameCount))
+            // how much of the time it has does the synthesizer use, and are callbacks arriving on time
+            let t1 = DispatchTime.now().uptimeNanoseconds
+            let load = Float(t1 - t0) / (Float(frameCount) / self.sampleRate * 1e9)
+            self.statLoadMax = max(self.statLoadMax, load); self.statLoadSum += load; self.statCalls += 1; self.statFrames = Int(frameCount)
+            if self.statLast != 0 { self.statGapMax = max(self.statGapMax, Float(t0 - self.statLast) / 1e6) }
+            self.statLast = t0
             return noErr
         }
         node = n
@@ -200,6 +219,7 @@ final class SoundEngine {
     /// The aircraft touches down. `strength` 0...1 from the speed into the ground; `ground` 0 asphalt, 1 grass, 2 snow,
     /// 3 sand, 4 bare earth, 5 water; `wheel` whether a tyre or the airframe touched; `slide` speed along the ground.
     func touch(_ strength: Float, ground: Int, wheel: Bool, slide: Float, mass: Float, pan: Float = 0) {
+        touchCount += 1
         let s = 0.25 + 0.75 * min(max(strength, 0), 1)
         touchPan = pan
         if ground == 5 { splashEnv = max(splashEnv, 0.12 + 0.3 * s); return }
@@ -327,17 +347,18 @@ final class SoundEngine {
                 let before = pFire
                 wrap(&pFire, fire * fl); wrap(&pBlade, hz * st.blades * fl); wrap(&pShaft, hz * 0.5)
                 // each firing is a sharp pressure pulse; no two are alike, and at idle some are weak
-                if pFire < before { lope = 1 + (0.38 - 0.3 * sPower) * n0 }
+                if pFire < before { lope = 1 + (0.2 - 0.14 * sPower) * n0 }
                 let uneven = 1 + (st.radial ? 0.35 : 0.18) * sin(twoPi * pShaft * (st.radial ? 1 : 2))
                 let pulse = exp(-pFire * (5 + 4 * sPower)) * uneven * lope
-                exhaust += (pulse * (0.7 + 0.3 * n0) - exhaust) * 0.35
+                exhaust += (pulse * (0.88 + 0.12 * n0) - exhaust) * 0.35
                 rumble += (n1 * pulse - rumble) * 0.08
                 // the exhaust pipe rings: a bark that rises with the revs
                 let bark = bandpass(pulse - 0.15, 170 + 2.2 * fire, 0.45, &exLo, &exBd) * 0.5
                 let prop = stack(pBlade, 5, 1.7 - 0.5 * sPower) * 0.09 * (0.3 + 0.7 * sPower)
                 let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
                 let wash = bandpass(n0, 400 + 1800 * sPower, 1.0, &propLo, &propBd) * (0.4 + 0.6 * beat) * 0.26 * sPower * sPower
-                eng = ((exhaust - 0.12) * (0.45 + 0.4 * sPower) + bark * (0.5 + 0.5 * sPower) + rumble * 1.6 + prop + wash) * sRun
+                // an idling engine is far quieter than one at full throttle
+                eng = ((exhaust - 0.12) * (0.45 + 0.4 * sPower) + bark * (0.5 + 0.5 * sPower) + rumble * (0.5 + 1.1 * sPower) + prop + wash) * (0.22 + 0.78 * sPower) * sRun
             case 2, 3:  // ducted fan / jet (2) and turboprop (3)
                 let fan = st.engine == 2
                 wrap(&pWhine, hz * (fan ? 11 : 28) * fl); wrap(&pWhine2, hz * (fan ? 11.09 : 41) * fl); wrap(&pBlade, hz * st.blades * fl)
@@ -591,6 +612,10 @@ func writeSoundTest(to path: String) {
         }
         print(String(format: "SOUND %@: peak %.2f rms %.3f %@", names[kind], peak, sqrt(sumSq / Double(n)), bad ? "NON-FINITE SAMPLES" : "ok"))
     }
+    writeWav(pcm, sampleRate: sr, to: path)
+}
+
+func writeWav(_ pcm: [Int16], sampleRate sr: Int, to path: String) {
     var d = Data()
     func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
     func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }

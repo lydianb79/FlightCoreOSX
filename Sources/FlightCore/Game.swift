@@ -246,6 +246,7 @@ final class Game {
             aircraft.reset(pos: V3(x, terrain.height(x, z) + aircraft.restHeight + 0.02, z), heading: -.pi / 2)
         }
         input.resetThrottle(spec.kind, launch: spec.handLaunch)
+        touchQuiet = 0.6            // settling onto its wheels is not a touchdown
         crashTimer = 0
         autopilot = Autopilot()
         camSnap = true
@@ -628,9 +629,11 @@ final class Game {
             let idles = spec.engineSound != 0 && !aircraft.crashed
             let rpm = idles ? max(lv, 0.24) : lv
             st.shaftHz = spec.soundBase / Float(max(spec.blades, 1)) * (0.25 + 0.75 * rpm)
-            st.power = lv
+            // the propeller takes seconds to spin down, but the motor goes quiet the moment the throttle is closed
+            st.power = lv * clampf(0.3 + 1.4 * aircraft.engineLoad, 0, 1)
             st.running = idles ? 1 : (lv > 0.01 ? 1 : 0)
         }
+        if aircraft.crashed { st.running = 0; st.power = 0 }       // a wrecked model is silent
         st.shaftHz *= st.doppler
         // distance: inverse-distance loudness, and the air soaks up the highs
         let size = max(spec.span, 0.6)

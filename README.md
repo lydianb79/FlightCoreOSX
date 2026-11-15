@@ -224,7 +224,8 @@ Press **H** in the app for this list.
   - airframe wind noise and tyre rumble on the ground;
   - ambience at the pilot's position that belongs to the place: every site has its own mix of songbirds, cuckoo, crows, gulls, frogs, crickets, cicadas, cowbells, surf, lapping water, a stream, leaves, dry grass, blown sand, whistling wind and distant traffic. Wind sounds follow the wind speed, and on 3D sites mornings have more birds and evenings more crickets and frogs (`FlightCore --ambiencetest` lists each site's mix and level);
   - crashes (impact, debris) and splashes.
-  `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file.
+  - the engine goes quiet as soon as the throttle is closed, while its pitch winds down with the propeller; an idling engine is much quieter than one at full throttle, and a crashed model is silent.
+  `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file; `FlightCore --flightsound out.wav <site> <aircraft>` records what the game plays during a demo flight, a throttle cut and a crash; `--perf` also prints the load of the audio thread.
 - **Touchdowns** sound like what the model lands on: a tyre chirp or a scrape on asphalt, a rustle on grass, a crunch on snow, a hiss on sand, a gritty thud on bare earth and a splash on water, louder the harder it comes down and deeper the heavier the model. On photo sites the ground is taken from the kind of place it is. `FlightCore --touchtest` lists what every 3D site is made of.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
 - **Helicopter rotor speed** is simulated. The governed engine holds head speed under load, and with throttle hold the rotor is driven by the airflow alone, so autorotations work.
