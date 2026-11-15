@@ -60,6 +60,7 @@ let realData: [String: RealData] = [
     "Robin DR400": rd(8.72, 14.2, 6.96, 1100, 134, 278, 0.8, .semiSymmetric, washout: 2),
     "DHC-6 Twin Otter": rd(19.8, 39.0, 15.77, 5670, 920, 314, 1.0, .flatBottom, washout: 2),
     "Beechcraft King Air": rd(16.61, 28.2, 13.34, 5670, 1268, 536, 0.45, .semiSymmetric, washout: 3),
+    "Pilatus PC-12": rd(16.28, 25.81, 14.4, 4740, 895, 528, 0.5, .semiSymmetric, washout: 2.5),
     "Antonov An-2": rd(18.2, 71.5, 12.4, 5500, 750, 258, 1.0, .slatted, washout: 0),
     "Douglas DC-3": rd(29.0, 91.7, 19.7, 11430, 1790, 370, 0.35, .semiSymmetric, washout: 3),
     "Boeing Stearman": rd(9.8, 27.6, 7.63, 1232, 164, 200, 1.0, .semiSymmetric, washout: 0),
@@ -797,6 +798,10 @@ enum AircraftLibrary {
                 $0.wingY = 0.1; $0.struts = true; $0.retracts = false; $0.blades = 3; $0.fuseExp = 3; $0.camber = 4; $0.canopyLen = 0.06; $0.wheelR = 0.045 },
             mk(twin, 1.9, "Beechcraft King Air", "Scale Civil", "Executive twin turboprop with a T-tail", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: navy) {
                 $0.wingY = -0.03; $0.tTail = true; $0.blades = 4; $0.thrust *= 1.2; $0.pitchSpeed = 30; $0.canopyLen = 0.06; $0.cdA *= 0.75 },
+            mk(warbird, 1.9, "Pilatus PC-12", "Scale Civil", "Swiss single-turboprop business aircraft: T-tail, long wing, five-blade propeller", scheme: 6,
+               fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.75, 0.1, 0.1)) {
+                $0.gear = .tricycle; $0.gearH = 0.17; $0.tTail = true; $0.blades = 5; $0.spinnerScale = 0.26; $0.spinnerColor = grey; $0.fuseExp = 2.1
+                $0.fuseW *= 1.15; $0.fuseH *= 1.15; $0.canopyLen = 0.07; $0.dihedral = 6; $0.sound = 175; $0.finH *= 1.15 },
             mk(bipe, 1.9, "Antonov An-2", "Scale Civil", "Enormous radial biplane: flies slower than anything its size should", scheme: 8, fuse: green, top: green, bottom: rgb(0.6, 0.7, 0.8), tail: green, accent: grey) {
                 $0.pants = false; $0.fuseExp = 2.4; $0.fuseW *= 1.25; $0.spinnerScale = 0.14; $0.blades = 4; $0.incidence = 2.5; $0.camber = 4.5; $0.dihedral = 2
                 $0.thrust *= 0.42; $0.pitchSpeed = 18; $0.ailThrow = 16; $0.elevThrow = 18; $0.rudThrow = 26; $0.washTail = 0.5; $0.wheelR = 0.05; $0.spinnerColor = grey; $0.sound = 85 },

@@ -6,7 +6,7 @@ A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Creat
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 99 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 100 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Download
 
@@ -51,12 +51,12 @@ The last aircraft and site are remembered between launches. The interface uses t
 
 ## Aircraft
 
-Ninety-nine aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
+One hundred aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
 | Category | Count | Examples |
 |---|---|---|
 | Trainers & Sport | 9 | Skylark Trainer, Cadet 1200, Stick 40, Tundra Trainer, Stiletto Racer |
-| Scale Civil | 25 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth, and three floatplanes |
+| Scale Civil | 26 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, Pilatus PC-12, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth, and three floatplanes |
 | Warbirds | 17 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel |
 | Aerobatic | 11 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7 |
 | Foam 3D | 9 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty |
