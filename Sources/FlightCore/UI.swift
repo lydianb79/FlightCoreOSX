@@ -301,7 +301,7 @@ struct AircraftBrowser: View {
                 && (search.isEmpty || all[i].name.localizedCaseInsensitiveContains(search) || all[i].blurb.localizedCaseInsensitiveContains(search))
         }
     }
-    private func fly(_ i: Int) { m.game.selectAircraft(i); m.overlay = .none }
+    private func fly(_ i: Int) { m.game.selectAircraft(i); m.overlay = .menu }
 
     var body: some View {
         Sheet(m: m, title: "Choose Aircraft", subtitle: "\(all.count) models", back: m.game.cameFromMenu ? .menu : .none) {
@@ -391,7 +391,7 @@ struct AircraftBrowser: View {
                         HStack(spacing: 5) { ForEach(spec.features.prefix(3), id: \.self) { Tag(text: $0) } }.padding(.top, 10)
                     }
                     Spacer(minLength: 8)
-                    Button { fly(selected) } label: { Text(selected == m.game.aircraftIndex ? "Fly Again" : "Fly This Aircraft").frame(maxWidth: .infinity) }
+                    Button { fly(selected) } label: { Text("Select").frame(maxWidth: .infinity) }
                         .buttonStyle(PrimaryButton()).keyboardShortcut(.defaultAction)
                 }
                 .frame(width: 300).padding(16)
@@ -423,7 +423,7 @@ struct SiteBrowser: View {
             matches(all[i], filter) && (search.isEmpty || all[i].displayName.localizedCaseInsensitiveContains(search) || all[i].summary.localizedCaseInsensitiveContains(search))
         }
     }
-    private func fly(_ i: Int) { m.game.selectSite(i); m.overlay = .none }
+    private func fly(_ i: Int) { m.game.selectSite(i); m.overlay = .menu }
 
     private func filterRow(_ f: String, icon: String) -> some View {
         Button { filter = f } label: {
@@ -532,7 +532,7 @@ struct SiteBrowser: View {
                     }
                     .padding(.top, 12)
                     Spacer(minLength: 8)
-                    Button { fly(selected) } label: { Text(selected == m.game.siteIndex ? "Fly Here Again" : "Fly Here").frame(maxWidth: .infinity) }
+                    Button { fly(selected) } label: { Text("Select").frame(maxWidth: .infinity) }
                         .buttonStyle(PrimaryButton()).keyboardShortcut(.defaultAction)
                 }
                 .frame(width: 300).padding(16)

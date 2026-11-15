@@ -107,7 +107,7 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 - The sun direction and ambient light are estimated from the photo, so the model is lit to match and casts a shadow on the photographed ground.
 - The **Photo:** items in the Flying Site menu rotate the panorama, shift its horizon and set the camera height. The settings are saved in a `.json` file next to the image.
 
-Photos are drawn with bicubic filtering when enlarged, sharpened according to how much real detail each one holds (`FlightCore --panostats` lists it), and given a fine grain when zoomed in far; photo sites always render at full resolution.
+Photos are shown as they are, without added sharpening; `FlightCore --panostats` lists how much real detail each one holds, which helps to pick sharp ones.
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
