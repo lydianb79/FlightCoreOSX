@@ -216,7 +216,10 @@ func makeAirplane(_ g: PlaneGeom) -> AircraftSpec {
     var spec = buildAirplane(g)
     for _ in 0..<2 {
         let actual = measuredMargin(spec, throttle: 0.3)
-        if actual >= spec.designMargin - 0.01 { break }
+        // 3D and aerobatic models are balanced close to neutral on purpose: one that came out nose-heavy needs up
+        // trim to fly level, and in a hover that trim, blown by the propeller, keeps pitching it over
+        let neutral = g.profile || g.category == "Foam 3D" || g.category == "Aerobatic"
+        if actual >= spec.designMargin - 0.01 && !(neutral && actual > spec.designMargin + 0.01) { break }
         spec = buildAirplane(g, cgShift: spec.cgShift + (spec.designMargin - actual) * spec.mac)
     }
     return spec
@@ -345,7 +348,8 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
         }
     }
     for (n, a) in [(V3(1, 0, 0), L * g.fuseH * 0.75), (V3(0, 1, 0), L * g.fuseW * 0.75)] {
-        surfaces.append(AeroSurface(pos: V3(0, 0, nz + 0.42 * L), normal: n, area: a, ar: 0.4, liftSlope: 0.9, stall: 0.6, cd0: 0))
+        // the fuselage as a low side and top area (for flat-sided 3D models it is moved forward below)
+        surfaces.append(AeroSurface(pos: V3(0, 0, nz + (g.profile ? 0.25 : 0.42) * L), normal: n, area: a, ar: 0.4, liftSlope: 0.9, stall: 0.6, cd0: 0))
     }
 
     // --- Contacts
@@ -428,7 +432,48 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
     spec.construction = construction.label
     spec.mac = mac; spec.designMargin = staticMargin; spec.cgShift = cgShift
     spec.endurance = g.endurance ?? (glider ? 420 : (g.profile ? 200 : 240))
-    if g.ducted || g.pusher { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
+    // Propeller blast, from the geometry: each surface gets the share of its area that lies inside the slipstream
+    // tube trailing back from a propeller ahead of it. Forces go with speed squared, so the speed factor is the root
+    // of that share. Just behind the propeller the stream has reached about three quarters of its final speed.
+    do {
+        let R = g.propDia / 2
+        func share(_ lo: Float, _ hi: Float, _ centres: [Float]) -> Float {
+            var covered: Float = 0
+            for c in centres { covered += max(0, min(hi, c + R) - max(lo, c - R)) }
+            return clampf(covered / max(hi - lo, 1e-4), 0, 1)
+        }
+        // flat profile fuselages and the deep, slab-sided ones of aerobatic models work as a keel in the blast;
+        // the rounded body of an ordinary model does not
+        let deepSided = g.profile || g.category == "Foam 3D" || g.category == "Aerobatic"
+        for i in spec.surfaces.indices {
+            let s = spec.surfaces[i]
+            let ahead = engines.filter { $0.z < s.pos.z }
+            var f: Float = 0
+            if abs(s.normal.x) > 0.9 {
+                // fin: a vertical strip; only a propeller in line with it blows on it
+                let inLine = ahead.filter { abs($0.x - s.pos.x) < R }
+                f = share(s.pos.y - g.finH / 2, s.pos.y + g.finH / 2, inLine.map { $0.y })
+            } else {
+                let half = s.isWing ? hs / Float(nPan) / 2 : g.stabSpan / 4
+                let level = ahead.filter { abs($0.y - s.pos.y) < R }
+                f = share(s.pos.x - half, s.pos.x + half, level.map { $0.x })
+            }
+            let developed: Float = s.isWing ? 0.75 : (s.flapCh < 0 && s.ar < 0.5 ? 0.85 : 1)      // wing just behind the propeller; fuselage; tail
+            let slab = s.flapCh < 0 && s.ar < 0.5 && !s.isWing            // fuselage side or top
+            spec.surfaces[i].wash = g.ducted || g.pusher || (slab && !deepSided) ? 0 : developed * sqrt(f)
+        }
+        // Hanging on the propeller, a sideways slide blows across the fin and swings the tail round, tipping the
+        // aircraft further over. The blown keel area of the fuselage ahead of the centre of gravity pushes the other
+        // way. On aircraft built to fly like this the two nearly cancel, which is what makes a hover holdable, so
+        // the keel's side force is centred where it offsets most of the fin's.
+        let fins = spec.surfaces.filter { abs($0.normal.x) > 0.9 && $0.ar >= 0.5 && $0.wash > 0 }
+        if let b = spec.surfaces.firstIndex(where: { abs($0.normal.x) > 0.9 && $0.ar < 0.5 && $0.flapCh < 0 }), !fins.isEmpty, spec.surfaces[b].wash > 0 {
+            let finMoment = fins.reduce(Float(0)) { $0 + $1.area * $1.liftSlope * $1.wash * $1.wash * $1.pos.z }
+            let body = spec.surfaces[b]
+            let z = -0.7 * finMoment / (body.area * body.liftSlope * body.wash * body.wash)
+            spec.surfaces[b].pos.z = clampf(z, nz + 0.12 * L, nz + 0.4 * L)
+        }
+    }
     spec.contacts = contacts
     spec.cdA = g.cdA
     spec.handLaunch = g.handLaunch

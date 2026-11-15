@@ -342,7 +342,7 @@ final class Aircraft {
                     let w = -v0 + sqrt(v0 * v0 + 2 * T / (rho * A))
                     if w > washV { washZ = p.pos.z; washR = p.diameter / 2 }
                     washV = max(washV, w)
-                    if abs(p.pos.x) < 0.01 { swirlV = 0.04 * w * p.spinDir }          // spiral slipstream
+                    if abs(p.pos.x) < 0.01 { swirlV = 0.018 * w * p.spinDir }          // spiral slipstream
                 }
                 spin[i] += (n > 0.01 ? 12 + 45 * sqrt(min(n, 1)) : 0) * dt
             }
@@ -368,7 +368,7 @@ final class Aircraft {
                 var inWash = s.wash
                 if inWash > 0 && washV > 0.5 {
                     let drift = abs(dot(v, s.normal)) * abs(s.pos.z - washZ) / (washV + max(-va.z, 0))
-                    let d = drift / (2 * washR)
+                    let d = drift / (3.5 * washR)
                     inWash /= 1 + d * d
                 }
                 v.z -= inWash * washV
@@ -381,11 +381,20 @@ final class Aircraft {
                 // control surfaces lose their bite in separated flow
                 // and a hinged surface turns the flow less and less as its deflection grows: past about 25 degrees
                 // of effective camber change the extra throw mostly adds drag
-                if s.flapCh >= 0 { alpha += 0.45 * tanh(s.flapGain * servo[s.flapCh] / 0.45) * (1 - 0.3 * stallT[i]) }
-                let dElev = s.elevGain * servo[1] * (1 - 0.3 * stallT[i])
-                alpha += dElev
+                // A hinged control works like a flap: it adds lift of its own and only nudges the whole surface toward
+                // the stall, so an aileron, elevator or rudder still bites when its surface is already at a large
+                // angle to the air (a hover in wind, a harrier, a spin). It needs air flowing along the chord to work.
+                // Its effect also tails off as the throw grows past about 25 degrees.
+                let dElev = s.elevGain * servo[1]
+                let throw_ = (s.flapCh >= 0 ? s.flapGain * servo[s.flapCh] : 0) + dElev
+                let hinge = throw_ != 0 ? 0.45 * tanh(throw_ / 0.45) * max(vf / sp, 0) : 0
+                alpha += 0.3 * hinge
                 alpha += s.flapsGain * flap
                 var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
+                if hinge != 0 {
+                    let dcl = s.liftSlope * s.load * 0.7 * hinge * (1 - 0.35 * stallT[i])
+                    cl += dcl; cd += dcl * dcl / (.pi * s.ar * 0.8) + 0.25 * hinge * hinge
+                }
                 if s.isWing { stallSum += stallT[i] * s.area; stallArea += s.area }
                 // a tailplane behind a stalled wing sits in its wake and loses much of its bite, except where the propeller blows on it
                 let blanket: Float = s.downwash > 0 ? 1 - 0.5 * wingStallNow * (1 - 0.7 * inWash) * s.downwash : 1
@@ -393,7 +402,7 @@ final class Aircraft {
                 if s.flapsGain != 0 { cd += 0.07 * flap; tb.x -= qS * s.chord * 0.18 * flap }
                 // a tailless wing is trimmed and pitched by its own section: reflex, and elevons moving the centre of lift
                 if s.cm0 != 0 || dElev != 0 { tb.x += qS * s.chord * (s.cm0 - 0.3 * s.liftSlope * dElev) * (1 - 0.85 * stallT[i]) }      // flaps drag, and pitch the nose down
-                if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area; wingArea += s.area }
+                if s.isWing && abs(s.pos.x) < spec.span * 0.3 { wingCl += cl * s.area * sp2; wingArea += s.area }
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
                 let f = (l * cl - u * cd) * qS
@@ -403,7 +412,14 @@ final class Aircraft {
             }
             if stallArea > 0 { wingStallNow = stallSum / stallArea }
             // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
-            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea * groundPhi - eps) * min(1, dt / 0.15) }
+            // It is the lift the wing is actually making that deflects the air, and the deflection is an angle only
+            // relative to the speed of the air reaching the tail. Hanging on the propeller the wing makes next to no
+            // lift while the tail sits in a fast stream, so there is next to no downwash.
+            if wingArea > 0 {
+                let vt = airspeed + 0.8 * washV
+                let target = clampf(spec.downwashK * wingCl / (wingArea * max(vt * vt, 1)) * groundPhi, -0.3, 0.3)
+                eps += (target - eps) * min(1, dt / 0.15)
+            }
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:

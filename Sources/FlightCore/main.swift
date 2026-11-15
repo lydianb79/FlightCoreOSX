@@ -269,6 +269,170 @@ func runEnvTest() {
     }
 }
 
+/// Rudder check: yaw authority from the propeller blast alone (aircraft held nose-up and motionless at hover
+/// power, or full power if it cannot hover) at a quarter, half and full rudder, plus the yaw rate in cruise.
+func runRudderTest() {
+    let terrain = Terrain(site: SiteSpec.all[0])
+    print("name                            T/W   blast yaw accel deg/s2 at rudder        pitch accel   roll accel    blast share of speed on     cruise yaw")
+    print("                                       25%      50%     100%                  100% elev     100% ail      inner wing  ailerons  tail   deg/s")
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let up = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+        let n = min(sqrt(spec.mass * gravity / spec.props[0].staticThrust / Float(spec.props.count)), 1)
+        func accel(_ set: (inout Controls) -> Void) -> (V3, Float) {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0); ac.q = up
+            for i in ac.levels.indices { ac.levels[i] = n }
+            var c = Controls(); c.throttle = 0.82 * n + 0.18 * n * n; set(&c)
+            for _ in 0..<400 { ac.vel = .zero; ac.omega = .zero; ac.q = up; ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0) }
+            ac.omega = .zero; ac.vel = .zero
+            ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+            let fin = spec.surfaces.firstIndex { $0.flapCh == 2 }
+            return (ac.omega / 0.001 / deg, fin.map { ac.stallT[$0] } ?? 0)
+        }
+        let rest = accel { _ in }.0
+        let q = accel { $0.rudder = 0.25 }, h = accel { $0.rudder = 0.5 }, f = accel { $0.rudder = 1 }
+        let e = accel { $0.elevator = 1 }, a = accel { $0.aileron = 1 }
+        let ail = spec.surfaces.filter { $0.isWing && $0.flapCh == 0 }, ailArea = ail.reduce(Float(0)) { $0 + $1.area }
+        let ailWash = ailArea > 0 ? sqrt(ail.reduce(Float(0)) { $0 + $1.area * $1.wash * $1.wash } / ailArea) : 0
+        let tailWash = spec.surfaces.first { !$0.isWing && $0.flapCh == 1 }?.wash ?? 0
+        print(String(format: "%@ %4.2f  %6.0f   %6.0f   %6.0f          %6.0f        %6.0f          %4.2f       %4.2f    %4.2f    %5.0f", spec.name.padding(toLength: 30, withPad: " ", startingAt: 0),
+                     spec.thrustToWeight, abs(q.0.y - rest.y), abs(h.0.y - rest.y), abs(f.0.y - rest.y), abs(e.0.x - rest.x), abs(a.0.z - rest.z),
+                     spec.surfaces.first { $0.isWing }?.wash ?? 0, ailWash, tailWash, measureRates(spec).yaw))
+    }
+
+    // open loop: hanging on the propeller with no stick input, then a third rudder for 0.3 s. What actually moves?
+    for name in ["Flatty 3D", "Foam Extra XL", "Vortex 3D"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        ac.reset(pos: V3(0, 100, 0), heading: 0); ac.q = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+        let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+        ac.levels[0] = n
+        var c = Controls(); c.throttle = 0.82 * n + 0.18 * n * n
+        for k in 0..<1300 {
+            c.rudder = k >= 1000 ? 0.33 : 0
+            ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+            if k == 999 || k == 1299 {
+                let nose = ac.q.act(V3(0, 0, -1))
+                print(String(format: "HOVER OPEN %@ %@: body rates pitch %5.0f, yaw %5.0f, roll %5.0f deg/s; nose %3.0f deg off vertical; momentum %.5f, inertia %.5f %.5f %.5f",
+                             name as NSString, k == 999 ? "after 1 s hands off     " : "after 0.3 s of 33% rudder", ac.omega.x / deg, ac.omega.y / deg, ac.omega.z / deg, acos(clampf(nose.y, -1, 1)) / deg,
+                             spec.props[0].momentum, spec.inertia.x, spec.inertia.y, spec.inertia.z))
+            }
+        }
+    }
+    // the way it is really flown: level flight, pull to the vertical, settle into a hover on the throttle with a gentle
+    // pilot on elevator and aileron, rudder left alone; then half rudder for 0.4 s. How much does the nose answer?
+    for name in ["Flatty 3D", "Foam Extra XL", "Vortex 3D"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        for sink in [Float(0), -2.5] {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0, speed: spec.stallSpeed * 1.8)
+            let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+            var c = Controls(), yaw0: Float = 0, lean0: Float = 0, info = ""
+            for k in 0..<7000 {
+                let local = ac.q.inverse.act(V3(0, 1, 0))                    // straight up as the aircraft sees it
+                let vertical = local.z < -0.8
+                c.throttle = k < 500 ? 0.6 : clampf(0.82 * n + 0.18 * n * n - 0.25 * (ac.vel.y - sink), 0, 1)
+                c.elevator = k < 500 ? 0 : clampf(0.9 * atan2(local.y, -local.z) - 0.08 * ac.omega.x, -1, 1)
+                c.aileron = vertical ? clampf(0.3 * ac.omega.z, -1, 1) : clampf(-1.5 * ac.roll, -0.5, 0.5)
+                c.rudder = k >= 5000 && k < 5400 ? 0.5 : (vertical && k < 5000 ? clampf(0.5 * local.x + 0.08 * ac.omega.y, -1, 1) : 0)
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+                if k == 4999 { yaw0 = ac.omega.y; lean0 = asin(clampf(local.x, -1, 1))
+                    let fin = spec.surfaces.firstIndex { $0.flapCh == 2 }!
+                    info = String(format: "before: nose %2.0f deg off vertical, climbing %4.1f m/s, shaft %3.0f%%, fin stall %.2f", acos(clampf(-local.z, -1, 1)) / deg, ac.vel.y, ac.levels[0] * 100, ac.stallT[fin]) }
+                if k == 5399 { print(String(format: "HOVER FLOWN %@ (target climb %4.1f) %@; half rudder for 0.4 s: yaw rate %4.0f -> %4.0f deg/s, sideways lean %3.0f -> %3.0f deg",
+                                           name.padding(toLength: 13, withPad: " ", startingAt: 0) as NSString, sink, info, yaw0 / deg, ac.omega.y / deg, lean0 / deg, asin(clampf(local.x, -1, 1)) / deg)) }
+            }
+        }
+    }
+    // hands off from a 6 degree lean: how fast does it get away in each axis?
+    for name in ["Flatty 3D", "Foam Extra XL", "Vortex 3D"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        print("SURFACES \(name): " + spec.surfaces.filter { !$0.isWing }.map { String(format: "[n %.0f,%.0f z %.2f area %.3f wash %.2f]", $0.normal.x, $0.normal.y, $0.pos.z, $0.area, $0.wash) }.joined(separator: " "))
+        for (yawAxis, variant) in [(true, 0), (false, 0), (true, 1), (true, 2), (true, 3), (true, 4)] {
+            var spec = spec
+            if variant == 1 { spec.props[0].momentum = 0 }
+            if variant == 2 { for i in spec.surfaces.indices { spec.surfaces[i].swirl = 0 } }
+            if variant == 3 { spec.props[0].axis = V3(0, 0, -1); spec.props[0].pos.x = 0; spec.props[0].pos.y = 0 }
+            if variant == 4 { spec.props[0].torqueK = 0 }
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0)
+            ac.q = simd_quatf(angle: 0.1, axis: yawAxis ? V3(0, 0, 1) : V3(1, 0, 0)) * simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+            let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+            ac.levels[0] = n
+            var t30: Float = -1, t60: Float = -1
+            for k in 0..<4000 {
+                var c = Controls(); c.throttle = 0.82 * n + 0.18 * n * n; c.aileron = clampf(0.3 * ac.omega.z, -1, 1)
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+                let off = acos(clampf(ac.q.act(V3(0, 0, -1)).y, -1, 1))
+                if name == "Vortex 3D" && (variant == 0 || variant == 2) && k % 100 == 0 && k < 400 { let fi = spec.surfaces.firstIndex { $0.flapCh == 2 }!; let va = ac.q.inverse.act(ac.vel)
+                    print(String(format: "  t=%.2f off %4.1f  rates p %5.0f y %5.0f r %5.0f  body vel x %5.2f y %5.2f z %5.2f  fin stall %.2f", Float(k) / 1000, off / deg, ac.omega.x / deg, ac.omega.y / deg, ac.omega.z / deg, va.x, va.y, va.z, ac.stallT[fi])) }
+                if t30 < 0 && off > 30 * deg { t30 = Float(k) / 1000 }
+                if t60 < 0 && off > 60 * deg { t60 = Float(k) / 1000 }
+            }
+            print(String(format: "HOVER DIVERGE %@ lean in %@ %@: 30 deg off after %.1f s, 60 deg after %.1f s", name as NSString, yawAxis ? "yaw  " : "pitch", ["", "(no gyro)", "(no swirl)", "(straight thrust)", "(no torque)"][variant], t30, t60))
+        }
+    }
+    // a human-like pilot: reacts 0.2 s late, in still air and in a light gusty wind. Which axis gets away?
+    for name in ["Flatty 3D", "Foam Extra XL", "Vortex 3D"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        for (gain, windV, gyro) in [(Float(0.6), Float(0), Float(1)), (0.3, 0, 1), (0.15, 0, 1), (0.6, 0, 0), (0.3, 0, 0), (0.15, 0, 0), (0.3, 3, 1), (0.3, 3, 0)] {
+            var spec = spec; spec.props[0].momentum *= gyro
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0); ac.q = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+            ac.q = simd_quatf(angle: 0.1, axis: V3(0, 0, 1)) * simd_quatf(angle: 0.1, axis: V3(1, 0, 0)) * ac.q       // start a little off
+            let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+            ac.levels[0] = n
+            var queue: [Controls] = []
+            var worstPitch: Float = 0, worstYaw: Float = 0, t: Float = 8, rud: Float = 0, ele: Float = 0
+            for k in 0..<8000 {
+                var c = Controls()
+                let local = ac.q.inverse.act(V3(0, 1, 0))
+                c.throttle = clampf(0.82 * n + 0.18 * n * n - 0.3 * ac.vel.y, 0, 1)
+                c.elevator = clampf(gain * local.y - 0.1 * gain * ac.omega.x, -1, 1)
+                c.rudder = clampf(gain * local.x + 0.1 * gain * ac.omega.y, -1, 1)
+                c.aileron = clampf(0.3 * ac.omega.z, -1, 1)
+                queue.append(c)
+                let use = queue.count > 200 ? queue.removeFirst() : Controls(throttle: c.throttle)
+                let gust = windV * (1 + 0.4 * sin(Float(k) * 0.004) + 0.3 * sin(Float(k) * 0.011))
+                ac.step(dt: 0.001, c: use, terrain: terrain, wind: V3(gust * 0.7, 0, gust * 0.7), rollMu: 0)
+                worstPitch = max(worstPitch, abs(asin(clampf(local.y, -1, 1)))); worstYaw = max(worstYaw, abs(asin(clampf(local.x, -1, 1))))
+                rud += abs(use.rudder); ele += abs(use.elevator)
+                if local.z > -0.35 { t = Float(k) / 1000; break }
+            }
+            print(String(format: "HOVER HUMAN %@ gain %.2f wind %.0f gyro %.0f: %@; worst lean in pitch %2.0f deg, in yaw %2.0f deg; average elevator %2.0f%%, rudder %2.0f%%",
+                         name.padding(toLength: 13, withPad: " ", startingAt: 0) as NSString, gain, windV, gyro, t < 8 ? String(format: "fell out after %.1f s", t) : "held 8 s", worstPitch / deg, worstYaw / deg, ele / (t * 1000) * 100, rud / (t * 1000) * 100))
+        }
+    }
+    // a flown hover: a simple pilot holds the nose on the vertical with elevator and rudder, in still air and in wind
+    // blowing across the fin. How far does the nose wander, and how much of the rudder does it take?
+    for name in ["Flatty 3D", "Foam Extra XL", "Foam Bipe 3D", "Katana Foamy", "Vortex 3D", "Extra 300"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        for (windV, fromSide) in [(Float(0), true), (3, true), (5, true), (3, false), (5, false)] {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0); ac.q = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+            let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+            ac.levels[0] = n
+            var worst: Float = 0, rudSum: Float = 0, rudMax: Float = 0, fell = false, eleSum: Float = 0, ailSum: Float = 0, rollMax: Float = 0
+            for k in 0..<8000 {
+                var c = Controls()
+                let nose = ac.q.act(V3(0, 0, -1))
+                let local = ac.q.inverse.act(V3(0, 1, 0))            // straight up, seen from the aircraft: x right, y canopy side
+                c.throttle = clampf(0.82 * n + 0.18 * n * n - 0.3 * ac.vel.y - 0.1 * (ac.pos.y - 100), 0, 1)
+                c.elevator = clampf(2.5 * local.y - 0.2 * ac.omega.x, -1, 1)
+                c.rudder = clampf(2.5 * local.x + 0.2 * ac.omega.y, -1, 1)
+                c.aileron = clampf(0.3 * ac.omega.z, -1, 1)                   // stop the torque roll
+                let wv = windV * min(Float(k) / 1000, 1)
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: fromSide ? V3(wv, 0, 0) : V3(0, 0, wv), rollMu: 0)
+                let tilt = acos(clampf(nose.y, -1, 1))
+                if k > 1500 { worst = max(worst, tilt); rudSum += abs(c.rudder); rudMax = max(rudMax, abs(c.rudder)); eleSum += abs(c.elevator); ailSum += abs(c.aileron); rollMax = max(rollMax, abs(ac.omega.z)) }
+                if tilt > 1.2 { fell = true; break }
+            }
+            print(String(format: "HOVER HOLD %@ wind %.0f m/s %@: %@; nose up to %2.0f deg off vertical; average stick: rudder %3.0f%% (peak %3.0f%%), elevator %3.0f%%, aileron %3.0f%%; roll rate up to %3.0f deg/s",
+                         name.padding(toLength: 13, withPad: " ", startingAt: 0) as NSString, windV, fromSide ? "on the fin " : "on the wing", fell ? "FELL OUT" : "held 8 s", worst / deg, rudSum / 6500 * 100, rudMax * 100, eleSum / 6500 * 100, ailSum / 6500 * 100, rollMax / deg))
+        }
+    }
+}
+
 /// Handling diagnostics: control rates for every airplane, and the balance of forces in a prop-hang.
 func runHandlingTest() {
     let terrain = Terrain(site: SiteSpec.all[0])
@@ -386,6 +550,7 @@ func runBalanceTest() {
     print("MARGIN BELOW 4%: " + (low.isEmpty ? "none" : low.joined(separator: ", ")))
 }
 
+if CommandLine.arguments.contains("--ruddertest") { runRudderTest(); exit(0) }
 if CommandLine.arguments.contains("--balancetest") {
     runBalanceTest()
     exit(0)
