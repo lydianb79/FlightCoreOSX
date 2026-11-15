@@ -972,10 +972,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.game.hud.overlay != .none {
                 if e.type == .keyDown && e.keyCode == 53 {
                     let o = self.game.hud.overlay
-                    self.game.hud.overlay = (o == .aircraft || o == .sites) && self.game.cameFromMenu ? .menu : .none
+                    self.game.hud.overlay = o != .menu && self.game.cameFromMenu ? .menu : .none
                     return nil
                 }
-                if self.game.hud.overlay.pausesSim || self.game.hud.overlay == .help { self.game.input.keys.removeAll(); return e }
+                if self.game.simHeld || self.game.hud.overlay == .help { self.game.input.keys.removeAll(); return e }
             } else if e.type == .keyDown && !e.modifierFlags.contains(.command) {
                 if e.keyCode == 53 { self.game.cameFromMenu = false; self.game.hud.overlay = .menu; return nil }
                 if e.keyCode == 48 { self.game.cameFromMenu = false; self.game.hud.overlay = .aircraft; return nil }
@@ -1064,7 +1064,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu("Flying Site", siteItems)
         menu("Simulation", [
             ClosureMenuItem("Main Menu") { g.cameFromMenu = false; g.hud.overlay = .menu },
-            ClosureMenuItem("Weather…", key: "e", mods: [.command, .shift]) { g.hud.overlay = .environment },
+            ClosureMenuItem("Weather…", key: "e", mods: [.command, .shift]) { g.cameFromMenu = g.hud.overlay == .menu; g.hud.overlay = .environment },
             .separator(),
             ClosureMenuItem("Reset Aircraft", key: "r") { g.resetAircraft() },
             ClosureMenuItem("Pause / Resume", key: "p") { g.paused.toggle() },
@@ -1084,9 +1084,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         envItems += [("Smooth air", 0), ("Light turbulence", 0.3), ("Gusty", 0.8)].map { n, t in
             ClosureMenuItem(n) { g.env.turbulence = Float(t); g.say(n) }
         }
+        envItems.append(.separator())
+        envItems += Environment.presets.enumerated().map { i, n in ClosureMenuItem("Preset: " + n) { g.env.apply(preset: i); g.say(n) } }
         envItems.append(ClosureMenuItem("Thermals On / Off") { g.env.thermalsOn.toggle(); g.say(g.env.thermalsOn ? "Thermals on" : "Thermals off") })
         envItems.append(.separator())
-        envItems += Game.timeNames.enumerated().map { i, n in ClosureMenuItem(n) { g.timeOfDay = i } }
+        envItems += Game.timeNames.enumerated().map { i, n in ClosureMenuItem(n) { if g.site.panorama != nil { g.say("Photo sites: use Photo light in the Weather panel") } else { g.timeOfDay = i; g.say(n) } } }
+        envItems.append(.separator())
+        envItems += Game.photoLightNames.enumerated().map { i, n in ClosureMenuItem("Photo light: " + n) { if g.site.panorama == nil { g.say("Only for photo sites") } else { g.photoLight = i; g.say(n) } } }
         menu("Environment", envItems)
         var viewItems: [NSMenuItem] = Game.cameraNames.enumerated().map { i, n in ClosureMenuItem("Camera: " + n) { g.cameraMode = i; g.keyDown(8); g.keyDown(8); g.keyDown(8) } }
         viewItems.append(.separator())
@@ -1095,7 +1099,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewItems += Game.qualityNames.enumerated().map { i, n in ClosureMenuItem("Graphics: " + n) { g.quality = i; g.say("Graphics quality: " + n) } }
         viewItems.append(.separator())
         viewItems.append(ClosureMenuItem("Show / Hide HUD") { g.hud.visible.toggle() })
-        viewItems.append(ClosureMenuItem("Keyboard Controls") { g.hud.overlay = g.hud.overlay == .help ? .none : .help })
+        viewItems.append(ClosureMenuItem("Keyboard Controls") { g.cameFromMenu = g.hud.overlay == .menu; g.hud.overlay = g.hud.overlay == .help ? .none : .help })
         viewItems.append(ClosureMenuItem("Toggle Full Screen", key: "f", mods: [.command, .control]) { [unowned self] in self.window.toggleFullScreen(nil) })
         menu("View", viewItems)
         menu("Controller", [

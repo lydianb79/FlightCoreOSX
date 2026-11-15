@@ -328,14 +328,15 @@ final class Renderer: NSObject, MTKViewDelegate {
         fu.shadow1 = lightVP(V3(0, 0, game.site.flatCenterZ), 300)
         fu.camPos = V4(game.eye.x, game.eye.y, game.eye.z, game.env.time)
         fu.sunDir = V4(L.x, L.y, L.z, Float(game.site.runwayType))
-        fu.sunColor = V4(light.sun.x, light.sun.y, light.sun.z, pano ? 0 : game.site.fog)
+        fu.sunColor = V4(light.sun.x, light.sun.y, light.sun.z, pano ? 0 : game.env.fog)
         fu.zenith = V4(light.zenith.x, light.zenith.y, light.zenith.z, game.site.north / 360)
         fu.horizon = V4(light.horizon.x, light.horizon.y, light.horizon.z, game.site.horizon * deg)
-        fu.runway = V4(game.site.runwayLen / 2, game.site.runwayWid / 2, Float(game.site.style), game.site.cloud)
+        fu.runway = V4(game.site.runwayLen / 2, game.site.runwayWid / 2, Float(game.site.style), game.env.cloud)
         fu.ambient = V4(light.ambient.x, light.ambient.y, light.ambient.z, 0)
         fu.post = V4(0, 1, quality > 0 ? 0.85 : 0, pano ? 0.12 : 0.32)
         fu.screen = V4(1 / Float(rw), 1 / Float(rh), Float(shadow1Size), s0Half)
-        fu.pano = .zero            // photographs are shown as they are: sharpening and grain made them look harsh
+        let tint = Game.photoTints[game.photoLight]
+        fu.pano = V4(tint.x, tint.y, tint.z, game.photoLight > 0 ? 1 : 0)      // photographs are shown as they are unless the light is graded
 
         // frustum side planes, for culling grass and trees
         let m = fu.viewProj

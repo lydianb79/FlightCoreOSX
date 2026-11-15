@@ -25,7 +25,7 @@ struct Frame {
     float4 ambient;
     float4 post;        // x = tone-map in the scene shader (thumbnails), y = exposure, z = AO strength, w = bloom strength
     float4 screen;      // xy = 1 / render size, z = airfield shadow map size, w = aircraft shadow half-extent (m)
-    float4 pano;        // photo sites: x = sharpening, y = detail grain
+    float4 pano;        // photo sites: rgb = light grade, w = 1 when it applies
 };
 struct Draw { float4x4 model; float4 tint; float4 params; };
 
@@ -329,6 +329,7 @@ fragment float4 panoFS(SkyOut in [[stage_in]], constant Frame& f [[buffer(1)]], 
     float gx = abs(dfdx(u)) < abs(dfdx(u2)) ? dfdx(u) : dfdx(u2);
     float gy = abs(dfdy(u)) < abs(dfdy(u2)) ? dfdy(u) : dfdy(u2);
     float3 c = pano.sample(ps, float2(u + 0.5 + f.zenith.w, v), gradient2d(float2(gx, dfdx(v)), float2(gy, dfdy(v)))).rgb;
+    if (f.pano.w > 0.5) c *= f.pano.rgb;
     return float4(f.post.x > 0.5 ? c : untonemap(c) / f.post.y, 1.0);
 }
 

@@ -46,7 +46,8 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 - **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures, including what powers the model: a brushless electric motor, an electric ducted fan, a piston engine or a turboprop. **Select** takes the aircraft and returns to the main menu.
 - **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama. **Select** takes the site and returns to the main menu.
-- **Weather panel** (wind button in the top bar): wind speed and direction, turbulence, thermals and time of day, applied live.
+- **Weather panel** (wind button in the top bar, or Weather in the main menu): presets from Calm to Stormy; wind speed and direction, gusts and lulls, turbulence and thermal strength; cloud cover, haze and six times of day from dawn to dusk on 3D sites; and on photo sites a light grade toward golden evening or dusk. Everything applies live.
+- Weather and Controls opened from the main menu return to it; the flight only starts with **Cleared for take-off**.
 - **In flight:** a top bar with the current aircraft and site, and a telemetry strip with altitude, airspeed, climb, distance, throttle and wind. Press V to hide it.
 
 The last aircraft and site are remembered between launches, and both browsers reopen on the category or filter you last used. The interface uses the red, cream and black of the splash artwork.
@@ -99,7 +100,7 @@ The site browser filters by type (3D or photo) and by landscape (Fields, Airfiel
 | Salt Flats | Desert | 400 m strip on a dead-flat white salt pan |
 | Sand Sea | Desert | Packed-sand strip between great dunes |
 
-Wind, turbulence, thermals and time of day are set from the Weather panel. An aircraft that comes down in water is lost.
+Wind, gusts, turbulence, thermals, cloud cover, haze and time of day are set from the Weather panel. An aircraft that comes down in water is lost.
 
 ### Photo sites
 
@@ -206,7 +207,7 @@ Press **H** in the app for this list.
 - **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
 - **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
 - **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.
-- **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m). Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
+- **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m), and it lulls, gusts and swings in direction over several seconds by an amount you set. Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
 - **Scale data:** the 100 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --handlingtest` lists every airplane's control rates and checks hovering and continuous rolls; `FlightCore --balancetest` lists every airplane's measured static margin, trim speed and response to full up elevator; `FlightCore --ruddertest` lists every airplane's rudder, elevator and aileron authority in the propeller blast, and flies a hover hands-off, with a perfect pilot and with one who reacts a fifth of a second late, in still air and in wind; `FlightCore --rotortest` measures every multirotor and helicopter: hover point, power, acro rates, control with the throttle closed, propwash, flight modes and inverted hover; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, flat-foam profile airframes, and ten trim schemes including camouflage. Surfaces are shaded as glossy film covering with sky reflections.
@@ -220,7 +221,7 @@ Press **H** in the app for this list.
 - **Frame pacing:** the simulation advances by exact display refresh periods, and the aircraft is drawn at its physics state carried forward by the fraction of a step not yet simulated, so motion is even from frame to frame. `FlightCore --perf` prints frame-pacing and motion statistics once a second.
 - **The app starts in full screen.** Press ⌃⌘F to switch to a window.
 - **Sound** is synthesized in stereo, with nothing sampled:
-  - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle), ducted fans, turboprops, helicopter rotor with blade slap that follows the blade count, tail rotor and gear whine, and four separate multirotor motors that warble as the flight controller corrects;
+  - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle; every cylinder fires with its own strength in a repeating pattern, through a silencer that opens up with the throttle), ducted fans, turboprops, helicopter rotor with blade slap that follows the blade count, tail rotor and gear whine, and four separate multirotor motors that warble as the flight controller corrects;
   - propeller and motor tones brighten and harshen with load, each blade tears the air as it passes, ducted fans howl, and piston engines lope at idle;
   - sound reflected off the ground arrives a moment after the direct sound, which gives a fly-past its sweeping, hollow tone;
   - the aircraft is placed left to right by where it is, gets quieter and duller with distance, and is Doppler-shifted;

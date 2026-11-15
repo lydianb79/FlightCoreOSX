@@ -181,9 +181,9 @@ struct HUDView: View {
                         }
                         .padding(.trailing, 4).allowsHitTesting(false)
                         HStack(spacing: 5) {
-                            BarButton(icon: "wind", help: "Wind, weather and time of day") { m.overlay = m.overlay == .environment ? .none : .environment }
+                            BarButton(icon: "wind", help: "Wind, weather and time of day") { m.game.cameFromMenu = false; m.overlay = m.overlay == .environment ? .none : .environment }
                             BarButton(icon: "gamecontroller", help: "Controller setup") { m.openControllerSetup?() }
-                            BarButton(icon: "questionmark", help: "Keyboard controls (H)") { m.overlay = m.overlay == .help ? .none : .help }
+                            BarButton(icon: "questionmark", help: "Keyboard controls (H)") { m.game.cameFromMenu = false; m.overlay = m.overlay == .help ? .none : .help }
                             BarButton(icon: "line.3.horizontal", help: "Main menu (Esc)") { m.overlay = .menu }
                         }
                         .padding(4).glass(10)
@@ -220,7 +220,7 @@ struct HUDView: View {
                     .padding(.horizontal, 14).padding(.bottom, 12).allowsHitTesting(false)
                 }
             }
-            if !s.message.isEmpty && !m.overlay.pausesSim {
+            if !s.message.isEmpty && !m.game.simHeld {
                 VStack {
                     Spacer().frame(height: 74)
                     let big = s.message == "CRASHED" || s.message == "PAUSED"
@@ -645,9 +645,9 @@ struct MainMenu: View {
                 }
                 .buttonStyle(CreamButton()).keyboardShortcut(.defaultAction).padding(.top, 16)
                 HStack(spacing: 8) {
-                    Button { m.game.cameFromMenu = false; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(InkButton())
+                    Button { m.game.cameFromMenu = true; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(InkButton())
                     Button { m.openControllerSetup?() } label: { Label("Controller", systemImage: "gamecontroller") }.buttonStyle(InkButton())
-                    Button { m.game.cameFromMenu = false; m.overlay = .help } label: { Label("Controls", systemImage: "keyboard") }.buttonStyle(InkButton())
+                    Button { m.game.cameFromMenu = true; m.overlay = .help } label: { Label("Controls", systemImage: "keyboard") }.buttonStyle(InkButton())
                     Spacer()
                     Button { NSApp.terminate(nil) } label: { Text("Quit") }.buttonStyle(InkButton())
                 }
@@ -702,47 +702,71 @@ struct EnvironmentPanel: View {
         }
     }
 
+    private func section(_ t: String) -> some View {
+        Text(t).font(.system(size: 9.5, weight: .heavy)).tracking(1.5).foregroundColor(Theme.cream.opacity(0.55)).padding(.top, 3)
+    }
+    private func level(_ v: Float, _ names: [String]) -> String { names[min(Int(v * Float(names.count)), names.count - 1)] }
+    private func pick(_ title: String, _ names: [String], _ sel: Binding<Int>) -> some View {
+        HStack {
+            Text(title).font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
+            Spacer()
+            Picker("", selection: sel) { ForEach(names.indices, id: \.self) { Text(names[$0]).tag($0) } }
+                .pickerStyle(.menu).labelsHidden().fixedSize()
+        }
+    }
+
     var body: some View {
         let env = m.game.env
         let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        ZStack {
+        if m.game.cameFromMenu { Color.black.opacity(0.55).ignoresSafeArea().onTapGesture { m.overlay = .menu } }
         HStack {
             Spacer()
             VStack {
-                VStack(alignment: .leading, spacing: 13) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Weather").font(.system(size: 17, weight: .bold)).foregroundColor(Theme.cream)
                         Spacer()
-                        Button { m.overlay = .none } label: {
+                        Button { m.overlay = m.game.cameFromMenu ? .menu : .none } label: {
                             Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundColor(Theme.cream.opacity(0.8))
                                 .frame(width: 24, height: 24).background(Circle().fill(Theme.cream.opacity(0.1)))
                         }
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                     }
+                    Menu {
+                        ForEach(Array(Environment.presets.enumerated()), id: \.offset) { i, n in
+                            Button(n) { env.apply(preset: i); m.objectWillChange.send() }
+                        }
+                    } label: { Label("Choose a preset", systemImage: "cloud.sun").frame(maxWidth: .infinity) }
+                    .menuStyle(.borderlessButton).padding(.vertical, 5).padding(.horizontal, 8)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Theme.cream.opacity(0.1)))
+                    section("WIND")
                     row("Wind speed", String(format: "%.0f m/s  (%.0f km/h)", env.windSpeed, env.windSpeed * 3.6), bind({ env.windSpeed }, { env.windSpeed = $0.rounded() }), 0...15)
                     row("Wind from", String(format: "%@  %.0f°", dirs[Int((env.windFrom + 22.5) / 45) % 8], env.windFrom), bind({ env.windFrom }, { env.windFrom = ($0 / 5).rounded() * 5 }), 0...355)
+                    row("Gusts and lulls", level(env.gustiness, ["Steady", "Light", "Moderate", "Strong"]), bind({ env.gustiness }, { env.gustiness = $0 }), 0...1)
                     row("Turbulence", env.turbulence < 0.05 ? "Smooth" : String(format: "%.0f %%", env.turbulence * 100), bind({ env.turbulence }, { env.turbulence = $0 }), 0...1)
-                    Toggle(isOn: Binding(get: { env.thermalsOn }, set: { env.thermalsOn = $0; m.objectWillChange.send() })) {
-                        Text("Thermals").font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
-                    }
-                    .toggleStyle(.switch).controlSize(.small)
+                    row("Thermals", !env.thermalsOn || env.thermalStrength < 0.05 ? "Off" : (env.thermalStrength < 0.6 ? "Weak" : (env.thermalStrength < 1.3 ? "Normal" : (env.thermalStrength < 1.75 ? "Strong" : "Booming"))),
+                        bind({ env.thermalsOn ? env.thermalStrength : 0 }, { env.thermalStrength = $0; env.thermalsOn = $0 >= 0.05 }), 0...2)
+                    section("SKY AND LIGHT")
                     if m.game.site.panorama == nil {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Time of day").font(.system(size: 12.5, weight: .medium)).foregroundColor(Theme.cream.opacity(0.9))
-                            Picker("", selection: Binding(get: { m.game.timeOfDay }, set: { m.game.timeOfDay = $0; m.objectWillChange.send() })) {
-                                ForEach(0..<3, id: \.self) { Text(Game.timeNames[$0]).tag($0) }
-                            }
-                            .pickerStyle(.segmented).labelsHidden()
-                        }
+                        row("Cloud cover", level(env.cloud, ["Clear", "Few clouds", "Broken", "Overcast"]), bind({ env.cloud }, { env.cloud = $0 }), 0...1)
+                        row("Haze", level(env.haze, ["Crystal clear", "Clear", "Hazy", "Misty"]), bind({ env.haze }, { env.haze = $0 }), 0...1)
+                        pick("Time of day", Game.timeNames, Binding(get: { m.game.timeOfDay }, set: { m.game.timeOfDay = $0; m.objectWillChange.send() }))
+                    } else {
+                        pick("Light", Game.photoLightNames, Binding(get: { m.game.photoLight }, set: { m.game.photoLight = $0; m.objectWillChange.send() }))
+                        Text("A photo site keeps the sky and sun of its photograph; the light can be graded toward evening or dusk.")
+                            .font(.system(size: 10.5)).foregroundColor(Theme.faint).fixedSize(horizontal: false, vertical: true)
                     }
                     Button { m.game.env.configure(m.game.site); m.objectWillChange.send() } label: { Text("Reset to Site Default").frame(maxWidth: .infinity) }.buttonStyle(QuietButton())
                 }
                 .padding(18)
-                .frame(width: 300)
+                .frame(width: 320)
                 .glass(14, fill: Theme.panel)
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 10)
                 Spacer()
             }
             .padding(.top, 54).padding(.trailing, 12)
+        }
         }
     }
 }
@@ -761,7 +785,7 @@ struct HelpView: View {
                                  ("K", "Demo pilot"), ("M", "Mute sound"), ("Esc", "Main menu")]),
     ]
     var body: some View {
-        Sheet(m: m, title: "Controls", subtitle: "Keyboard", width: 860, height: 520) {
+        Sheet(m: m, title: "Controls", subtitle: "Keyboard", back: m.game.cameFromMenu ? .menu : .none, width: 860, height: 520) {
             HStack(alignment: .top, spacing: 26) {
                 ForEach(groups, id: \.0) { g in
                     VStack(alignment: .leading, spacing: 7) {

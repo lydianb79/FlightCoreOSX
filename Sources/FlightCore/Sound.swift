@@ -116,8 +116,8 @@ struct Ambience {
     /// Mornings belong to the birds, evenings to the crickets and frogs. `time` 0 morning, 1 midday, 2 evening.
     func at(time: Int) -> Ambience {
         var a = self
-        if time == 0 { a.birds = min(a.birds * 1.4, 1); a.cuckoo = min(a.cuckoo * 1.3, 1); a.cicadas *= 0.3; a.crickets *= 0.5 }
-        if time == 2 { a.birds *= 0.5; a.cuckoo *= 0.3; a.cicadas *= 0.5; a.crickets = min(a.crickets * 1.6, 1); a.frogs = min(a.frogs * 1.5, 1); a.gulls *= 0.6 }
+        if time <= 1 { a.birds = min(a.birds * 1.4, 1); a.cuckoo = min(a.cuckoo * 1.3, 1); a.cicadas *= 0.3; a.crickets *= 0.5 }
+        if time >= 4 { a.birds *= 0.5; a.cuckoo *= 0.3; a.cicadas *= 0.5; a.crickets = min(a.crickets * 1.6, 1); a.frogs = min(a.frogs * 1.5, 1); a.gulls *= 0.6 }
         return a
     }
 }
@@ -153,6 +153,7 @@ final class SoundEngine {
     private var lfo1: Float = 0, lfo2: Float = 0.4, lfo3: Float = 0.7
     // engine detail: slow pitch flutter, exhaust resonance, duct howl, per-motor warble, ground reflection
     private var flutter: Float = 0, lope: Float = 1, lopePrev: Float = 0
+    private var cyl = 0, exh2: Float = 0, exhDC: Float = 0, raspLo: Float = 0, raspBd: Float = 0
     private var exLo: Float = 0, exBd: Float = 0, fanLo: Float = 0, fanBd: Float = 0, lowLo: Float = 0, lowBd: Float = 0
     private var warble = SIMD4<Float>(0, 0, 0, 0)
     private var sReflect: Float = 0, sReflectGain: Float = 0
@@ -341,24 +342,38 @@ final class SoundEngine {
                 let tear = bandpass(n0, 700 + 2900 * sPower, 0.8, &propLo, &propBd) * (0.25 + 0.75 * beat * beat) * 0.42 * sPower * (0.4 + 0.6 * sPower)
                 // the motor itself: magnet whine and its overtone, strongest when it is working
                 let whine = (sin(twoPi * pWhine) * 0.03 + sin(twoPi * pWhine2) * 0.016) * (0.35 + 0.65 * sPower)
-                eng = (prop + tear + whine) * sRun
+                // nothing is perfectly balanced: a low hum at the speed of the shaft itself
+                wrap(&pShaft, hz * fl)
+                let hum = (sin(twoPi * pShaft) * 0.05 + sin(2 * twoPi * pShaft + 1.1) * 0.022) * (0.25 + 0.75 * sPower)
+                eng = (prop + tear + whine + hum) * sRun
             case 1:     // piston engine: exhaust pulses, mechanical rumble, propeller
                 let fire = hz * st.cylinders * 0.5
                 let before = pFire
                 wrap(&pFire, fire * fl); wrap(&pBlade, hz * st.blades * fl); wrap(&pShaft, hz * 0.5)
-                // each firing is a sharp pressure pulse; no two are alike, and at idle some are weak
-                if pFire < before { lope = 1 + (0.2 - 0.14 * sPower) * n0 }
-                let uneven = 1 + (st.radial ? 0.35 : 0.18) * sin(twoPi * pShaft * (st.radial ? 1 : 2))
-                let pulse = exp(-pFire * (5 + 4 * sPower)) * uneven * lope
-                exhaust += (pulse * (0.88 + 0.12 * n0) - exhaust) * 0.35
-                rumble += (n1 * pulse - rumble) * 0.08
-                // the exhaust pipe rings: a bark that rises with the revs
-                let bark = bandpass(pulse - 0.15, 170 + 2.2 * fire, 0.45, &exLo, &exBd) * 0.5
+                if pFire < before {
+                    // every cylinder has a strength of its own, the same each time round: that repeating pattern is
+                    // what makes an engine sound like an engine and not a buzzer. A little chance on top, most at idle.
+                    cyl = (cyl + 1) % max(Int(st.cylinders), 1)
+                    let own = 1 + (st.radial ? 0.26 : 0.15) * sin(Float(cyl) * 2.4 + 0.7)
+                    lope = own * (1 + (0.16 - 0.1 * sPower) * n0)
+                }
+                // one firing: the pressure rises fast but not instantly, then dies away
+                let pulse = (1 - exp(-pFire * 55)) * exp(-pFire * (4.5 + 3.5 * sPower)) * 1.2 * lope
+                // the silencer: two low-pass stages that open up with the throttle, so idle is a soft putter and
+                // full power is hard-edged
+                let open = 0.09 + 0.3 * sPower
+                exhaust += (pulse - exhaust) * open; exh2 += (exhaust - exh2) * open
+                exhDC += (exh2 - exhDC) * 0.0006
+                let note = exh2 - exhDC
+                // the pipe rings, and under load the exhaust rasps
+                let bark = bandpass(pulse - 0.15, 150 + 1.7 * fire, 0.5, &exLo, &exBd) * 0.42
+                let rasp = bandpass(pulse * (0.6 + 0.4 * n0), 1000 + 1700 * sPower, 0.7, &raspLo, &raspBd) * 0.2 * sPower
+                rumble += (n1 * pulse - rumble) * 0.05
                 let prop = stack(pBlade, 5, 1.7 - 0.5 * sPower) * 0.09 * (0.3 + 0.7 * sPower)
                 let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
                 let wash = bandpass(n0, 400 + 1800 * sPower, 1.0, &propLo, &propBd) * (0.4 + 0.6 * beat) * 0.26 * sPower * sPower
                 // an idling engine is far quieter than one at full throttle
-                eng = ((exhaust - 0.12) * (0.45 + 0.4 * sPower) + bark * (0.5 + 0.5 * sPower) + rumble * (0.5 + 1.1 * sPower) + prop + wash) * (0.22 + 0.78 * sPower) * sRun
+                eng = (note * (0.95 + 0.35 * sPower) + bark * (0.4 + 0.6 * sPower) + rasp + rumble * (0.5 + 1.0 * sPower) + prop + wash) * (0.22 + 0.78 * sPower) * sRun
             case 2, 3:  // ducted fan / jet (2) and turboprop (3)
                 let fan = st.engine == 2
                 wrap(&pWhine, hz * (fan ? 11 : 28) * fl); wrap(&pWhine2, hz * (fan ? 11.09 : 41) * fl); wrap(&pBlade, hz * st.blades * fl)

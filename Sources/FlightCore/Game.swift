@@ -120,7 +120,13 @@ struct Lighting { var sunDir: V3; var sun: V3; var ambient: V3; var zenith: V3; 
 final class Game {
     static let cameraNames = ["Pilot (line of sight)", "Chase", "Onboard"]
     static let zoomNames = ["Auto zoom", "Keep ground in view", "Fixed"]
-    static let timeNames = ["Morning", "Midday", "Evening"]
+    static let timeNames = ["Dawn", "Morning", "Midday", "Afternoon", "Evening", "Dusk"]
+    /// Photo sites cannot move the sun, but the light can be graded toward evening or dusk.
+    static let photoLightNames = ["As photographed", "Golden evening", "Dusk"]
+    static let photoTints: [V3] = [V3(1, 1, 1), V3(1.0, 0.8, 0.6) * 0.88, V3(0.45, 0.5, 0.78) * 0.5]
+    var photoLight = 0
+    /// A site's own time of day (0 morning, 1 midday, 2 evening) as an index into `timeNames`.
+    static func time(forSite t: Int) -> Int { [1, 2, 4][min(max(t, 0), 2)] }
 
     var siteIndex = 0, aircraftIndex = 0
     var site: SiteSpec
@@ -133,7 +139,7 @@ final class Game {
 
     var paused = false
     var timeScale: Float = 1
-    var cameraMode = 0, zoomMode = 1, flightMode = 0, timeOfDay = 1
+    var cameraMode = 0, zoomMode = 1, flightMode = 0, timeOfDay = 2
     var rotorSpeed = 1                  // helicopters: 0 low, 1 normal, 2 high head speed
     static let rotorNames = ["Low (80%)", "Normal (90%)", "High (100%)"]
     var autopilotOn = false
@@ -160,7 +166,9 @@ final class Game {
     var renderScale: Float = 1, gpuMs: Float = 0       // reported by the renderer
     var advanceMs: [Float] = []
     static let noInterp = CommandLine.arguments.contains("--no-interp")
-    var cameFromMenu = false        // browsers return to the main menu when opened from it
+    var cameFromMenu = false        // browsers and panels return to the main menu when opened from it
+    /// The flight is held: a menu or browser is open, or a panel that was opened from the main menu.
+    var simHeld: Bool { hud.overlay.pausesSim || (cameFromMenu && (hud.overlay == .environment || hud.overlay == .help)) }
     var fixedView: (eye: V3, target: V3)? = nil     // debug: absolute camera, heights above the pilot's ground
     var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
     var flapSetting: Float = 0
@@ -182,7 +190,7 @@ final class Game {
         env.configure(site)
         env.obstacles = terrain.windObstacles
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
-        timeOfDay = site.defaultTime
+        timeOfDay = Game.time(forSite: site.defaultTime)
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
         flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
         newSession()
@@ -192,12 +200,23 @@ final class Game {
     }
 
     var lighting: Lighting {
-        if let p = panoLight { return p }
+        if var p = panoLight {
+            // a graded photo lights the model to match: dimmer, and warmer or bluer
+            let t = Game.photoTints[photoLight]
+            if photoLight > 0 { p.sun *= t * (photoLight == 2 ? 0.35 : 0.9); p.ambient *= t; p.zenith *= t; p.horizon *= t }
+            return p
+        }
         switch timeOfDay {
-        case 0: return Lighting(sunDir: normalize(V3(0.8, 0.3, 0.5)), sun: V3(1, 0.85, 0.65) * 2.8, ambient: V3(0.36, 0.42, 0.55) * 0.5,
+        case 0: return Lighting(sunDir: normalize(V3(0.9, 0.11, 0.4)), sun: V3(1, 0.62, 0.42) * 2.3, ambient: V3(0.4, 0.4, 0.52) * 0.75,
+                                zenith: V3(0.13, 0.2, 0.44), horizon: V3(0.85, 0.6, 0.5))
+        case 1: return Lighting(sunDir: normalize(V3(0.8, 0.3, 0.5)), sun: V3(1, 0.85, 0.65) * 2.8, ambient: V3(0.36, 0.42, 0.55) * 0.5,
                                 zenith: V3(0.16, 0.3, 0.6), horizon: V3(0.7, 0.66, 0.6))
-        case 2: return Lighting(sunDir: normalize(V3(-0.85, 0.2, 0.45)), sun: V3(1, 0.58, 0.3) * 3.4, ambient: V3(0.4, 0.38, 0.5) * 0.7,
+        case 3: return Lighting(sunDir: normalize(V3(-0.62, 0.5, 0.5)), sun: V3(1, 0.91, 0.76) * 3.1, ambient: V3(0.35, 0.44, 0.6) * 0.6,
+                                zenith: V3(0.1, 0.24, 0.58), horizon: V3(0.58, 0.66, 0.8))
+        case 4: return Lighting(sunDir: normalize(V3(-0.85, 0.2, 0.45)), sun: V3(1, 0.58, 0.3) * 3.4, ambient: V3(0.4, 0.38, 0.5) * 0.7,
                                 zenith: V3(0.1, 0.17, 0.4), horizon: V3(0.8, 0.5, 0.32))
+        case 5: return Lighting(sunDir: normalize(V3(-0.92, 0.07, 0.4)), sun: V3(1, 0.45, 0.3) * 1.3, ambient: V3(0.3, 0.33, 0.52) * 0.6,
+                                zenith: V3(0.05, 0.08, 0.22), horizon: V3(0.62, 0.36, 0.3))
         default: return Lighting(sunDir: normalize(V3(-0.35, 0.8, 0.5)), sun: V3(1, 0.96, 0.88) * 3.2, ambient: V3(0.34, 0.45, 0.62) * 0.62,
                                  zenith: V3(0.09, 0.24, 0.6), horizon: V3(0.5, 0.65, 0.84))
         }
@@ -278,7 +297,7 @@ final class Game {
         env.configure(site)
         env.obstacles = terrain.windObstacles
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
-        if site.panorama != nil { cameraMode = 0 } else { timeOfDay = site.defaultTime }
+        if site.panorama != nil { cameraMode = 0 } else { timeOfDay = Game.time(forSite: site.defaultTime) }
         siteVersion += 1
         if challenge { spawnBalloons() }
         resetAircraft()
@@ -322,7 +341,7 @@ final class Game {
             if site.panorama != nil { cameraMode = 0; say("Photo sites use the pilot camera only") }
             else { cameraMode = (cameraMode + 1) % 3; camSnap = true; say("Camera: " + Game.cameraNames[cameraMode]) }
         case 6: zoomMode = (zoomMode + 1) % 3; say("Zoom: " + Game.zoomNames[zoomMode])
-        case 4: hud.overlay = hud.overlay == .help ? .none : .help
+        case 4: cameFromMenu = false; hud.overlay = hud.overlay == .help ? .none : .help
         case 9: hud.visible.toggle()
         case 17: timeScale = timeScale == 1 ? 0.5 : (timeScale == 0.5 ? 0.25 : 1); say(String(format: "Simulation speed %.0f%%", timeScale * 100))
         case 14:
@@ -416,7 +435,7 @@ final class Game {
         aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
         if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say(aircraft.spec.burnsFuel ? "Fuel low — land soon" : "Battery low — land soon", 4) }
 
-        if !paused && !hud.overlay.pausesSim {
+        if !paused && !simHeld {
             let h: Float = 0.001
             acc += dt * timeScale
             while acc >= h {
@@ -437,7 +456,7 @@ final class Game {
             postStep(sdt)
         }
         let before = aircraft.renderPos
-        aircraft.updateRenderPose(ahead: paused || hud.overlay.pausesSim || aircraft.crashed || Game.noInterp ? 0 : acc)
+        aircraft.updateRenderPose(ahead: paused || simHeld || aircraft.crashed || Game.noInterp ? 0 : acc)
         // --perf: how much simulated time this frame's picture advanced by
         let sp = length(aircraft.vel)
         if sp > 3 { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
@@ -660,7 +679,7 @@ final class Game {
         st.groundRoll = aircraft.onGround && !aircraft.crashed ? length(V3(aircraft.vel.x, 0, aircraft.vel.z)) : 0
         st.windSpeed = env.windSpeed
         st.ambience = site.panorama != nil ? siteAmbience : siteAmbience.at(time: timeOfDay)
-        st.paused = paused || hud.overlay.pausesSim
+        st.paused = paused || simHeld
         sound.state = st
     }
 
@@ -678,7 +697,7 @@ final class Game {
         s.camera = Game.cameraNames[cameraMode] + (cameraMode == 0 ? " · " + Game.zoomNames[zoomMode] : "")
         s.mode = spec.modes.count > 1 ? spec.modes[flightMode] : ""
         s.input = autopilotOn ? "Demo pilot" : input.source
-        s.time = Game.timeNames[timeOfDay] + (timeScale < 1 ? String(format: " · %.0f%% speed", timeScale * 100) : "")
+        s.time = (site.panorama != nil ? (photoLight == 0 ? "Photo site" : Game.photoLightNames[photoLight]) : Game.timeNames[timeOfDay]) + (timeScale < 1 ? String(format: " · %.0f%% speed", timeScale * 100) : "")
         if challenge { s.score = String(format: "Balloons %d/%d   %.1f s", score, balloons.count, challengeTime) }
         if aircraft.crashed { s.message = "CRASHED" }
         else if paused { s.message = "PAUSED" }

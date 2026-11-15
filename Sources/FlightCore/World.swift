@@ -571,6 +571,11 @@ final class Environment {
     var windFrom: Float = 90
     var turbulence: Float = 0.3
     var thermalsOn = true
+    var thermalStrength: Float = 1      // 0 none ... 2 booming
+    var gustiness: Float = 0.25         // 0 steady wind ... 1 strong lulls, gusts and shifts in direction
+    var cloud: Float = 0.3              // cloud cover 0...1 (3D sites)
+    var haze: Float = 0.2               // 0 crystal clear ... 1 thick mist (3D sites)
+    private var lull: Float = 0, veer: Float = 0
     var time: Float = 0
     var thermals: [Thermal] = []
     var obstacles: [WindObstacle] = []
@@ -580,6 +585,8 @@ final class Environment {
 
     func configure(_ site: SiteSpec) {
         windSpeed = site.windSpeed; windFrom = site.windFrom; turbulence = site.turbulence
+        thermalStrength = 1; thermalsOn = true; gustiness = min(0.15 + 0.6 * site.turbulence, 1)
+        cloud = site.cloud; haze = Environment.haze(forFog: site.fog); lull = 0; veer = 0
         rng = LCG(UInt64(site.seed) + 5)
         thermals = (0..<6).map { _ in newThermal(aged: true) }
         gust = .zero; wakeDeficit = 0; wakeTurb = 0
@@ -591,11 +598,32 @@ final class Environment {
                        age: aged ? rng.range(0, life) : 0, life: life)
     }
 
-    var windVec: V3 { let t = windFrom * deg; return V3(-sin(t), 0, cos(t)) * windSpeed }
+    /// Fog density for the renderer from the haze setting, and back.
+    var fog: Float { 0.00004 * pow(40, haze) }
+    static func haze(forFog f: Float) -> Float { clampf(log(max(f, 0.00004) / 0.00004) / log(40), 0, 1) }
+
+    /// The wind right now: the set speed and direction with the current lull or gust and shift applied.
+    var windVec: V3 { let t = (windFrom + veer) * deg; return V3(-sin(t), 0, cos(t)) * (windSpeed * max(1 + lull, 0)) }
+
+    /// Named weather to start from.
+    static let presets = ["Calm", "Light breeze", "Breezy", "Gusty", "Stormy"]
+    func apply(preset i: Int) {
+        let v: [(Float, Float, Float, Float, Float, Float)] = [   // wind, turbulence, gustiness, thermals, cloud, haze
+            (0, 0.05, 0, 0.6, 0.1, 0.15), (2, 0.2, 0.2, 1, 0.25, 0.2), (5, 0.4, 0.4, 1.2, 0.4, 0.2), (8, 0.75, 0.85, 1, 0.6, 0.3), (13, 1, 1, 0.3, 0.95, 0.55)]
+        let p = v[min(max(i, 0), v.count - 1)]
+        windSpeed = p.0; turbulence = p.1; gustiness = p.2; thermalStrength = p.3; thermalsOn = p.3 > 0; cloud = p.4; haze = p.5
+    }
 
     /// Advance the weather by one step around an aircraft at `p` flying at `airspeed`.
     func advance(dt: Float, at p: V3, airspeed: Float, terrain: Terrain) {
         time += dt
+        // the wind is never steady: it lulls and gusts over several seconds and swings a little in direction
+        if gustiness > 0 && windSpeed > 0.2 {
+            let a: Float = 1 / 4.5, k = sqrt(2 * a * dt)
+            lull += -lull * a * dt + gustiness * 0.42 * k * (rng.next() + rng.next() + rng.next() - 1.5) * 2
+            veer += -veer * a * 0.6 * dt + gustiness * 22 * sqrt(2 * a * 0.6 * dt) * (rng.next() + rng.next() + rng.next() - 1.5) * 2
+            lull = clampf(lull, -0.85, 1.2); veer = clampf(veer, -60, 60)
+        } else { lull = 0; veer = 0 }
         let base = windVec
         let agl = max(p.y - terrain.height(p.x, p.z), 0)
         // thermals drift downwind, build, fade and are replaced
@@ -609,8 +637,9 @@ final class Environment {
         if wakeTimer <= 0 {
             wakeTimer = 0.02
             var deficit: Float = 0, turb: Float = 0
-            if windSpeed > 0.3 {
-                let dir = base / windSpeed
+            let speedNow = length(base)
+            if speedNow > 0.3 {
+                let dir = base / speedNow
                 for o in obstacles {
                     let rx = p.x - o.p.x, rz = p.z - o.p.z
                     let along = rx * dir.x + rz * dir.z
@@ -622,7 +651,7 @@ final class Environment {
                 }
                 // rotor in the lee of a slope
                 let n = terrain.normal(p.x, p.z)
-                let lee = -(base.x * -n.x + base.z * -n.z) / n.y / windSpeed
+                let lee = -(base.x * -n.x + base.z * -n.z) / n.y / speedNow
                 if lee > 0.05 { turb = max(turb, min(lee * 2.5, 1) * exp(-agl / 40)) }
             }
             wakeDeficit += (deficit - wakeDeficit) * 0.2; wakeTurb += (turb - wakeTurb) * 0.2
@@ -648,13 +677,14 @@ final class Environment {
         // boundary layer: the wind speed is given at 10 m and falls off logarithmically toward the ground
         let shear = clampf(log((agl + 0.1 + 0.05) / 0.05) / log(10.05 / 0.05), 0, 1.6)
         var w = base * (shear * (1 - wakeDeficit))
-        let dir = windSpeed > 0.01 ? base / windSpeed : V3(1, 0, 0)
+        let speedNow = length(base)
+        let dir = speedNow > 0.01 ? base / speedNow : V3(1, 0, 0)
         w += dir * gust.x + V3(-dir.z, 0, dir.x) * gust.y + V3(0, gust.z, 0)
         if windSpeed > 0.1 {
             let n = terrain.normal(p.x, p.z)
             w.y += (base.x * -n.x + base.z * -n.z) / n.y * exp(-agl / 60) * 0.9
         }
-        if thermalsOn {
+        if thermalsOn && thermalStrength > 0 {
             let top = (1 - smoothstep(350, 500, agl)) * min(1, agl / 40)
             for th in thermals {
                 // the column leans downwind as it rises; a ring of sinking air surrounds the core
@@ -662,7 +692,7 @@ final class Environment {
                 let d2 = dx * dx + dz * dz, r = th.r * (1 + agl / 400)
                 if d2 > 9 * 6.25 * r * r { continue }
                 let env = pow(max(sin(.pi * th.age / th.life), 0), 0.6)
-                w.y += th.s * env * top * (exp(-d2 / (r * r)) - 0.22 * exp(-d2 / (6.25 * r * r)))
+                w.y += th.s * thermalStrength * env * top * (exp(-d2 / (r * r)) - 0.22 * exp(-d2 / (6.25 * r * r)))
             }
         }
         return w
