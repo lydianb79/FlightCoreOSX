@@ -6,7 +6,7 @@ A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Creat
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 150 aircraft, 20 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 175 aircraft, 20 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Download
 
@@ -51,7 +51,7 @@ The last aircraft and site are remembered between launches. The interface uses t
 
 ## Aircraft
 
-One hundred and fifty aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
+One hundred and seventy-five aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
 | Category | Count | Examples |
 |---|---|---|
@@ -60,11 +60,11 @@ One hundred and fifty aircraft, grouped by category in the aircraft browser and 
 | Warbirds | 30 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel, F4U Corsair, P-38 Lightning, Ju 87 Stuka, Tempest, B-25 Mitchell, Fokker D.VII |
 | Aerobatic | 17 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7, Extra 330SC, MXS, Sbach 342, Laser, Bücker Jungmeister |
 | Foam 3D | 11 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty, Shock Flyer 800, Sbach 3D Foamy |
-| Wings | 6 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Horten Ho 229, Race Wing 600 |
+| Wings | 16 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Horten Ho 229, Race Wing 600, Mini Combat Wing 800, Slope Racer 60, Thermal Wing 2.4, B-2 Spirit, Avro Vulcan, Mirage III, Me 163 Komet, Twin Trekker 1.3, Micro Delta 420, Speed Arrow 900 |
 | Jets | 16 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros, T-33, F-5 Tiger, F-15 Eagle, A-10, Hawker Hunter, Alpha Jet, Citation CJ |
 | Gliders | 11 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M, ASH 31, Ventus, SGS 2-33 |
-| Helicopters | 3 | Kestrel 550, Sparrow 450, Condor 700 |
-| Multirotors | 2 | Quad X450, Wasp Racing Quad |
+| Helicopters | 10 | Kestrel 550, Sparrow 450, Condor 700, Gnat 150, Swift 380, Talon 500, Fury 600 3D, Raven 770 Speed, Bell 206 JetRanger, MD 500E |
+| Multirotors | 10 | Quad X450, Wasp Racing Quad, Apex 5 Racer, Freestyle 5 HD, Tiny Whoop 65, Whoop 75 Brushless, Cinewhoop 3, Toothpick 3, Long Range 7, Hexa 680 Lifter |
 
 Every aircraft has its own flight model: the physics and the 3D shape are both generated from the same set of numbers (span, chords, mass, thrust, tail sizes, control throws, gear). The scale models are approximations: proportions, engine layout, gear and colours follow the real aircraft, but shapes such as elliptical or gull wings are simplified and there are no national markings. Most were derived by scaling a handful of tested base designs, so aircraft of the same family handle more alike than the real ones would. The Foam 3D planes are flat-plate "profile" airframes with oversized control surfaces and more thrust than weight.
 
@@ -107,9 +107,11 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 - The sun direction and ambient light are estimated from the photo, so the model is lit to match and casts a shadow on the photographed ground.
 - The **Photo:** items in the Flying Site menu rotate the panorama, shift its horizon and set the camera height. The settings are saved in a `.json` file next to the image.
 
+Photos are drawn with bicubic filtering when enlarged, sharpened according to how much real detail each one holds (`FlightCore --panostats` lists it), and given a fine grain when zoomed in far; photo sites always render at full resolution.
+
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Twenty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `limpopo_golf_course`, `rural_asphalt_road`, `snow_field`, `snowy_field`, `spiaggia_di_mondello`, `straw_rolls_field_01`, `suburban_football_field`, `wildflower_field` and `yellow_field`.
+Twenty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dreifaltigkeitsberg`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `horn-koppe_spring`, `limpopo_golf_course`, `poolbeg`, `rural_asphalt_road`, `snow_field`, `snowy_hillside_02`, `suburban_football_field` and `wildflower_field`.
 
 For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
 
@@ -142,7 +144,8 @@ Press **H** in the app for this list.
 | N | Next flying site |
 | C | Camera: pilot, chase, onboard |
 | Z | Zoom: auto, keep ground in view, fixed |
-| F | Flight mode (quadcopters) |
+| F | Flight mode: self-level / acro (multirotors), stabilized / acro (helicopters) |
+| I | Helicopter rotor speed: low, normal, high |
 | L | High / low rates |
 | E | Flaps: up, half, full (aircraft that have them) |
 | G | Landing gear up / down (aircraft with retractable gear) |
@@ -170,7 +173,9 @@ Press **H** in the app for this list.
 - channel assignment and reversing for transmitters
 - stick calibration (end points and centre)
 - stick mode 1–4 for gamepads and the on-screen stick display
-- low-rate throw, expo per axis, and stick deadband
+- rates: every aircraft has a low rate and expo of its own, chosen so full stick on low rates gives a roll rate that suits the type (about 65°/s for a sailplane, 95°/s for a trainer, 160°/s for an aerobat), and every flight starts on low rates; you can instead set one low rate and expo for all aircraft
+- stick deadband, and a reverse for the pitch stick on multirotors only
+- switches and buttons: any of the keyboard actions (rates, flight mode, rotor speed, throttle hold, flaps, gear, smoke, brakes, reset, camera, zoom, pause and more) can be assigned to a transmitter switch or controller button. Click Assign and move the switch. A two- or three-position switch sets the state directly; a push button steps through it
 
 ## How it works
 
@@ -186,11 +191,13 @@ Press **H** in the app for this list.
   - **Hovering:** the wing's downwash on the tail is taken from the lift the wing is really making, so a model hanging on its propeller has none. The flat or slab-sided fuselage of a 3D model works as a keel in the blast ahead of the centre of gravity and offsets the fin, so a sideways slide does not swing the tail round. 3D and aerobatic models are balanced close to neutral, so they need almost no trim.
   - **Control rates** are calibrated when the app starts: each airplane is test-flown and its control throws scaled until it rolls, pitches and yaws at the rate its category is set up for (for example 150°/s of roll for a trainer, 380°/s for an aerobat, 95°/s for a glider).
 - **Flying wings** have no tailplane. Pitch and roll both come from elevons, the wing is balanced by a reflexed section (or, for the delta, by its shape), and stability comes from sweep and a small static margin. Fins are on the wingtips, on the body, or absent (the Horten, which is loose in yaw).
+- **Multirotors** command motor speed, and thrust goes with speed squared, so a powerful quad hovers around a quarter to a third of the stick. The mixer gives attitude priority over throttle and the motors idle in flight, so flips and dives with the throttle closed stay under control. Acro uses a rate curve (gentle at the centre, steep at the ends) with a full-stick rate set per model, from 260°/s for the hexacopter to 900°/s for the five-inch racer. Propellers lose thrust as air speeds up through them and gain it when pushed against the air, the battery sags under load, and sinking through its own downwash brings propwash: lost lift and a wobble, milder with ducts.
+- **Helicopters** have two flight modes, Stabilized (the cyclic stick commands a lean angle and the machine levels itself) and Acro (the cyclic commands a rate). In both, the throttle stick is collective pitch, symmetric about mid stick, so they fly inverted on negative pitch. Rotor speed is a separate three-position setting (80, 90 or 100 % head speed, key I), as on a transmitter's idle-up switch.
 - **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
 - **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
 - **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.
 - **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m). Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
-- **Scale data:** the 100 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --handlingtest` lists every airplane's control rates and checks hovering and continuous rolls; `FlightCore --balancetest` lists every airplane's measured static margin, trim speed and response to full up elevator; `FlightCore --ruddertest` lists every airplane's rudder, elevator and aileron authority in the propeller blast, and flies a hover hands-off, with a perfect pilot and with one who reacts a fifth of a second late, in still air and in wind; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
+- **Scale data:** the 100 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --handlingtest` lists every airplane's control rates and checks hovering and continuous rolls; `FlightCore --balancetest` lists every airplane's measured static margin, trim speed and response to full up elevator; `FlightCore --ruddertest` lists every airplane's rudder, elevator and aileron authority in the propeller blast, and flies a hover hands-off, with a perfect pilot and with one who reacts a fifth of a second late, in still air and in wind; `FlightCore --rotortest` measures every multirotor and helicopter: hover point, power, acro rates, control with the throttle closed, propwash, flight modes and inverted hover; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, flat-foam profile airframes, and ten trim schemes including camouflage. Surfaces are shaded as glossy film covering with sky reflections.
 - **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, long grass that sways in the wind, wild flowers and bushes. Each site has its own terrain shape, ground colours and trees (deciduous, conifers, palms, acacias, cypresses, cacti), and some have water, a farm, or an airport with hangars and a tower.
@@ -203,7 +210,9 @@ Press **H** in the app for this list.
 - **Frame pacing:** the simulation advances by exact display refresh periods, and the aircraft is drawn at its physics state carried forward by the fraction of a step not yet simulated, so motion is even from frame to frame. `FlightCore --perf` prints frame-pacing and motion statistics once a second.
 - **The app starts in full screen.** Press ⌃⌘F to switch to a window.
 - **Sound** is synthesized in stereo, with nothing sampled:
-  - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle), ducted fans, turboprops, helicopter rotor with blade slap and tail rotor, and four separate multirotor motors;
+  - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle), ducted fans, turboprops, helicopter rotor with blade slap that follows the blade count, tail rotor and gear whine, and four separate multirotor motors that warble as the flight controller corrects;
+  - propeller and motor tones brighten and harshen with load, each blade tears the air as it passes, ducted fans howl, and piston engines lope at idle;
+  - sound reflected off the ground arrives a moment after the direct sound, which gives a fly-past its sweeping, hollow tone;
   - the aircraft is placed left to right by where it is, gets quieter and duller with distance, and is Doppler-shifted;
   - airframe wind noise and tyre rumble on the ground;
   - ambience at the pilot's position: wind that follows the wind speed, birdsong on green sites, surf on water sites;

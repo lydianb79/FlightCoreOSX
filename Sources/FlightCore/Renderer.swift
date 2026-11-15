@@ -6,6 +6,7 @@ struct FrameUniforms {
     var viewProj = M4.identity, invViewProj = M4.identity, shadow0 = M4.identity, shadow1 = M4.identity
     var camPos = V4.zero, sunDir = V4.zero, sunColor = V4.zero, zenith = V4.zero, horizon = V4.zero, runway = V4.zero, ambient = V4.zero
     var post = V4(0, 1, 0.85, 0.3), screen = V4(0, 0, 4096, 1)
+    var pano = V4.zero
 }
 struct DrawUniforms { var model = M4.identity; var tint = V4(1, 1, 1, 1); var params = V4.zero }
 
@@ -58,6 +59,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // scene
     private var panoTex: MTLTexture?
+    private var panoDetail: Float = 1           // 0 soft photograph ... 1 pin sharp
+    private var lastDetail: Float = 0.7
     private var catcherMesh: GPUMesh?
     private var terrainMesh: GPUMesh?
     private var sceneryMesh: GPUMesh?
@@ -168,7 +171,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         ls.minFilter = .linear; ls.magFilter = .linear; ls.sAddressMode = .clampToEdge; ls.tAddressMode = .clampToEdge
         linearSampler = device.makeSamplerState(descriptor: ls)
         let pd = MTLSamplerDescriptor()
-        pd.minFilter = .linear; pd.magFilter = .linear; pd.mipFilter = .linear; pd.maxAnisotropy = 8
+        pd.minFilter = .linear; pd.magFilter = .linear; pd.mipFilter = .linear; pd.maxAnisotropy = 16
         pd.sAddressMode = .repeat; pd.tAddressMode = .clampToEdge
         panoSampler = device.makeSamplerState(descriptor: pd)
 
@@ -217,7 +220,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             panoTex = nil
             if let url = game.site.panorama {
                 terrainMesh = nil; sceneryMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil; waterMesh = nil
-                if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img) }
+                if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img); panoDetail = clampf((lastDetail - 0.4) / 0.35, 0, 1) }
                 if panoTex == nil { game.say("Could not load panorama image", 6) }
             } else {
                 terrainMesh = GPUMesh(device, game.terrain.buildMesh())
@@ -299,6 +302,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         dynScale = min(max(dynScale, 0.5), 1)
         var scale = min(dynScale, ceiling)
+        if game.site.panorama != nil { scale = 1 }           // a photo site is cheap to draw and shows every lost pixel
         if let fixed = Renderer.debugScale { scale = fixed }
         game.renderScale = scale
         let dw = drawable.texture.width, dh = drawable.texture.height
@@ -332,6 +336,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         fu.ambient = V4(light.ambient.x, light.ambient.y, light.ambient.z, 0)
         fu.post = V4(0, 1, quality > 0 ? 0.85 : 0, pano ? 0.12 : 0.32)
         fu.screen = V4(1 / Float(rw), 1 / Float(rh), Float(shadow1Size), s0Half)
+        fu.pano = V4(1.3 - 0.9 * panoDetail, 1.2 - 0.5 * panoDetail, 0, 0)
 
         // frustum side planes, for culling grass and trees
         let m = fu.viewProj
@@ -633,6 +638,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        if w >= 2048 { lastDetail = Panoramas.detail(px, width: w, height: h) }
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: w, height: h, mipmapped: true)
         d.usage = [.shaderRead, .renderTarget]
         guard let tex = device.makeTexture(descriptor: d) else { return nil }

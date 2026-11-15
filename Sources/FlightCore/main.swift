@@ -433,6 +433,98 @@ func runRudderTest() {
     }
 }
 
+/// Rotorcraft check: hover point, power, acro rates, control with the throttle closed, propwash, and for
+/// helicopters the hover in each mode, flips and inverted flight.
+func runRotorTest() {
+    let terrain = Terrain(site: SiteSpec.all[0])
+    func fly(_ ac: Aircraft, _ seconds: Float, _ c: (Float) -> Controls, each: (Float) -> Void = { _ in }) {
+        for i in 0..<Int(seconds * 1000) { ac.step(dt: 0.001, c: c(Float(i) / 1000), terrain: terrain, wind: .zero, rollMu: 0); each(Float(i) / 1000) }
+    }
+    print("MULTIROTORS                 mass g  T/W   hover   climb    roll rate deg/s      full roll with      level-mode  propwash: sink m/s, lift lost,")
+    print("                                          stick   m/s2     full stick  30% stick  throttle closed    km/h       wobble deg/s")
+    for spec in AircraftLibrary.all where spec.kind == .multirotor {
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        let hov = spec.hoverThrottle
+        func start() { ac.reset(pos: V3(0, 150, 0), heading: 0); for i in ac.levels.indices { ac.levels[i] = sqrt(spec.mass * gravity / (Float(spec.multi!.motors.count) * spec.multi!.maxThrust)) } }
+        // punch out
+        start(); var c = Controls(); c.mode = 1; c.throttle = hov
+        fly(ac, 0.5) { _ in c }
+        c.throttle = 1; fly(ac, 0.06) { _ in c }; let v0 = ac.vel.y; fly(ac, 0.1) { _ in c }
+        let climb = (ac.vel.y - v0) / 0.1
+        // roll rates
+        func rollRate(_ stick: Float, thr: Float) -> Float {
+            start(); var c = Controls(); c.mode = 1; c.throttle = hov
+            fly(ac, 0.3) { _ in c }
+            c.aileron = stick; c.throttle = thr
+            var peak: Float = 0
+            fly(ac, 0.6, { _ in c }, each: { _ in peak = max(peak, abs(ac.omega.z)) })
+            return peak / deg
+        }
+        let full = rollRate(1, thr: hov), part = rollRate(0.3, thr: hov), closed = rollRate(1, thr: 0)
+        // top speed: self-level, full forward stick, full throttle
+        start(); c = Controls(); c.mode = 0; c.throttle = 1; c.elevator = -1
+        var top: Float = 0
+        fly(ac, 8, { _ in c }, each: { _ in top = max(top, sqrt(ac.vel.x * ac.vel.x + ac.vel.z * ac.vel.z)) })
+        // propwash: let it sink straight down at hover throttle after a brief cut
+        start(); c = Controls(); c.mode = 0
+        var wash: Float = 0, wob: Float = 0
+        fly(ac, 4, { t in c.throttle = t < 0.9 ? 0.0 : hov * 0.98; return c }, each: { t in if t > 1.5 { wash = max(wash, ac.vortexRing); wob = max(wob, abs(ac.omega.x) + abs(ac.omega.z)) } })
+        print(String(format: "%@ %6.0f  %4.1f   %3.0f%%   %5.1f      %5.0f       %5.0f        %5.0f           %5.0f      %4.1f  %3.0f%%  %3.0f", spec.name.padding(toLength: 26, withPad: " ", startingAt: 0),
+                     spec.mass * 1000, spec.thrustToWeight, hov * 100, climb, full, part, closed, top * 3.6, -ac.vel.y, wash * 100, wob / deg))
+    }
+    // direction check: stick forward (elevator -1) must tip the nose down and move the machine forward, in both modes
+    for name in ["Quad X450", "Apex 5 Racer", "Kestrel 550"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        for mode in 0..<2 {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 150, 0), heading: 0); for i in ac.levels.indices { ac.levels[i] = spec.kind == .helicopter ? 1 : 0.5 }
+            var c = Controls(); c.mode = mode; c.throttle = spec.kind == .helicopter ? 0.66 : spec.hoverThrottle; c.elevator = -0.3
+            fly(ac, 0.6) { _ in c }
+            let nose = ac.q.act(V3(0, 0, -1))
+            print(String(format: "DIRECTION %@ mode %d, stick forward: nose %@ (%.0f deg), moving %@ at %.1f m/s", name, mode, nose.y < 0 ? "DOWN" : "UP", asin(clampf(nose.y, -1, 1)) / deg,
+                         dot(ac.vel, V3(0, 0, -1)) > 0 ? "FORWARD" : "BACKWARD", abs(dot(ac.vel, V3(0, 0, -1)))))
+        }
+    }
+    print("HELICOPTERS                 mass g  rotor m  hover stick: high low rotor climb m/s   flip deg/s  pirouette deg/s   inverted hover       head speed in a")
+    print("                                                                      (full pitch)                                (acro, 3 s)          full-pitch climb")
+    for spec in AircraftLibrary.all where spec.kind == .helicopter {
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        func hoverStick(_ mode: Int) -> Float {
+            ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
+            var c = Controls(); c.mode = 1; c.rotorSpeed = mode; c.throttle = 0.7
+            var integ = c.throttle
+            fly(ac, 5) { _ in integ = clampf(integ - 0.4 * ac.vel.y * 0.001, 0, 1); c.throttle = clampf(integ - 0.08 * ac.vel.y, 0, 1); c.elevator = clampf(-2 * ac.pitch - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(-2 * ac.roll + 0.3 * ac.omega.z, -1, 1); return c }
+            return integ
+        }
+        let h3 = hoverStick(2), hn = hoverStick(0)
+        var c = Controls(); c.throttle = 1
+        var droop: Float = 9
+        ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
+        fly(ac, 3, { _ in c.elevator = clampf(-2 * ac.pitch - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(-2 * ac.roll + 0.3 * ac.omega.z, -1, 1); return c }, each: { t in if t > 1 { droop = min(droop, ac.levels[0]) } })
+        let climb = ac.vel.y
+        ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
+        c = Controls(); c.mode = 1; c.throttle = h3; c.aileron = 1
+        var flip: Float = 0
+        fly(ac, 0.8, { _ in c }, each: { _ in flip = max(flip, abs(ac.omega.z)) })
+        ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
+        c = Controls(); c.mode = 1; c.throttle = h3; c.rudder = 1
+        var piro: Float = 0
+        fly(ac, 0.8, { _ in c }, each: { _ in piro = max(piro, abs(ac.omega.y)) })
+        // inverted hover: start upside down on negative pitch and hold it
+        ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
+        ac.q = simd_quatf(angle: .pi, axis: V3(0, 0, 1)) * ac.q
+        var integ = 1 - h3, worst: Float = 0
+        fly(ac, 3, { _ in
+            integ = clampf(integ + 0.4 * ac.vel.y * 0.001, 0, 1)
+            c = Controls(); c.mode = 1; c.throttle = clampf(integ + 0.08 * ac.vel.y, 0, 1)
+            let up = ac.q.inverse.act(V3(0, -1, 0))             // straight down, as the machine sees it: should be its own up axis
+            c.elevator = clampf(2 * up.z - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(2 * up.x + 0.3 * ac.omega.z, -1, 1); return c
+        }, each: { _ in worst = max(worst, acos(clampf(-ac.q.act(V3(0, 1, 0)).y, -1, 1))) })
+        print(String(format: "%@ %6.0f   %4.2f              %3.0f%%   %3.0f%%      %5.1f        %5.0f        %5.0f        sinks %4.1f m/s, off %2.0f deg     %3.0f%%", spec.name.padding(toLength: 26, withPad: " ", startingAt: 0),
+                     spec.mass * 1000, spec.heli!.rotorR, h3 * 100, hn * 100, climb, flip / deg, piro / deg, -ac.vel.y, worst / deg, droop * 100))
+    }
+}
+
 /// Handling diagnostics: control rates for every airplane, and the balance of forces in a prop-hang.
 func runHandlingTest() {
     let terrain = Terrain(site: SiteSpec.all[0])
@@ -442,7 +534,7 @@ func runHandlingTest() {
         let m = measureRates(spec)
         let r = m.roll, p = m.pitch, y = m.yaw
         rolls.append((spec.name, r))
-        print(String(format: "%@  %6.0f      %6.0f      %6.0f", spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), r, p, y))
+        print(String(format: "%@  %6.0f      %6.0f      %6.0f        low rate %2.0f%% (roll %3.0f deg/s), expo %2.0f%%", spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), r, p, y, spec.lowRate * 100, r * spec.lowRate, spec.expo * 100))
     }
     let sorted = rolls.sorted { $0.1 < $1.1 }
     print(String(format: "ROLL RATE RANGE: slowest %@ %.0f deg/s, fastest %@ %.0f deg/s", sorted.first!.0, sorted.first!.1, sorted.last!.0, sorted.last!.1))
@@ -551,6 +643,20 @@ func runBalanceTest() {
 }
 
 if CommandLine.arguments.contains("--ruddertest") { runRudderTest(); exit(0) }
+if CommandLine.arguments.contains("--rotortest") { runRotorTest(); exit(0) }
+if CommandLine.arguments.contains("--panostats") {
+    // how sharp each installed panorama really is
+    for site in SiteSpec.all {
+        guard let url = site.panorama, let img = Panoramas.image(url, maxSize: 8192) else { continue }
+        let w = img.width, h = img.height
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { continue }
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        print(String(format: "%@ %d x %d  detail %.2f", url.lastPathComponent.padding(toLength: 32, withPad: " ", startingAt: 0), w, h, Panoramas.detail(px, width: w, height: h)))
+    }
+    exit(0)
+}
 if CommandLine.arguments.contains("--balancetest") {
     runBalanceTest()
     exit(0)
@@ -875,6 +981,21 @@ final class SetupModel: ObservableObject {
     @Published var connected = false
     @Published var calibrating = false
     @Published var s: InputSettings { didSet { input.settings = s } }
+    @Published var listening: String? = nil         // action waiting for a switch or button to be moved
+    private var seenAxes: [Float] = [], seenButtons: [Bool] = []
+    func listen(_ id: String) {
+        if listening == id { listening = nil; return }
+        listening = id; seenAxes = input.hid.axes; seenButtons = input.hid.buttons
+    }
+    func clear(_ id: String) { var b = s.bindings ?? [:]; b[id] = nil; s.bindings = b; if listening == id { listening = nil } }
+    func setFollow(_ id: String, _ on: Bool) { var b = s.bindings ?? [:]; b[id]?.follow = on; s.bindings = b }
+    private func bind(_ id: String, _ c: ControlBinding) { var b = s.bindings ?? [:]; b[id] = c; s.bindings = b; listening = nil }
+    /// While waiting, the first button that changes or switch axis that moves a long way is taken.
+    private func watch() {
+        guard let id = listening else { return }
+        for (i, on) in input.hid.buttons.enumerated() where i < seenButtons.count && on != seenButtons[i] { bind(id, ControlBinding(axis: false, index: i)); return }
+        for (i, v) in input.hid.axes.enumerated() where i < seenAxes.count && !s.axis.contains(i) && abs(v - seenAxes[i]) > 0.6 { bind(id, ControlBinding(axis: true, index: i)); return }
+    }
     private var timer: Timer?
     init(input: InputManager) {
         self.input = input
@@ -882,6 +1003,7 @@ final class SetupModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let m = self else { return }
             m.values = (0..<4).map { m.input.channel($0) }
+            m.watch()
             m.connected = m.input.hid.connected
             m.device = m.connected ? m.input.hid.name : "No USB transmitter or joystick detected"
         }
@@ -905,7 +1027,7 @@ struct SetupView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("USB transmitter").font(.headline)
             Text(model.device).foregroundColor(model.connected ? .primary : .secondary)
             ForEach(0..<4, id: \.self) { i in
@@ -938,16 +1060,41 @@ struct SetupView: View {
 
             Divider()
             Text("Rates and expo").font(.headline)
-            pct("Low rate", $model.s.lowRate, 0.3...1)
-            pct("Aileron expo", $model.s.expo[0], 0...0.8)
-            pct("Elevator expo", $model.s.expo[1], 0...0.8)
-            pct("Rudder expo", $model.s.expo[2], 0...0.8)
+            Toggle("Use my own low rate and expo for every aircraft", isOn: Binding(get: { model.s.ownRates ?? false }, set: { model.s.ownRates = $0 }))
+            Group {
+                pct("Low rate", $model.s.lowRate, 0.3...1)
+                pct("Aileron expo", $model.s.expo[0], 0...0.8)
+                pct("Elevator expo", $model.s.expo[1], 0...0.8)
+                pct("Rudder expo", $model.s.expo[2], 0...0.8)
+            }.disabled(!(model.s.ownRates ?? false))
             pct("Stick deadband", $model.s.deadband, 0...0.15)
-            Text("Press L while flying to switch between high and low rates. Set expo to 0 if your transmitter already applies its own.")
+            Toggle("Reverse the pitch stick on multirotors", isOn: Binding(get: { model.s.multiPitchReverse ?? false }, set: { model.s.multiPitchReverse = $0 }))
+            Text("Each aircraft comes with a low rate and expo of its own, and every flight starts on low rates. Press L, or use an assigned switch, to change between low and high.")
+                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            Text("Switches and buttons").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(InputManager.actions, id: \.id) { a in
+                        HStack {
+                            Text(a.title).frame(width: 165, alignment: .leading)
+                            Text(model.listening == a.id ? "move a switch or press a button…" : InputManager.label(model.s.bindings?[a.id]))
+                                .foregroundColor(model.listening == a.id ? .orange : .secondary).frame(width: 150, alignment: .leading).lineLimit(1)
+                            Button(model.listening == a.id ? "Cancel" : "Assign") { model.listen(a.id) }
+                            Button("Clear") { model.clear(a.id) }.disabled(model.s.bindings?[a.id] == nil)
+                            if a.states >= 2, let b = model.s.bindings?[a.id], !b.axis {
+                                Toggle("latching", isOn: Binding(get: { b.follow }, set: { model.setFollow(a.id, $0) })).help("On: the button is a switch that stays in position. Off: each press steps to the next setting.")
+                            }
+                        }.font(.system(size: 12))
+                    }
+                }
+            }.frame(height: 118)
+            Text("Click Assign, then move the switch or press the button on your transmitter. A two- or three-position switch sets the state directly; a push button steps through it. The four stick axes cannot be assigned.")
                 .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
         }
-        .padding(20)
-        .frame(width: 520)
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .frame(width: 600)
     }
 }
 

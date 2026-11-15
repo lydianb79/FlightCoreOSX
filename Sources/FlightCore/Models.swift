@@ -624,14 +624,32 @@ func buildAirplaneModel(_ g: PlaneGeom, wheels: [V3], engines: [V3], wings: [(y:
 
 // MARK: - Helicopter
 
-func buildHeliModel(rotorR R: Float, body: V4, accent: V4) -> [Part] {
+func buildHeliModel(rotorR R: Float, body: V4, accent: V4, blades nBlades: Int = 2, scale: Int = 0) -> [Part] {
     var b = MeshBuilder()
     let cBody = gl(body, 0.85), cAcc = gl(accent, 0.85)
-    // canopy
-    b.fuselage([(-0.42, 0.012, 0.014, -0.06), (-0.4, 0.035, 0.04, -0.055), (-0.34, 0.058, 0.07, -0.04), (-0.25, 0.074, 0.098, -0.015), (-0.14, 0.082, 0.115, 0.005),
-                (-0.03, 0.08, 0.118, 0.015), (0.05, 0.07, 0.1, 0.02), (0.1, 0.05, 0.07, 0.02)].map { (z: $0.0, w: $0.1, h: $0.2, y: $0.3) }, exp: 2.3, seg: 20) { t, _, sy in
-        if sy > 0.3 && t > 0.12 && t < 0.62 { return glass }
-        return sy > -0.5 && sy < -0.12 ? cAcc : cBody
+    if scale == 1 {
+        // scale fuselage in the style of a light turbine helicopter: cabin, engine cowl and a slim tail cone
+        b.fuselage([(-0.5, 0.01, 0.012, -0.06), (-0.47, 0.05, 0.05, -0.055), (-0.38, 0.088, 0.1, -0.04), (-0.24, 0.108, 0.145, -0.018), (-0.06, 0.112, 0.165, 0.0),
+                    (0.1, 0.108, 0.16, 0.012), (0.24, 0.08, 0.125, 0.03), (0.42, 0.036, 0.06, 0.04), (0.7, 0.02, 0.03, 0.037), (0.99, 0.014, 0.02, 0.035)].map { (z: $0.0, w: $0.1, h: $0.2, y: $0.3) },
+                   exp: 2.2, seg: 22) { t, _, sy in
+            if t > 0.06 && t < 0.3 && sy > 0.05 { return glass }
+            if t > 0.32 && t < 0.42 && sy > 0.15 && sy < 0.6 { return glass }
+            return sy > -0.25 && sy < 0.02 ? cAcc : cBody
+        }
+    } else if scale == 2 {
+        // egg-shaped cabin of a light observation helicopter, glazed right round the nose
+        b.fuselage([(-0.4, 0.01, 0.012, -0.045), (-0.37, 0.06, 0.07, -0.04), (-0.27, 0.1, 0.13, -0.025), (-0.12, 0.118, 0.165, -0.005), (0.04, 0.118, 0.17, 0.005),
+                    (0.17, 0.095, 0.14, 0.02), (0.27, 0.055, 0.08, 0.035), (0.34, 0.02, 0.03, 0.04)].map { (z: $0.0, w: $0.1, h: $0.2, y: $0.3) }, exp: 2.0, seg: 22) { t, _, sy in
+            if t > 0.05 && t < 0.5 && sy > -0.15 { return glass }
+            return sy > -0.6 && sy < -0.3 ? cAcc : cBody
+        }
+    } else {
+        // canopy
+        b.fuselage([(-0.42, 0.012, 0.014, -0.06), (-0.4, 0.035, 0.04, -0.055), (-0.34, 0.058, 0.07, -0.04), (-0.25, 0.074, 0.098, -0.015), (-0.14, 0.082, 0.115, 0.005),
+                    (-0.03, 0.08, 0.118, 0.015), (0.05, 0.07, 0.1, 0.02), (0.1, 0.05, 0.07, 0.02)].map { (z: $0.0, w: $0.1, h: $0.2, y: $0.3) }, exp: 2.3, seg: 20) { t, _, sy in
+            if sy > 0.3 && t > 0.12 && t < 0.62 { return glass }
+            return sy > -0.5 && sy < -0.12 ? cAcc : cBody
+        }
     }
     // frame, motor, main gear
     for s in [Float(-1), 1] {
@@ -688,13 +706,17 @@ func buildHeliModel(rotorR R: Float, body: V4, accent: V4) -> [Part] {
     for s in [Float(-1), 1] { head.box(center: V3(s * 0.075, 0, 0), size: V3(0.05, 0.02, 0.034), color: black) }
     parts.append(Part(mesh: head, pivot: V3(0, 0.25, 0), axis: V3(0, 1, 0), anim: .spin(0)))
     var blades = MeshBuilder()
-    for s in [Float(-1), 1] {
-        blades.wingPanel(le: { V3(s * (0.095 + (R - 0.095) * $0), 0, -s * 0.017) }, chord: { _ in s * 0.056 }, thick: 0.12, camber: 0, up: V3(0, 1, 0),
-                         f0: 0, f1: 1, strips: 8, roundTip: true) { f, _, _ in f > 0.9 ? V4(0.95, 0.95, 0.95, 0.5) : (f > 0.82 ? V4(0.85, 0.1, 0.1, 0.5) : black) }
+    let chordK: Float = nBlades > 2 ? 0.7 : 1           // multi-blade heads carry narrower blades
+    for k in 0..<nBlades {
+        var one = MeshBuilder()
+        one.wingPanel(le: { V3(0.095 + (R - 0.095) * $0, 0, -0.017 * chordK) }, chord: { _ in 0.056 * chordK }, thick: 0.12, camber: 0, up: V3(0, 1, 0),
+                      f0: 0, f1: 1, strips: 8, roundTip: true) { f, _, _ in f > 0.9 ? V4(0.95, 0.95, 0.95, 0.5) : (f > 0.82 ? V4(0.85, 0.1, 0.1, 0.5) : black) }
+        one.box(center: V3(0.075, 0, 0), size: V3(0.05, 0.02, 0.034 * chordK), color: black)
+        blades.append(one, M4.rotation(Float(k) / Float(nBlades) * 2 * .pi, V3(0, 1, 0)))
     }
     parts.append(Part(mesh: blades, pivot: V3(0, 0.25, 0), axis: V3(0, 1, 0), anim: .spin(0), blur: 1))
     let toY = M4.rotation(-.pi / 2, V3(1, 0, 0))
-    var disc = MeshBuilder(); disc.append(makePropeller(diameter: 2 * R, blades: 2, tip: V4(0.9, 0.9, 0.9, 1)).disc, toY)
+    var disc = MeshBuilder(); disc.append(makePropeller(diameter: 2 * R, blades: nBlades, tip: V4(0.9, 0.9, 0.9, 1)).disc, toY)
     parts.append(Part(mesh: disc, pivot: V3(0, 0.25, 0), axis: V3(0, 1, 0), anim: .spin(0), blur: 2))
     // tail rotor
     let toX = M4.rotation(.pi / 2, V3(0, 1, 0))
@@ -758,6 +780,101 @@ func buildQuadModel(motors: [V3], shell: V4, front: V4, rear: V4) -> [Part] {
         var pd = MeshBuilder(); pd.append(pr.disc, toY)
         parts.append(Part(mesh: pb, pivot: V3(m.x, 0.052, m.z), axis: V3(0, 1, 0), anim: .spin(i), blur: 1))
         parts.append(Part(mesh: pd, pivot: V3(m.x, 0.052, m.z), axis: V3(0, 1, 0), anim: .spin(i), blur: 2))
+    }
+    parts.insert(Part(mesh: b), at: 0)
+    return parts
+}
+
+/// Racing, freestyle and whoop multirotors. `style`: 0 racer, 1 freestyle with an action camera, 2 tiny whoop with
+/// propeller ducts and a canopy, 3 ducted cinewhoop with an action camera, 4 long-range cruiser with GPS.
+func buildFpvModel(motors: [V3], propD: Float, style: Int, accent: V4, canopy: V4) -> [Part] {
+    var b = MeshBuilder()
+    let u = propD / 0.127                       // everything is drawn for a five-inch quad and scaled
+    let ducted = style == 2 || style == 3
+    let cAcc = gl(accent, 0.75), cCan = gl(canopy, 0.85)
+    let L = (motors.map { abs($0.z) }.max() ?? 0.08) * (ducted ? 0.9 : 1.15)
+    let deck: Float = 0.026 * u
+    // bottom and top plates with standoffs between them
+    b.box(center: V3(0, 0, 0), size: V3(0.04 * u, 0.004 * u, 2 * L), color: carbon)
+    if style != 2 {
+        b.box(center: V3(0, deck, 0), size: V3(0.034 * u, 0.003 * u, 2 * L * 0.92), color: carbon)
+        for z in [-L * 0.85, -L * 0.3, L * 0.3, L * 0.85] { for sd in [Float(-1), 1] {
+            b.cylinder(from: V3(sd * 0.015 * u, 0, z), to: V3(sd * 0.015 * u, deck, z), r0: 0.0028 * u, r1: 0.0028 * u, seg: 6, color: cAcc)
+        } }
+        b.box(center: V3(0, deck * 0.5, L * 0.1), size: V3(0.028 * u, deck * 0.7, 0.032 * u), color: V4(0.05, 0.22, 0.1, 0.3))      // flight controller stack
+    }
+    // FPV camera, tilted up for speed
+    let tilt = simd_quatf(angle: (style == 0 ? 0.6 : (style == 2 ? 0.35 : 0.45)), axis: V3(1, 0, 0))
+    let camPos = V3(0, (style == 2 ? 0.012 : deck * 0.55) , -L * 0.92)
+    b.box(center: camPos, size: V3(0.02 * u, 0.02 * u, 0.018 * u), color: black, rot: tilt)
+    b.cylinder(from: camPos + tilt.act(V3(0, 0, -0.009 * u)), to: camPos + tilt.act(V3(0, 0, -0.017 * u)), r0: 0.007 * u, r1: 0.0065 * u, seg: 10, color: glass)
+    for sd in [Float(-1), 1] { b.box(center: V3(sd * 0.014 * u, camPos.y, -L * 0.9), size: V3(0.002 * u, 0.03 * u, 0.026 * u), color: cAcc) }
+    if style == 2 {
+        // whoop: bubble canopy over the board, battery slung underneath
+        b.ellipsoid(center: V3(0, 0.012 * u, 0), radii: V3(0.02 * u, 0.02 * u, L * 0.95), color: cCan, seg: 12, rings: 6)
+        b.box(center: V3(0, -0.012 * u, 0), size: V3(0.02 * u, 0.014 * u, 2 * L * 1.1), color: V4(0.75, 0.75, 0.78, 0.5))
+    } else {
+        // battery strapped on top (underneath on a cinewhoop), with its lead and plug
+        let by: Float = style == 3 ? -0.02 * u : deck + 0.017 * u
+        b.box(center: V3(0, by, L * 0.12), size: V3(0.034 * u, 0.03 * u, (style == 4 ? 0.105 : 0.074) * u), color: V4(0.1, 0.1, 0.12, 0.3))
+        b.box(center: V3(0, by, L * 0.12), size: V3(0.0365 * u, 0.032 * u, 0.016 * u), color: cAcc)
+        b.box(center: V3(0, by, L * 0.12 + (style == 4 ? 0.058 : 0.042) * u), size: V3(0.012 * u, 0.008 * u, 0.012 * u), color: V4(0.95, 0.75, 0.1, 0.4))
+    }
+    if style == 1 || style == 3 || style == 4 {
+        // action camera on a wedge mount
+        let p = V3(0, deck + (style == 3 ? 0.02 : 0.045) * u, -L * (style == 3 ? 0.35 : 0.62))
+        b.box(center: p, size: V3(0.042 * u, 0.032 * u, 0.024 * u), color: V4(0.2, 0.21, 0.23, 0.5), rot: simd_quatf(angle: 0.35, axis: V3(1, 0, 0)))
+        b.cylinder(from: p + V3(-0.01 * u, 0.004 * u, -0.012 * u), to: p + V3(-0.01 * u, 0.008 * u, -0.019 * u), r0: 0.009 * u, r1: 0.008 * u, seg: 10, color: glass)
+    }
+    if style == 4 {
+        b.cylinder(from: V3(0, deck, L * 0.8), to: V3(0, deck + 0.04 * u, L * 0.8), r0: 0.002 * u, r1: 0.002 * u, seg: 5, color: carbon)
+        b.cylinder(from: V3(0, deck + 0.04 * u, L * 0.8), to: V3(0, deck + 0.046 * u, L * 0.8), r0: 0.014 * u, r1: 0.013 * u, seg: 10, color: black)
+    }
+    // video and radio antennas, tail light
+    let ay: Float = style == 2 ? 0.02 * u : deck
+    b.cylinder(from: V3(0, ay, L * 0.9), to: V3(0, ay + 0.05 * u, L * 1.15), r0: 0.0015 * u, r1: 0.0015 * u, seg: 5, color: black)
+    b.cylinder(from: V3(0, ay + 0.045 * u, L * 1.13), to: V3(0, ay + 0.065 * u, L * 1.22), r0: 0.006 * u, r1: 0.006 * u, seg: 8, color: cAcc)
+    for sd in [Float(-1), 1] { b.cylinder(from: V3(sd * 0.012 * u, ay * 0.5, L * 0.8), to: V3(sd * 0.04 * u, ay * 0.5 + 0.03 * u, L * 1.05), r0: 0.001 * u, r1: 0.001 * u, seg: 4, color: black) }
+    b.box(center: V3(0, ay * 0.5, L * 1.0), size: V3(0.03 * u, 0.006 * u, 0.003 * u), color: V4(1, 0.1, 0.05, 1))
+    var parts: [Part] = []
+    let toY = M4.rotation(-.pi / 2, V3(1, 0, 0))
+    for (i, m) in motors.enumerated() {
+        let front = m.z < 0
+        let tip = V3(m.x, 0, m.z), root = V3(m.x * 0.12, 0, m.z * 0.25)
+        let dir = normalize(tip - root), side = V3(-dir.z, 0, dir.x)
+        let w0 = 0.011 * u, w1 = 0.008 * u, th = 0.0028 * u
+        b.loft([[root + side * w0 + V3(0, th, 0), root - side * w0 + V3(0, th, 0), root - side * w0 - V3(0, th, 0), root + side * w0 - V3(0, th, 0)],
+                [tip + side * w1 + V3(0, th, 0), tip - side * w1 + V3(0, th, 0), tip - side * w1 - V3(0, th, 0), tip + side * w1 - V3(0, th, 0)]], color: carbon)
+        // motor: base, coloured bell, shaft
+        let r = 0.0135 * u
+        b.cylinder(from: V3(m.x, th, m.z), to: V3(m.x, th + 0.006 * u, m.z), r0: r, r1: r, seg: 12, color: black)
+        b.cylinder(from: V3(m.x, th + 0.007 * u, m.z), to: V3(m.x, th + 0.019 * u, m.z), r0: r * 1.05, r1: r * 0.9, seg: 12, color: cAcc)
+        b.cylinder(from: V3(m.x, th + 0.019 * u, m.z), to: V3(m.x, th + 0.027 * u, m.z), r0: 0.003 * u, r1: 0.003 * u, seg: 6, color: alu)
+        let py = th + 0.023 * u
+        if ducted {
+            // propeller duct: a ring of short wall segments on struts
+            let rr = propD / 2 * 1.07, hgt = 0.02 * u
+            let nSeg = 20
+            for k in 0..<nSeg {
+                let a = (Float(k) + 0.5) / Float(nSeg) * 2 * .pi
+                b.box(center: V3(m.x + cos(a) * rr, py - hgt * 0.15, m.z + sin(a) * rr), size: V3(0.0025 * u, hgt, 2 * .pi * rr / Float(nSeg) * 1.05), color: cCan,
+                      rot: simd_quatf(angle: -a, axis: V3(0, 1, 0)))
+            }
+            for k in 0..<3 {
+                let a = Float(k) * 2.094 + 0.5
+                b.cylinder(from: V3(m.x, th, m.z), to: V3(m.x + cos(a) * rr, th, m.z + sin(a) * rr), r0: 0.0016 * u, r1: 0.0016 * u, seg: 4, color: cCan)
+            }
+        } else {
+            // landing pad under the motor, LED on the arm
+            b.box(center: V3(m.x, -th - 0.004 * u, m.z), size: V3(0.016 * u, 0.008 * u, 0.016 * u), color: rubber)
+            b.box(center: root + (tip - root) * 0.6 + V3(0, th + 0.001 * u, 0), size: V3(0.006 * u, 0.002 * u, 0.006 * u), color: front ? V4(1, 1, 1, 1) : V4(1, 0.12, 0.08, 1))
+        }
+        let pr = makePropeller(diameter: propD, blades: style == 2 ? 4 : 3, color: front ? gl(accent, 0.4) : V4(0.1, 0.1, 0.11, 0.4), tip: front ? gl(accent, 0.4) : V4(0.1, 0.1, 0.11, 0.4),
+                               pitch: 0.26, chordScale: 1.5)
+        var pb = MeshBuilder(); pb.append(pr.blades, toY)
+        var pd = MeshBuilder(); pd.append(pr.disc, toY)
+        parts.append(Part(mesh: pb, pivot: V3(m.x, py, m.z), axis: V3(0, 1, 0), anim: .spin(i), blur: 1))
+        parts.append(Part(mesh: pd, pivot: V3(m.x, py, m.z), axis: V3(0, 1, 0), anim: .spin(i), blur: 2))
     }
     parts.insert(Part(mesh: b), at: 0)
     return parts

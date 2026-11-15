@@ -576,7 +576,7 @@ func makeQuad(shell: V4 = rgb(0.95, 0.55, 0.05), front: V4 = rgb(0.9, 0.1, 0.1),
     return s
 }
 
-func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.1, 0.1, 0.12)) -> AircraftSpec {
+func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.1, 0.1, 0.12), blades: Int = 2, scale: Int = 0) -> AircraftSpec {
     let R: Float = 0.62
     var s = AircraftSpec(name: "Kestrel 550", kind: .helicopter, blurb: "Flybarless collective-pitch 3D helicopter", mass: 3.2,
                          inertia: V3(0.10, 0.09, 0.04), span: 2 * R)
@@ -588,10 +588,61 @@ func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.1, 0.1, 0.
     for p in [V3(R, 0.24, 0), V3(-R, 0.24, 0), V3(0, 0.24, R), V3(0, 0.24, -R)] { s.contacts.append(Contact(pos: p, crashSpeed: 0.8)) }
     s.contacts.append(Contact(pos: V3(0, -0.02, 1.0), crashSpeed: 2.5))
     s.contacts.append(Contact(pos: V3(0, -0.05, -0.38), crashSpeed: 2.5))
-    s.parts = buildHeliModel(rotorR: R, body: yel, accent: canopy)
+    s.parts = buildHeliModel(rotorR: R, body: yel, accent: canopy, blades: blades, scale: scale)
     s.eyeOffset = V3(0, -0.02, -0.42)
     s.smokePos = V3(0, 0, 0.3)
-    s.modes = []
+    s.modes = ["Stabilized", "Acro"]
+    return s
+}
+
+/// A helicopter of another size or type, derived from the 550-class reference machine. `k` is the scale of the rotor.
+func heliVariant(_ k: Float, _ name: String, _ blurb: String, mass: Float, body: V4, accent: V4, blades: Int = 2, scale: Int = 0,
+                 agility: Float = 1, rate: Float = 5, yaw: Float = 7, coll: Float = 11) -> AircraftSpec {
+    var s = rescale(makeHeli(body: body, canopy: accent, blades: blades, scale: scale), k)
+    s.name = name; s.blurb = blurb; s.category = "Helicopters"
+    let mr = mass / 3.2
+    s.mass = mass
+    s.inertia = V3(0.10, 0.09, 0.04) * (mr * k * k) * (scale > 0 ? 1.25 : 1)
+    s.cdA = 0.03 * k * k * (scale > 0 ? 1.5 : 1)
+    s.soundBase = 67 / k
+    s.heli!.collMax = coll * deg
+    s.heli!.maxMoment = 9 * mr * k * agility
+    s.heli!.tailMax = 3.5 * mr * k * agility
+    s.heli!.maxRate = rate; s.heli!.maxYaw = yaw
+    if blades > 2 { s.heli!.sigma = 0.058 * Float(blades) * 0.35 }
+    s.blades = blades
+    return s
+}
+
+/// Racing, freestyle and whoop quadcopters. `prop` is the propeller diameter in inches, `wheelbase` the distance
+/// between diagonally opposite motors, `thrust` the static thrust of one motor in newtons, `rate` the full-stick
+/// roll and pitch rate in acro in degrees per second.
+func makeFpv(_ name: String, _ blurb: String, mass: Float, prop: Float, wheelbase: Float, thrust: Float, style: Int, accent: V4, canopy: V4 = rgb(0.1, 0.1, 0.12),
+             rate: Float, yawRate: Float, pitchSpeed: Float, sound: Float, tough: Float = 1.5) -> AircraftSpec {
+    let a = wheelbase / 2 / sqrt(2), propD = prop * 0.0254, u = propD / 0.127
+    let motors = [V3(a, 0, -a), V3(-a, 0, -a), V3(-a, 0, a), V3(a, 0, a)]
+    let ducted = style == 2 || style == 3
+    let ixx = 0.62 * mass * a * a + 0.00002 * mass
+    var s = AircraftSpec(name: name, kind: .multirotor, blurb: blurb, mass: mass, inertia: V3(ixx, 1.75 * ixx, ixx), span: wheelbase + propD)
+    var m = MultiSpec(motors: motors, dirs: [1, -1, 1, -1], maxThrust: thrust)
+    m.kYaw = 0.016 * propD / 0.25
+    m.maxRate = 7; m.maxYaw = 4.5; m.maxAngle = ducted ? 0.7 : 0.95
+    m.acroRate = rate * deg; m.acroYaw = yawRate * deg; m.center = 0.22
+    m.tau = 0.018 + 0.09 * propD
+    m.pitchSpeed = pitchSpeed; m.propR = propD / 2
+    m.rotorDrag = ducted ? 0.2 : 0.09; m.ducted = ducted
+    m.gain = 36
+    s.multi = m
+    s.cdA = 1.3 * a * a * (ducted ? 2.2 : 1) + 0.0004 * u * u
+    s.modes = ["Self-level", "Acro"]
+    s.soundBase = sound
+    s.category = "Multirotors"
+    let low: Float = style == 2 ? -0.02 * u : (style == 3 ? -0.037 * u : -0.012 * u), high: Float = (style == 2 ? 0.035 : 0.075) * u
+    for mp in motors { s.contacts.append(Contact(pos: V3(mp.x, low, mp.z), crashSpeed: 4 * tough, mu: 0.6)) }
+    for mp in motors { s.contacts.append(Contact(pos: V3(mp.x * 1.35, 0.02 * u, mp.z * 1.35), crashSpeed: 3 * tough, mu: 0.6)) }
+    s.contacts.append(Contact(pos: V3(0, high, 0), crashSpeed: 2.5 * tough))
+    s.parts = buildFpvModel(motors: motors, propD: propD, style: style, accent: accent, canopy: canopy)
+    s.eyeOffset = V3(0, 0.02 * u, -a * 1.3)
     return s
 }
 
@@ -700,7 +751,10 @@ func calibrateRates(_ spec0: AircraftSpec) -> AircraftSpec {
     var spec = spec0
     guard spec.kind == .airplane, let target = rateTargets[spec.category] else { return spec }
     // long wings roll more slowly than the category norm, short ones faster
-    let sizeK = clampf(pow(1.4 / spec.span, 0.35), 0.75, 1.3)
+    var sizeK = clampf(pow(1.4 / spec.span, 0.35), 0.75, 1.3)
+    // and so do slender wings and aircraft with engines out on them; each model ends up with rates of its own
+    if spec.wingArea > 0 { sizeK *= clampf(pow(6 * spec.wingArea / (spec.span * spec.span), 0.3), 0.8, 1.15) }
+    if spec.props.count > 1 { sizeK *= 0.9 }
     for _ in 0..<2 {
         let m = measureRates(spec)
         let kr = clampf(target.roll * sizeK / max(m.roll, 1), 0.4, 2.2), kp = clampf(target.pitch / max(m.pitch, 1), 0.4, 2.2), ky = clampf(target.yaw / max(m.yaw, 1), 0.4, 2.2)
@@ -720,6 +774,28 @@ func calibrateRates(_ spec0: AircraftSpec) -> AircraftSpec {
                 spec.parts[i].anim = .hinge(ch, clampf(a * k, -55 * deg, 55 * deg))
             }
         }
+    }
+    return spec
+}
+
+/// Low rate and expo that make each aircraft comfortable on a first flight: the low rate is chosen so that full
+/// stick gives a roll rate a beginner on that kind of model can follow, and the livelier the model, the more expo.
+func defaultRates(_ spec0: AircraftSpec) -> AircraftSpec {
+    var spec = spec0
+    switch spec.kind {
+    case .airplane:
+        let calm: [String: (roll: Float, expo: Float)] = ["Trainers & Sport": (95, 0.2), "Scale Civil": (80, 0.2), "Gliders": (65, 0.15), "Warbirds": (115, 0.25), "Jets": (125, 0.3),
+                                                           "Wings": (125, 0.3), "Aerobatic": (160, 0.35), "Foam 3D": (160, 0.4)]
+        guard let c = calm[spec.category] else { return spec }
+        let size = clampf(pow(1.4 / spec.span, 0.35), 0.75, 1.3) * (spec.wingArea > 0 ? clampf(pow(6 * spec.wingArea / (spec.span * spec.span), 0.3), 0.8, 1.15) : 1) * (spec.props.count > 1 ? 0.9 : 1)
+        let full = (rateTargets[spec.category]?.roll ?? 150) * size          // the roll rate it was calibrated to
+        spec.lowRate = clampf(c.roll / max(full, 1), 0.4, 0.85); spec.expo = c.expo
+    case .multirotor:
+        let m = spec.multi!
+        let full = m.acroRate > 0 ? m.acroRate : m.maxRate * 1.6
+        spec.lowRate = clampf(380 * deg / full, 0.4, 0.85); spec.expo = 0.15         // the flight controller's own rate curve already softens the centre
+    case .helicopter:
+        spec.lowRate = clampf(3.0 / spec.heli!.maxRate, 0.45, 0.85); spec.expo = 0.25
     }
     return spec
 }
@@ -1296,6 +1372,62 @@ enum AircraftLibrary {
                 $0.margin = 0.07; $0.trimCL = 0.25; $0.ailThrow = 14; $0.elevThrow = 12; $0.tough = 2
                 $0.fuse = black; $0.wingTop = rgb(0.5, 0.95, 0.1); $0.wingBottom = black; $0.tail = rgb(0.9, 0.1, 0.5); $0.accent = rgb(0.9, 0.1, 0.5); $0.sound = 330 },
         ]
+        let moreWings: [PlaneGeom] = [
+            wing("Mini Combat Wing 800", "Eighty-centimetre EPP wing for mid-air combat: light, rubbery and back in the air seconds after a hit") {
+                $0.span = 0.8; $0.rootChord = 0.26; $0.tipChord = 0.16; $0.sweep = 0.24; $0.mass = 0.3; $0.thrust = 4.4; $0.pitchSpeed = 22; $0.propDia = 0.15
+                $0.fuseLen = 0.34; $0.noseZ = -0.14; $0.fuseW = 0.08; $0.fuseH = 0.065; $0.finH = 0.09; $0.finChord = 0.11; $0.thick = 0.1; $0.washout = 2
+                $0.margin = 0.09; $0.ailThrow = 16; $0.elevThrow = 15; $0.tough = 2.4
+                $0.fuse = black; $0.wingTop = rgb(0.95, 0.3, 0.6); $0.wingBottom = black; $0.tail = rgb(0.1, 0.8, 0.85); $0.accent = rgb(0.1, 0.8, 0.85); $0.sound = 280 },
+            wing("Slope Racer 60", "Moulded sixty-inch racing wing: heavy, slippery and very fast along a ridge; needs speed to stay tidy") {
+                $0.span = 1.52; $0.rootChord = 0.27; $0.tipChord = 0.15; $0.sweep = 0.3; $0.mass = 1.35; $0.thrust = 9; $0.pitchSpeed = 34; $0.propDia = 0.2
+                $0.build = .composite; $0.thick = 0.085; $0.washout = 1.5; $0.margin = 0.09; $0.trimCL = 0.3; $0.ailThrow = 13; $0.elevThrow = 11; $0.tough = 1; $0.cdA = 0.003
+                $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.85, 0.08, 0.08); $0.tail = rgb(0.1, 0.1, 0.12); $0.accent = rgb(0.85, 0.08, 0.08); $0.sound = 200 },
+            wing("Thermal Wing 2.4", "Large, lightly loaded soaring wing: circles in weak lift and glides a very long way on a small motor") {
+                $0.span = 2.4; $0.rootChord = 0.3; $0.tipChord = 0.16; $0.sweep = 0.4; $0.mass = 1.05; $0.thrust = 6; $0.pitchSpeed = 16; $0.propDia = 0.28
+                $0.fuseLen = 0.6; $0.noseZ = -0.27; $0.washout = 3.5; $0.thick = 0.1; $0.margin = 0.11; $0.trimCL = 0.5; $0.endurance = 600; $0.airfoil = .reflex
+                $0.ailThrow = 12; $0.elevThrow = 11; $0.tough = 1.2
+                $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.1, 0.45, 0.2); $0.tail = rgb(0.95, 0.75, 0.05); $0.accent = rgb(0.95, 0.75, 0.05); $0.sound = 130 },
+            wing("Northrop B-2 Spirit", "Stealth bomber as a ducted-fan flying wing: no fin, a saw-tooth trailing edge and a long, flat approach") {
+                $0.span = 1.6; $0.rootChord = 0.5; $0.tipChord = 0.14; $0.sweep = 0.5; $0.mass = 2.1; $0.thrust = 20; $0.pitchSpeed = 52
+                $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.noFin = true; $0.handLaunch = false; $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.22; $0.wheelR = 0.026
+                $0.retracts = true; $0.fuseLen = 0.6; $0.noseZ = -0.3; $0.fuseW = 0.16; $0.fuseH = 0.09; $0.canopyLen = 0.12; $0.washout = 5; $0.thick = 0.11
+                $0.margin = 0.12; $0.trimCL = 0.3; $0.ailThrow = 12; $0.elevThrow = 13; $0.tough = 1; $0.airfoil = .reflex
+                $0.fuse = rgb(0.2, 0.22, 0.25); $0.wingTop = rgb(0.2, 0.22, 0.25); $0.accent = rgb(0.13, 0.14, 0.16); $0.wingBottom = rgb(0.24, 0.26, 0.29); $0.tail = rgb(0.2, 0.22, 0.25); $0.sound = 420 },
+            wing("Avro Vulcan", "Cold War delta bomber: a vast triangular wing that floats at alarming nose-up angles and howls on the way past") {
+                $0.span = 1.3; $0.rootChord = 0.78; $0.tipChord = 0.1; $0.sweep = 0.68; $0.mass = 2.3; $0.thrust = 24; $0.pitchSpeed = 55
+                $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.24; $0.finChord = 0.3; $0.finZ = 0.5; $0.handLaunch = false
+                $0.gear = .tricycle; $0.gearH = 0.13; $0.track = 0.2; $0.wheelR = 0.028; $0.retracts = true
+                $0.fuseLen = 1.15; $0.noseZ = -0.6; $0.fuseW = 0.12; $0.fuseH = 0.12; $0.canopyLen = 0.05; $0.airfoil = .delta; $0.thick = 0.08
+                $0.margin = 0.14; $0.trimCL = 0.25; $0.ailStart = 0; $0.ailFrac = 0.16; $0.ailThrow = 16; $0.elevThrow = 16; $0.tough = 1; $0.scheme = 7
+                $0.fuse = rgb(0.3, 0.33, 0.35); $0.wingTop = rgb(0.3, 0.33, 0.35); $0.accent = rgb(0.22, 0.28, 0.16); $0.wingBottom = rgb(0.85, 0.85, 0.83); $0.tail = rgb(0.3, 0.33, 0.35); $0.sound = 400 },
+            wing("Dassault Mirage III", "Tailless delta fighter: a needle fuselage on a sharp triangle; quick, clean, and fast on the approach") {
+                $0.span = 0.82; $0.rootChord = 0.62; $0.tipChord = 0.05; $0.sweep = 0.56; $0.mass = 1.25; $0.thrust = 17; $0.pitchSpeed = 62
+                $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.2; $0.finChord = 0.26; $0.finZ = 0.42; $0.handLaunch = false
+                $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.12; $0.wheelR = 0.024; $0.retracts = true
+                $0.fuseLen = 1.25; $0.noseZ = -0.75; $0.fuseW = 0.1; $0.fuseH = 0.11; $0.canopyLen = 0.1; $0.airfoil = .delta; $0.thick = 0.05
+                $0.margin = 0.14; $0.trimCL = 0.22; $0.ailStart = 0; $0.ailFrac = 0.16; $0.ailThrow = 16; $0.elevThrow = 15; $0.tough = 1; $0.scheme = 4
+                $0.fuse = metal; $0.wingTop = metal; $0.wingBottom = metal; $0.tail = rgb(0.1, 0.2, 0.55); $0.accent = rgb(0.85, 0.08, 0.08); $0.sound = 430 },
+            wing("Messerschmitt Me 163 Komet", "Tailless rocket interceptor of 1944: a fat little fuselage on swept wooden wings, landed on its belly") {
+                $0.span = 1.0; $0.rootChord = 0.34; $0.tipChord = 0.13; $0.sweep = 0.3; $0.mass = 1.1; $0.thrust = 15; $0.pitchSpeed = 50
+                $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.2; $0.finChord = 0.24; $0.finZ = 0.3
+                $0.fuseLen = 0.62; $0.noseZ = -0.3; $0.fuseW = 0.15; $0.fuseH = 0.17; $0.fuseExp = 2; $0.canopyLen = 0.16; $0.thick = 0.11; $0.washout = 4
+                $0.margin = 0.1; $0.trimCL = 0.3; $0.ailThrow = 14; $0.elevThrow = 13; $0.tough = 1.2
+                $0.fuse = rgb(0.75, 0.1, 0.08); $0.wingTop = rgb(0.75, 0.1, 0.08); $0.wingBottom = rgb(0.75, 0.1, 0.08); $0.tail = rgb(0.75, 0.1, 0.08); $0.accent = rgb(0.9, 0.9, 0.88); $0.sound = 400 },
+            wing("Twin Trekker 1.3", "Twin-motor cruising wing: two small tractor propellers, no torque roll on launch and hours of range") {
+                $0.span = 1.3; $0.rootChord = 0.3; $0.tipChord = 0.17; $0.sweep = 0.3; $0.mass = 1.1; $0.thrust = 12; $0.pitchSpeed = 24; $0.propDia = 0.18
+                $0.pusher = false; $0.twin = 0.2; $0.fuseLen = 0.55; $0.noseZ = -0.26; $0.fuseW = 0.13; $0.fuseH = 0.1; $0.washout = 2.5; $0.thick = 0.11
+                $0.margin = 0.1; $0.ailThrow = 13; $0.elevThrow = 12; $0.endurance = 520; $0.tough = 1.4
+                $0.fuse = rgb(0.3, 0.32, 0.35); $0.wingTop = rgb(0.3, 0.32, 0.35); $0.wingBottom = orange; $0.tail = orange; $0.accent = orange; $0.sound = 190 },
+            wing("Micro Delta 420", "Sixty-gram paper-dart delta for the park: surprisingly quick and almost impossible to hurt") {
+                $0.span = 0.42; $0.rootChord = 0.3; $0.tipChord = 0.04; $0.sweep = 0.27; $0.mass = 0.06; $0.thrust = 1.1; $0.pitchSpeed = 14; $0.propDia = 0.09
+                $0.winglets = false; $0.finH = 0.07; $0.finChord = 0.1; $0.finZ = 0.12; $0.fuseLen = 0.3; $0.noseZ = -0.14; $0.fuseW = 0.04; $0.fuseH = 0.04
+                $0.airfoil = .delta; $0.thick = 0.04; $0.margin = 0.13; $0.trimCL = 0.25; $0.ailStart = 0; $0.ailFrac = 0.2; $0.ailThrow = 18; $0.elevThrow = 18; $0.tough = 3
+                $0.fuse = yellow; $0.wingTop = yellow; $0.wingBottom = rgb(0.1, 0.2, 0.6); $0.tail = rgb(0.85, 0.08, 0.08); $0.accent = rgb(0.85, 0.08, 0.08); $0.sound = 400 },
+            wing("Speed Arrow 900", "Sharply swept composite arrow built for one thing: flat-out passes at well over a hundred and fifty kilometres an hour") {
+                $0.span = 0.9; $0.rootChord = 0.36; $0.tipChord = 0.1; $0.sweep = 0.42; $0.mass = 0.78; $0.thrust = 16; $0.pitchSpeed = 52; $0.propDia = 0.15
+                $0.build = .composite; $0.thick = 0.075; $0.washout = 1; $0.margin = 0.08; $0.trimCL = 0.2; $0.ailThrow = 12; $0.elevThrow = 10; $0.tough = 1; $0.cdA = 0.0025
+                $0.fuse = rgb(0.1, 0.1, 0.12); $0.wingTop = rgb(0.1, 0.1, 0.12); $0.wingBottom = rgb(0.95, 0.75, 0.05); $0.tail = rgb(0.95, 0.75, 0.05); $0.accent = rgb(0.95, 0.75, 0.05); $0.sound = 340 },
+        ]
 
         var trainerHeli = rescale(makeHeli(body: rgb(0.95, 0.95, 0.95), canopy: rgb(0.85, 0.1, 0.1)), 0.6)
         trainerHeli.name = "Sparrow 450"; trainerHeli.blurb = "Small, docile helicopter for learning to hover"
@@ -1311,13 +1443,65 @@ enum AircraftLibrary {
         var racerQuad = rescale(makeQuad(shell: rgb(0.55, 0.9, 0.1), front: rgb(0.6, 0.15, 0.8), rear: rgb(0.2, 0.2, 0.22)), 0.5)
         racerQuad.name = "Wasp Racing Quad"; racerQuad.blurb = "5-inch racing quad: brutal power, best flown in acro"
         racerQuad.mass = 0.6; racerQuad.inertia = V3(0.0016, 0.0028, 0.0016); racerQuad.cdA = 0.008; racerQuad.soundBase = 380
-        racerQuad.multi!.maxThrust = 6.5; racerQuad.multi!.kYaw = 0.008; racerQuad.multi!.maxRate = 9; racerQuad.multi!.maxYaw = 6; racerQuad.multi!.maxAngle = 0.95; racerQuad.category = "Multirotors"
+        racerQuad.multi!.maxThrust = 9.5; racerQuad.multi!.acroRate = 800 * deg; racerQuad.multi!.acroYaw = 600 * deg; racerQuad.multi!.pitchSpeed = 40; racerQuad.multi!.propR = 0.0635; racerQuad.multi!.center = 0.22; racerQuad.multi!.kYaw = 0.008; racerQuad.multi!.maxRate = 9; racerQuad.multi!.maxYaw = 6; racerQuad.multi!.maxAngle = 0.95; racerQuad.category = "Multirotors"
 
+        // ---- more rotorcraft
+        let lime = rgb(0.55, 0.9, 0.1), cyan = rgb(0.1, 0.8, 0.85), pink = rgb(0.95, 0.25, 0.6), purple = rgb(0.5, 0.2, 0.75)
+        var gnat = heliVariant(0.29, "Gnat 150", "Palm-sized collective-pitch helicopter: darts about like an insect and bounces off the furniture",
+                               mass: 0.075, body: lime, accent: black, agility: 1.3, rate: 5.5, yaw: 8, coll: 10)
+        gnat.contacts = gnat.contacts.map { var c = $0; c.crashSpeed *= 2.2; return c }
+        var swift380 = heliVariant(0.52, "Swift 380", "Light 380-class sport helicopter: lively, cheap to crash, a good first collective-pitch machine",
+                                   mass: 0.62, body: white, accent: blue, rate: 4.2, yaw: 6)
+        let talon = heliVariant(0.8, "Talon 500", "500-class all-rounder: steady in a breeze and happy with loops, rolls and gentle 3D",
+                                mass: 1.9, body: red, accent: white, rate: 4.8, yaw: 7)
+        let fury = heliVariant(1.08, "Fury 600 3D", "600-class competition machine set up hot: fast flips, hard pitch pumps and no patience for sloppy thumbs",
+                               mass: 3.9, body: orange, accent: black, agility: 1.5, rate: 7, yaw: 10, coll: 13)
+        var raven = heliVariant(1.38, "Raven 770 Speed", "Low-drag 770-class speed helicopter: a huge rotor at high head speed that crosses the field in seconds",
+                                mass: 6.4, body: black, accent: lime, agility: 1.1, rate: 4.6, yaw: 7, coll: 13)
+        raven.cdA *= 0.55
+        var jetRanger = heliVariant(1.1, "Bell 206 JetRanger", "Scale turbine helicopter with a two-blade rotor: smooth, stately and best flown like the real thing",
+                                    mass: 4.6, body: white, accent: blue, scale: 1, agility: 0.7, rate: 2.6, yaw: 4, coll: 10)
+        var md500 = heliVariant(1.0, "MD 500E", "Egg-shaped scale light helicopter with a five-blade rotor: nimble for a scale machine and quick on the pedals",
+                                mass: 3.6, body: navy, accent: yellow, blades: 5, scale: 2, agility: 0.85, rate: 3.2, yaw: 5.5, coll: 10)
+        var hexa: AircraftSpec = {
+            let r: Float = 0.2
+            let motors = (0..<6).map { k -> V3 in let a = (Float(k) + 0.5) / 6 * 2 * Float.pi; return V3(r * sin(a), 0.03, -r * cos(a)) }
+            var s = AircraftSpec(name: "Hexa 680 Lifter", kind: .multirotor, blurb: "Six-rotor camera platform: heavy, unhurried and rock steady, with power in hand if a motor is working hard",
+                                 mass: 3.9, inertia: V3(0.014, 0.026, 0.014), span: 0.6)
+            s.multi = MultiSpec(motors: motors, dirs: [1, -1, 1, -1, 1, -1], maxThrust: 13.5)
+            s.cdA = 0.024; s.modes = ["Self-level", "Acro"]; s.soundBase = 210
+            for m in motors { s.contacts.append(Contact(pos: V3(m.x * 0.8, -0.09, m.z * 0.8), crashSpeed: 4, mu: 0.6)) }
+            for m in motors { s.contacts.append(Contact(pos: V3(m.x * 1.5, 0.06, m.z * 1.5), crashSpeed: 3, mu: 0.6)) }
+            s.contacts.append(Contact(pos: V3(0, 0.09, 0), crashSpeed: 2.5))
+            s.parts = buildQuadModel(motors: motors, shell: rgb(0.2, 0.22, 0.25), front: orange, rear: rgb(0.2, 0.22, 0.25))
+            s.eyeOffset = V3(0, 0.02, -0.14)
+            return s
+        }()
+        hexa = rescale(hexa, 1.7)
+        hexa.inertia = V3(0.16, 0.29, 0.16); hexa.cdA = 0.07; hexa.soundBase = 130; hexa.category = "Multirotors"
+        hexa.multi!.maxRate = 3.2; hexa.multi!.maxYaw = 2.2; hexa.multi!.maxAngle = 0.5; hexa.multi!.acroRate = 260 * deg; hexa.multi!.acroYaw = 160 * deg
+        hexa.multi!.tau = 0.07; hexa.multi!.pitchSpeed = 20; hexa.multi!.propR = 0.2; hexa.multi!.kYaw = 0.03; hexa.multi!.gain = 22
+        let rotorcraft: [AircraftSpec] = [gnat, swift380, talon, fury, raven, jetRanger, md500,
+            makeFpv("Apex 5 Racer", "Five-inch racing quad stripped to the bone: twelve times its weight in thrust, and rates to match", mass: 0.42, prop: 5, wheelbase: 0.21, thrust: 12.5,
+                    style: 0, accent: lime, rate: 900, yawRate: 650, pitchSpeed: 44, sound: 360),
+            makeFpv("Freestyle 5 HD", "Five-inch freestyle quad carrying an action camera: heavier and smoother, built for flips, dives and power loops", mass: 0.72, prop: 5, wheelbase: 0.225,
+                    thrust: 14.5, style: 1, accent: orange, rate: 760, yawRate: 560, pitchSpeed: 40, sound: 330),
+            makeFpv("Tiny Whoop 65", "Twenty-five-gram ducted micro for the living room: slow, floaty and almost unbreakable", mass: 0.025, prop: 1.22, wheelbase: 0.065, thrust: 0.2,
+                    style: 2, accent: pink, canopy: cyan, rate: 620, yawRate: 520, pitchSpeed: 9, sound: 720, tough: 4),
+            makeFpv("Whoop 75 Brushless", "Seventy-five-millimetre brushless whoop: enough punch for the garden as well as the house", mass: 0.043, prop: 1.6, wheelbase: 0.075, thrust: 0.5,
+                    style: 2, accent: yellow, canopy: purple, rate: 700, yawRate: 560, pitchSpeed: 13, sound: 640, tough: 4),
+            makeFpv("Cinewhoop 3", "Three-inch ducted camera quad: steady, forgiving and safe to fly close to things", mass: 0.39, prop: 3, wheelbase: 0.145, thrust: 4.4,
+                    style: 3, accent: blue, canopy: rgb(0.3, 0.32, 0.35), rate: 480, yawRate: 380, pitchSpeed: 24, sound: 430, tough: 2.5),
+            makeFpv("Toothpick 3", "Featherweight three-inch quad on a skeleton frame: quiet, quick and gentle on batteries", mass: 0.095, prop: 3, wheelbase: 0.13, thrust: 2.4,
+                    style: 0, accent: cyan, rate: 800, yawRate: 600, pitchSpeed: 30, sound: 470, tough: 2),
+            makeFpv("Long Range 7", "Seven-inch cruiser with GPS and a big battery: efficient, stable and made for surfing mountainsides", mass: 1.15, prop: 7, wheelbase: 0.3, thrust: 15.5,
+                    style: 4, accent: rgb(0.45, 0.5, 0.3), rate: 520, yawRate: 400, pitchSpeed: 36, sound: 250),
+            hexa]
         var heli = makeHeli(); heli.category = "Helicopters"
         var quad = makeQuad(); quad.category = "Multirotors"
         let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane) + more2.map(makeAirplane)
-        return everything.map { calibrateRates(trimForCruise($0)) }
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane) + more2.map(makeAirplane) + rotorcraft + moreWings.map(makeAirplane)
+        return everything.map { defaultRates(calibrateRates(trimForCruise($0))) }
     }()
 }

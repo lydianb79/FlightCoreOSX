@@ -752,7 +752,7 @@ struct HelpView: View {
     private let groups: [(String, [(String, String)])] = [
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
                     ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("Space", "Reset aircraft")]),
-        ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"),
+        ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Helicopter rotor speed: low, normal, high"),
                       ("F", "Quadcopter flight mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),
                                  ("T", "Slow motion"), (",  .", "Less / more wind"), ("N", "Next flying site"), ("B", "Balloon Burst challenge"),

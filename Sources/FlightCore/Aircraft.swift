@@ -14,6 +14,7 @@ struct Controls {
     var mode: Int = 0
     var flaps: Float = 0        // 0...1
     var gearUp = false
+    var rotorSpeed = 2          // helicopters: head speed setting, 0 low, 1 normal, 2 high
     var hold = false            // helicopter throttle hold (engine disengaged)
     var brake: Float = 0        // wheel brakes 0...1
 }
@@ -76,6 +77,23 @@ struct MultiSpec {
     var maxRate: Float = 6.5
     var maxYaw: Float = 4.0
     var maxAngle: Float = 0.7
+    // acro
+    var acroRate: Float = 0         // roll and pitch rate at full stick in acro (rad/s); 0 = 1.6 x maxRate
+    var acroYaw: Float = 0          // yaw rate at full stick in acro (rad/s); 0 = 1.5 x maxYaw
+    var center: Float = 0.3         // stick sensitivity around the centre, as a fraction of the full rate
+    var idle: Float = 0.07          // motor speed at zero throttle while flying, as a fraction of full speed
+    var tau: Float = 0.03           // motor and propeller spin-up time (s)
+    var pitchSpeed: Float = 24      // air speed through the propellers at which they stop pulling (m/s at full speed)
+    var propR: Float = 0.12         // propeller radius (m)
+    var rotorDrag: Float = 0.1      // sideways drag of the spinning propellers
+    var gain: Float = 30            // how hard the flight controller chases the commanded rate (1/s)
+    var ducted = false              // propellers in ducts: more drag, less propwash wobble
+}
+
+/// Stick-to-rate curve of a flight controller: gentle round the centre, steep toward the ends.
+func rateCurve(_ x: Float, center: Float, full: Float) -> Float {
+    let a = abs(x)
+    return x * full * (center + (1 - center) * a * a * a)
 }
 
 struct HeliSpec {
@@ -98,17 +116,23 @@ extension AircraftSpec {
         case .helicopter: return 4
         }
     }
+    /// Throttle stick position at which a multirotor hovers.
+    var hoverThrottle: Float {
+        guard let m = multi else { return 0.5 }
+        let speed = sqrt(mass * gravity / (Float(m.motors.count) * m.maxThrust))
+        return clampf((speed - m.idle) / (1 - m.idle), 0, 1)
+    }
     /// 1 (easy) to 5 (expert)
     var difficulty: Int {
         switch category {
         case "Trainers & Sport": return name.contains("Racer") ? 3 : 1
         case "Scale Civil": return 2
         case "Gliders": return 2
-        case "Wings": return name.contains("Ho 229") || name.contains("Race") ? 4 : (name.contains("Delta") ? 3 : 2)
+        case "Wings": return ["Ho 229", "Race", "B-2", "Mirage", "Vulcan", "Speed", "Komet"].contains { name.contains($0) } ? 4 : (name.contains("Delta") || name.contains("Slope") ? 3 : 2)
         case "Aerobatic", "Foam 3D": return 3
         case "Warbirds", "Jets": return 4
-        case "Helicopters": return name.contains("Sparrow") ? 4 : 5
-        case "Multirotors": return name.contains("Racing") ? 4 : 2
+        case "Helicopters": return (heli?.maxRate ?? 5) < 4.5 ? 4 : 5
+        case "Multirotors": return thrustToWeight > 6 ? 4 : (thrustToWeight > 4 ? 3 : 2)
         default: return 3
         }
     }
@@ -169,6 +193,9 @@ struct AircraftSpec {
     var smokePos = V3(0, 0, 0.2)
     var parts: [Part] = []
     var modes: [String] = []
+    var defaultMode = 0             // flight mode selected when the aircraft is chosen
+    var lowRate: Float = 0.6        // control throw on low rates that suits this aircraft
+    var expo: Float = 0.3           // stick expo that suits this aircraft
     var soundBase: Float = 120   // blade-pass frequency (Hz) at full power
     var engineSound = 0          // 0 electric, 1 piston, 2 ducted fan, 3 turboprop
     var cylinders = 4
@@ -206,6 +233,7 @@ final class Aircraft {
     private var wingStallNow: Float = 0     // stalled fraction of the wing, from the previous step
     private var groundPhi: Float = 1   // 1 in free air, falling toward 0 as the wing nears the ground
     private var buffet: Float = 0
+    private var tqPrev = V3.zero            // multirotor: last torque demand, for the controller's lead term
     var vortexRing: Float = 0       // helicopter: 0...1 how deep in vortex ring state
     private var motorLoad: Float = 0
     /// Fraction of the main wing that is stalled (for the display and tests).
@@ -423,10 +451,16 @@ final class Aircraft {
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:
+            // Motors are commanded in speed, thrust goes with speed squared: hover sits around a third of the stick
+            // on a powerful machine, not a tenth. `levels` holds each motor's speed, 1 = full.
             let m = spec.multi!
             let n = m.motors.count
-            for i in 0..<n { want[i] = 0 }
-            if thr > 0.03 {
+            // sitting on the ground with the throttle closed the motors are stopped; anywhere else they idle and the
+            // controller keeps full authority, so a flip or a dive with the stick at zero stays under control
+            let flying = thr > 0.03 || !onGround
+            let load = levels.reduce(0, +) / Float(n)
+            let sag = 1 - 0.1 * load * load                          // battery voltage drops under load
+            if flying && !crashed {
                 var wd: V3
                 if c.mode == 0 {
                     var fh = R * V3(0, 0, -1); fh.y = 0
@@ -436,30 +470,67 @@ final class Aircraft {
                     let eb = Rt * cross(R * V3(0, 1, 0), t)
                     wd = V3(clampf(eb.x * 9, -m.maxRate, m.maxRate), -c.rudder * m.maxYaw, clampf(eb.z * 9, -m.maxRate, m.maxRate))
                 } else {
-                    wd = V3(c.elevator * m.maxRate * 1.6, -c.rudder * m.maxYaw * 1.5, -c.aileron * m.maxRate * 1.6)
+                    let full = m.acroRate > 0 ? m.acroRate : m.maxRate * 1.6, fullYaw = m.acroYaw > 0 ? m.acroYaw : m.maxYaw * 1.5
+                    wd = V3(rateCurve(c.elevator, center: m.center, full: full), -rateCurve(c.rudder, center: m.center, full: fullYaw),
+                            -rateCurve(c.aileron, center: m.center, full: full))
                 }
-                let tq = spec.inertia * ((wd - omega) * V3(30, 12, 30))
+                var tq = spec.inertia * ((wd - omega) * V3(m.gain, 0.4 * m.gain, m.gain))
+                // the controller leads its demand by the motors' spin-up time, so the rate settles without overshoot
+                let lead = (tq - tqPrev) * (m.tau / dt)
+                tqPrev = tq
+                let cap = simd_abs(tq) * 2.5 + spec.inertia * 2
+                tq += simd_clamp(lead, -cap, cap)
                 var sx: Float = 0, sz: Float = 0
                 for p in m.motors { sx += p.x * p.x; sz += p.z * p.z }
-                let base = thr * m.maxThrust
+                let cmd = m.idle + (1 - m.idle) * thr
+                var base = cmd * cmd * m.maxThrust
+                var lo: Float = 0, hi: Float = 0
                 for i in 0..<n {
                     let p = m.motors[i]
-                    let yaw = clampf(tq.y * m.dirs[i] / (Float(n) * m.kYaw), -0.25 * m.maxThrust, 0.25 * m.maxThrust)
-                    want[i] = clampf(base - tq.x * p.z / sz + tq.z * p.x / sx + yaw, 0.03 * m.maxThrust, m.maxThrust)
+                    let yaw = clampf(tq.y * m.dirs[i] / (Float(n) * m.kYaw), -0.2 * m.maxThrust, 0.2 * m.maxThrust)
+                    want[i] = -tq.x * p.z / sz + tq.z * p.x / sx + yaw
+                    lo = min(lo, want[i]); hi = max(hi, want[i])
                 }
+                // Mixing with priority for attitude: if the corrections do not fit between idle and full power,
+                // shrink them to fit, then move the collective thrust so that none is cut off
+                let tMin = m.idle * m.idle * m.maxThrust, tMax = m.maxThrust
+                let k = min(1, (tMax - tMin) / max(hi - lo, 1e-6))
+                base = clampf(base, tMin - lo * k, tMax - hi * k)
+                for i in 0..<n { want[i] = sqrt(clampf(base + want[i] * k, tMin, tMax) / m.maxThrust) }
+            } else {
+                for i in 0..<n { want[i] = 0 }
             }
-            let inflow = clampf(1 - va.y / 28, 0.3, 1.3)
+            // Vortex ring / propwash: sinking back through its own downwash at low sideways speed the machine
+            // loses lift and wobbles; flying out sideways or powering through cures it
+            let disc = Float.pi * m.propR * m.propR * Float(n)
+            let vHover = sqrt(spec.mass * gravity / (2 * rho * disc))
+            let vin = sqrt(va.x * va.x + va.z * va.z)
+            let wash = smoothstep(0.35 * vHover, 0.8 * vHover, -va.y) * (1 - smoothstep(1.4 * vHover, 2.2 * vHover, -va.y)) * (1 - smoothstep(0.5 * vHover, 1.3 * vHover, vin)) * min(1, load * 3)
+            vortexRing += (wash - vortexRing) * min(1, dt / 0.15)
+            buffet += dt
+            let agl = pos.y - terrain.height(pos.x, pos.z)
+            let span = spec.span
+            let cushion: Float = agl < span ? 1 + 0.12 * (1 - max(agl, 0) / span) * max(R.columns.1.y, 0) : 1      // ground effect
             var sum: Float = 0
             for i in 0..<n {
-                levels[i] += (want[i] / m.maxThrust - levels[i]) * min(1, dt / 0.03)
-                let T = levels[i] * m.maxThrust * inflow
+                let w = min(want[i], sag)
+                levels[i] += (w - levels[i]) * min(1, dt / (w > levels[i] ? m.tau : m.tau * 1.5))
+                // a propeller pulls less the faster the air already moves through it, and more when it is pushed
+                // against the air; the same effect resists rotation
+                let through = va.y + cross(omega, m.motors[i]).y
+                let inflow = clampf(1 - through / (m.pitchSpeed * max(levels[i], 0.25)), 0.15, 1.4)
+                let shake = sin(buffet * (31 + 7 * Float(i)) + Float(i) * 1.7) * 0.6 + sin(buffet * (53 + 5 * Float(i)) + Float(i)) * 0.4
+                let T = levels[i] * levels[i] * m.maxThrust * inflow * cushion * (1 - vortexRing * (0.13 + (m.ducted ? 0.04 : 0.1) * shake))
                 fb.y += T
                 tb += cross(m.motors[i], V3(0, T, 0))
                 tb.y += m.dirs[i] * m.kYaw * T
                 sum += levels[i]
-                spin[i] += (levels[i] > 0.01 ? 14 + 50 * sqrt(levels[i]) : 0) * m.dirs[i] * dt
+                spin[i] += (levels[i] > 0.01 ? 14 + 50 * levels[i] : 0) * m.dirs[i] * dt
             }
-            fb -= va * (0.5 * rho * spec.cdA * airspeed + 0.1 * sum)
+            // the flat frame and the propeller discs drag far more when moved face-on than edge-on
+            let q = 0.5 * rho * spec.cdA * airspeed
+            fb -= V3(va.x, 2.6 * va.y, va.z) * q
+            fb -= V3(va.x, 0, va.z) * (m.rotorDrag * sum * spec.mass / 1.2)
 
         case .helicopter:
             // Rotor speed is a real state: the governed engine drives it, aerodynamic torque loads it,
@@ -470,17 +541,23 @@ final class Aircraft {
             let om = om0 * lv
             let tip = max(om * h.rotorR, 1)
             let A = Float.pi * h.rotorR * h.rotorR
+            // The throttle stick is collective pitch, symmetric about its centre, in both flight modes; the rotor is
+            // held at a set speed by the governor, chosen with a three-position switch. Mode 0, Stabilized: the cyclic
+            // stick commands a lean angle and the machine levels itself when it is released. Mode 1, Acro: the cyclic
+            // commands a rate of rotation and the attitude stays where it is put.
             let theta = (2 * thr - 1) * h.collMax
+            let headSpeed: Float = [0.8, 0.9, 1.0][min(max(c.rotorSpeed, 0), 2)]
             let vc = va.y
             let vin = sqrt(va.x * va.x + va.z * va.z)
             let lam = (vc + vi) / tip
             var T = 0.5 * rho * 5.7 * h.sigma * A * tip * tip * (theta / 3 - lam / 2)
             let agl = pos.y - terrain.height(pos.x, pos.z)
-            if agl < h.rotorR * 1.5 { T *= 1 + 0.12 * (1 - max(agl, 0) / (h.rotorR * 1.5)) }
+            let side: Float = theta >= 0 ? 1 : -1                // which way the rotor is blowing: -1 when flown inverted on negative pitch
+            if agl < h.rotorR * 1.5 { T *= 1 + 0.12 * (1 - max(agl, 0) / (h.rotorR * 1.5)) * max(R.columns.1.y * side, 0) }
             // Vortex ring state: descending into its own downwash at low airspeed, the rotor loses lift and
             // shakes. More collective makes it worse; flying forward out of the column cures it.
             let vHover = sqrt(spec.mass * gravity / (2 * rho * A))
-            let vrs = smoothstep(0.45 * vHover, 0.8 * vHover, -vc) * (1 - smoothstep(1.5 * vHover, 2.1 * vHover, -vc)) * (1 - smoothstep(0.5 * vHover, 1.1 * vHover, vin)) * lv
+            let vrs = smoothstep(0.45 * vHover, 0.8 * vHover, -vc * side) * (1 - smoothstep(1.5 * vHover, 2.1 * vHover, -vc * side)) * (1 - smoothstep(0.5 * vHover, 1.1 * vHover, vin)) * lv
             vortexRing += (vrs - vortexRing) * min(1, dt / 0.3)
             buffet += dt
             let shake = sin(buffet * 17) * 0.5 + sin(buffet * 29 + 1) * 0.3 + sin(buffet * 43 + 2) * 0.2
@@ -491,7 +568,8 @@ final class Aircraft {
             T *= 1 - 0.3 * rbs
             let viT = T / (2 * rho * A * max(sqrt(vin * vin + (vc + vi) * (vc + vi)), 1.5))
             vi += (viT - vi) * min(1, dt / 0.08)
-            let f = V3(-0.25 * va.x, T, -0.25 * va.z)
+            let hForce = 0.25 * spec.mass / 3.2 * lv                // in-plane drag of the turning rotor
+            let f = V3(-hForce * va.x, T, -hForce * va.z)
             fb += f; tb += cross(h.hub, f)
             // Blade flapping: the disc tilts away from the oncoming air, so the nose rises with forward speed
             // and the machine rolls away from a sideways slide. The flight controller has to hold against it.
@@ -501,18 +579,30 @@ final class Aircraft {
             tb.y -= 0.002 * spec.mass * va.x * max(airspeed, 1)                  // fin weathervanes into the airflow
             let pScale = spec.mass / 3.2
             let qMax = 600 * pScale / om0
-            let qEng: Float = (crashed || c.hold) ? 0 : clampf(40 * (1 - lv), 0, 1) * qMax
+            let qEng: Float = (crashed || c.hold) ? 0 : clampf(40 * (headSpeed - lv), 0, 1) * qMax
             let qAero = (T * (vc + vi) + 70 * pScale * lv * lv * lv) / max(om, 20)
             let iRot = 0.04 * spec.mass * h.rotorR * h.rotorR
             levels[0] = clampf(lv + (qEng - qAero - (crashed ? qMax : 0)) / iRot / om0 * dt, 0, 1.3)
             tb.y += qEng                       // only engine torque is reacted by the airframe
             if !crashed {
                 let auth = min(lv * lv, 1.2)
-                let ex = c.elevator * h.maxRate - omega.x
-                let ez = -c.aileron * h.maxRate - omega.z
+                var wx: Float, wz: Float
+                if c.mode == 0 {
+                    var fh = R * V3(0, 0, -1); fh.y = 0
+                    fh = length(fh) > 0.15 ? normalize(fh) : V3(0, 0, -1)
+                    let hr = cross(fh, V3(0, 1, 0))
+                    let t = normalize(V3(0, 1, 0) - fh * tan(c.elevator * 0.75) + hr * tan(c.aileron * 0.75))
+                    let eb = Rt * cross(R * V3(0, 1, 0), t)
+                    wx = clampf(eb.x * 7, -0.6 * h.maxRate, 0.6 * h.maxRate); wz = clampf(eb.z * 7, -0.6 * h.maxRate, 0.6 * h.maxRate)
+                } else {
+                    let full = h.maxRate
+                    wx = rateCurve(c.elevator, center: 0.45, full: full); wz = -rateCurve(c.aileron, center: 0.45, full: full)
+                }
+                let ex = wx - omega.x
+                let ez = wz - omega.z
                 tb.x += clampf(spec.inertia.x * 40 * ex, -h.maxMoment * auth, h.maxMoment * auth)
                 tb.z += clampf(spec.inertia.z * 40 * ez, -h.maxMoment * auth, h.maxMoment * auth)
-                let ey = -c.rudder * h.maxYaw - omega.y
+                let ey = -rateCurve(c.rudder, center: 0.5, full: h.maxYaw) - omega.y
                 yawI = clampf(yawI + spec.inertia.y * 160 * ey * dt, -h.tailMax, h.tailMax)
                 // the tail rotor loses bite when it slides sideways into its own wake
                 let tailLoss = smoothstep(2, 5, va.x) * (1 - smoothstep(9, 13, va.x))

@@ -25,6 +25,7 @@ struct Frame {
     float4 ambient;
     float4 post;        // x = tone-map in the scene shader (thumbnails), y = exposure, z = AO strength, w = bloom strength
     float4 screen;      // xy = 1 / render size, z = airfield shadow map size, w = aircraft shadow half-extent (m)
+    float4 pano;        // photo sites: x = sharpening, y = detail grain
 };
 struct Draw { float4x4 model; float4 tint; float4 params; };
 
@@ -303,6 +304,21 @@ vertex SkyOut skyVS(uint vid [[vertex_id]]) {
 }
 static float2 uvOf(float2 ndc) { return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5); }
 
+/// Catmull-Rom interpolation of the panorama: smooth, sharp edges where plain bilinear filtering shows the pixel grid.
+static float3 panoCubic(texture2d<float> t, sampler s, float2 uv, float2 size) {
+    float2 p = uv * size, tc = floor(p - 0.5) + 0.5, fr = p - tc;
+    float2 w0 = fr * (-0.5 + fr * (1.0 - 0.5 * fr));
+    float2 w1 = 1.0 + fr * fr * (-2.5 + 1.5 * fr);
+    float2 w2 = fr * (0.5 + fr * (2.0 - 1.5 * fr));
+    float2 w3 = fr * fr * (-0.5 + 0.5 * fr);
+    float2 w12 = w1 + w2;
+    float2 t0 = (tc - 1.0) / size, t3 = (tc + 2.0) / size, t12 = (tc + w2 / w12) / size;
+    float3 r = t.sample(s, float2(t0.x, t0.y), level(0.0)).rgb * (w0.x * w0.y) + t.sample(s, float2(t12.x, t0.y), level(0.0)).rgb * (w12.x * w0.y) + t.sample(s, float2(t3.x, t0.y), level(0.0)).rgb * (w3.x * w0.y)
+             + t.sample(s, float2(t0.x, t12.y), level(0.0)).rgb * (w0.x * w12.y) + t.sample(s, float2(t12.x, t12.y), level(0.0)).rgb * (w12.x * w12.y) + t.sample(s, float2(t3.x, t12.y), level(0.0)).rgb * (w3.x * w12.y)
+             + t.sample(s, float2(t0.x, t3.y), level(0.0)).rgb * (w0.x * w3.y) + t.sample(s, float2(t12.x, t3.y), level(0.0)).rgb * (w12.x * w3.y) + t.sample(s, float2(t3.x, t3.y), level(0.0)).rgb * (w3.x * w3.y);
+    return max(r, 0.0);
+}
+
 fragment float4 panoFS(SkyOut in [[stage_in]], constant Frame& f [[buffer(1)]], texture2d<float> pano [[texture(0)]], sampler ps [[sampler(1)]]) {
     float4 w = f.invViewProj * float4(in.ndc, 0.5, 1.0);
     float3 d = normalize(w.xyz / w.w - f.camPos.xyz);
@@ -312,7 +328,29 @@ fragment float4 panoFS(SkyOut in [[stage_in]], constant Frame& f [[buffer(1)]], 
     float v = 0.5 - (asin(clamp(d.y, -1.0, 1.0)) + f.horizon.w) / PI;
     float gx = abs(dfdx(u)) < abs(dfdx(u2)) ? dfdx(u) : dfdx(u2);
     float gy = abs(dfdy(u)) < abs(dfdy(u2)) ? dfdy(u) : dfdy(u2);
-    float3 c = pano.sample(ps, float2(u + 0.5 + f.zenith.w, v), gradient2d(float2(gx, dfdx(v)), float2(gy, dfdy(v)))).rgb;
+    float2 uv = float2(u + 0.5 + f.zenith.w, v);
+    float2 size = float2(pano.get_width(), pano.get_height());
+    float2 ddx = float2(gx, dfdx(v)), ddy = float2(gy, dfdy(v));
+    // photo pixels per screen pixel: below one, the photo is being enlarged
+    float tpp = max(max(length(ddx * size), length(ddy * size)), 1e-4);
+    float3 c = pano.sample(ps, uv, gradient2d(ddx, ddy)).rgb;
+    float enlarged = smoothstep(1.0, 0.65, tpp);
+    if (enlarged > 0.0) c = mix(c, panoCubic(pano, ps, uv, size), enlarged);
+    // sharpen against a slightly blurred copy; soft photographs get more, and nothing is added once the photo is
+    // being shrunk, where it would only shimmer
+    float3 soft = pano.sample(ps, uv, level(max(log2(tpp), 0.0) + 1.6)).rgb;
+    float3 edge = clamp(c - soft, -0.14, 0.14);
+    // (and nothing when it is enlarged many times over: there is no detail left to bring out, only blotches)
+    c = max(c + edge * f.pano.x * smoothstep(2.2, 1.0, tpp) * smoothstep(0.14, 0.42, tpp), 0.0);
+    // enlarged well past its resolution, a photo goes smooth and plasticky: put back a fine grain that follows
+    // the local contrast, fixed to the scenery so it does not crawl
+    float mag = 1.0 / tpp;
+    float grainAmt = f.pano.y * smoothstep(1.6, 5.0, mag) * smoothstep(0.46, 0.52, v);
+    if (grainAmt > 0.0) {
+        float2 gp = uv * size * 1.7;
+        float g = vnoise(gp) * 0.6 + vnoise(gp * 2.3 + 17.0) * 0.4 - 0.5;
+        c *= 1.0 + g * grainAmt * (0.06 + 0.8 * length(edge));
+    }
     return float4(f.post.x > 0.5 ? c : untonemap(c) / f.post.y, 1.0);
 }
 

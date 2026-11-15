@@ -9,6 +9,7 @@ import AVFoundation
 final class HIDJoystick {
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     var axes = [Float](repeating: 0, count: 9)
+    var buttons = [Bool](repeating: false, count: 32)
     /// Devices that identify as joysticks or multi-axis controllers, and those that identify as gamepads.
     /// Many RC transmitters (DJI, some EdgeTX modes) report as gamepads, like console controllers do.
     private(set) var joysticks: [IOHIDDevice] = []
@@ -19,6 +20,11 @@ final class HIDJoystick {
     private static func isGamepad(_ d: IOHIDDevice) -> Bool { (IOHIDDeviceGetProperty(d, kIOHIDPrimaryUsageKey as CFString) as? Int) == kHIDUsage_GD_GamePad }
 
     private func store(_ el: IOHIDElement, _ raw: Int) {
+        if IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_Button) {
+            let b = Int(IOHIDElementGetUsage(el)) - 1
+            if b >= 0 && b < buttons.count { buttons[b] = raw != 0 }
+            return
+        }
         guard IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) else { return }
         let idx = Int(IOHIDElementGetUsage(el)) - kHIDUsage_GD_X
         guard idx >= 0 && idx < 9 else { return }
@@ -30,7 +36,8 @@ final class HIDJoystick {
     /// Read where the sticks are right now; change reports only arrive once something moves.
     private func readCurrent(_ d: IOHIDDevice) {
         for el in (IOHIDDeviceCopyMatchingElements(d, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement]) ?? [] {
-            guard IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) else { continue }
+            let page = IOHIDElementGetUsagePage(el)
+            guard page == UInt32(kHIDPage_GenericDesktop) || page == UInt32(kHIDPage_Button) else { continue }
             var ref: Unmanaged<IOHIDValue>?
             let ok = withUnsafeMutablePointer(to: &ref) { p in
                 p.withMemoryRebound(to: Unmanaged<IOHIDValue>.self, capacity: 1) { IOHIDDeviceGetValue(d, el, $0) == kIOReturnSuccess }
@@ -73,6 +80,13 @@ final class HIDJoystick {
     }
 }
 
+/// A switch or button on the controller assigned to an action.
+struct ControlBinding: Codable, Equatable {
+    var axis: Bool              // true: a switch that reports as an axis; false: a button
+    var index: Int
+    var follow = false          // buttons only: true = a latching switch whose position sets the state, false = each press steps on
+}
+
 /// Controller settings, saved in user defaults. Channel order: aileron, elevator, throttle, rudder.
 struct InputSettings: Codable {
     var axis = [0, 1, 2, 3]
@@ -85,6 +99,9 @@ struct InputSettings: Codable {
     var lowRate: Float = 0.6                // control throw on low rates
     var expo: [Float] = [0.25, 0.25, 0.2]   // aileron, elevator, rudder
     var deadband: Float = 0.03
+    var multiPitchReverse: Bool? = nil      // reverse the pitch stick on multirotors only
+    var ownRates: Bool? = nil               // true: use the low rate and expo above for every aircraft instead of each aircraft's own
+    var bindings: [String: ControlBinding]? = nil       // actions assigned to switches and buttons
 
     static let axisNames = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider", "Dial", "Wheel"]
     static let channelNames = ["Aileron", "Elevator", "Throttle", "Rudder"]
@@ -98,11 +115,53 @@ struct InputSettings: Codable {
     }
 }
 
+/// Something the pilot can do from the keyboard that can also be put on a controller switch or button.
+/// `states`: 0 = happens once per press; 2 or 3 = a setting with that many positions; -1 = held down.
+struct ControlAction {
+    let id: String, title: String, states: Int, key: UInt16
+}
+
 final class InputManager {
+    static let actions: [ControlAction] = [
+        ControlAction(id: "rates", title: "Rates: low / high", states: 2, key: 37),
+        ControlAction(id: "mode", title: "Flight mode", states: 2, key: 3),
+        ControlAction(id: "rotor", title: "Rotor speed (helicopters)", states: 3, key: 34),
+        ControlAction(id: "hold", title: "Throttle hold (helicopters)", states: 2, key: 32),
+        ControlAction(id: "flaps", title: "Flaps: up / half / full", states: 3, key: 14),
+        ControlAction(id: "gear", title: "Landing gear", states: 2, key: 5),
+        ControlAction(id: "smoke", title: "Smoke", states: 2, key: 16),
+        ControlAction(id: "brake", title: "Wheel brakes", states: -1, key: 12),
+        ControlAction(id: "reset", title: "Reset aircraft", states: 0, key: 49),
+        ControlAction(id: "camera", title: "Camera", states: 0, key: 8),
+        ControlAction(id: "zoom", title: "Zoom", states: 0, key: 6),
+        ControlAction(id: "pause", title: "Pause", states: 0, key: 35),
+        ControlAction(id: "slow", title: "Slow motion", states: 0, key: 17),
+        ControlAction(id: "next", title: "Next aircraft", states: 0, key: 30),
+        ControlAction(id: "prev", title: "Previous aircraft", states: 0, key: 33),
+        ControlAction(id: "site", title: "Next flying site", states: 0, key: 45),
+        ControlAction(id: "demo", title: "Demo pilot", states: 0, key: 40),
+        ControlAction(id: "balloons", title: "Balloon challenge", states: 0, key: 11),
+        ControlAction(id: "windDown", title: "Less wind", states: 0, key: 43),
+        ControlAction(id: "windUp", title: "More wind", states: 0, key: 47),
+        ControlAction(id: "hud", title: "Hide / show display", states: 0, key: 9),
+        ControlAction(id: "mute", title: "Mute sound", states: 0, key: 46),
+    ]
+    /// Where an assigned switch or button is: -1...1 for an axis, -1 or 1 for a button.
+    func value(of b: ControlBinding) -> Float {
+        if b.axis { return b.index >= 0 && b.index < hid.axes.count ? hid.axes[b.index] : 0 }
+        return b.index >= 0 && b.index < hid.buttons.count && hid.buttons[b.index] ? 1 : -1
+    }
+    static func label(_ b: ControlBinding?) -> String {
+        guard let b = b else { return "not assigned" }
+        return b.axis ? "Switch on axis " + InputSettings.axisNames[min(max(b.index, 0), 8)] : "Button \(b.index + 1)"
+    }
     var keys = Set<UInt16>()
     let hid = HIDJoystick()
     var settings = InputSettings() { didSet { if let d = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(d, forKey: "inputSettings") } } }
-    var lowRates = false
+    var lowRates = true
+    /// Low rate and expo recommended for the aircraft being flown; used unless the pilot has chosen their own.
+    var aircraftLowRate: Float = 0.6, aircraftExpo: Float = 0.3
+    var lowRateInUse: Float { settings.ownRates == true ? settings.lowRate : aircraftLowRate }
     private var kb = V3.zero
     var kbThrottle: Float = 0
     var source = "Keyboard"
@@ -127,8 +186,8 @@ final class InputManager {
         let m = abs(x)
         if m <= db { return 0 }
         let v = (x < 0 ? -1 : 1) * min((m - db) / (1 - db), 1)
-        let k = clampf(settings.expo[i], 0, 1)
-        return ((1 - k) * v + k * v * v * v) * (lowRates ? settings.lowRate : 1)
+        let k = clampf(settings.ownRates == true ? settings.expo[i] : aircraftExpo, 0, 1)
+        return ((1 - k) * v + k * v * v * v) * (lowRates ? lowRateInUse : 1)
     }
 
     /// Calibrated value of a USB axis: centred channels map min/centre/max to -1/0/+1, throttle maps min/max to -1/+1.
@@ -176,7 +235,7 @@ final class InputManager {
         if calibrating { for a in 0..<9 { recMin[a] = min(recMin[a], hid.axes[a]); recMax[a] = max(recMax[a], hid.axes[a]) } }
 
         // keyboard: arrows = elevator / aileron, A/D = rudder, W/S = throttle
-        let full: Float = (keys.contains(56) || keys.contains(60) ? 1 : 0.75) * (lowRates ? settings.lowRate : 1)
+        let full: Float = (keys.contains(56) || keys.contains(60) ? 1 : 0.75) * (lowRates ? lowRateInUse : 1)
         let tgt = V3(down(124) - down(123), down(125) - down(126), down(2) - down(0)) * full
         for i in 0..<3 {
             let rate: Float = tgt[i] == 0 ? 7 : 4.5
@@ -211,9 +270,11 @@ final class InputManager {
         }
         c.aileron = clampf(dev.x + kb.x, -1, 1)
         c.elevator = clampf(dev.y + kb.y, -1, 1)
+        if kind == .multirotor && settings.multiPitchReverse == true { c.elevator = -c.elevator }
         c.rudder = clampf(dev.z + kb.z, -1, 1)
         c.throttle = clampf(thr, 0, 1)
         c.brake = max(c.brake, down(12))          // Q
+        if hid.connected, let b = settings.bindings?["brake"], value(of: b) > 0.3 { c.brake = 1 }
         return c
     }
 }

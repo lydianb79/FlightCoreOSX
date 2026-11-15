@@ -19,6 +19,8 @@ struct SoundState {
     var groundRoll: Float = 0   // rolling speed while on the ground, m/s
     var windSpeed: Float = 0    // ambient wind at the pilot, m/s
     var ambience = 0            // 0 countryside (birds), 1 water (waves), 2 open / desert, 3 winter
+    var reflect: Float = 0      // extra travel time of the sound that bounces off the ground on its way to the pilot (s)
+    var reflectGain: Float = 0  // strength of that reflection, 0 = none
     var paused = false
 }
 
@@ -45,6 +47,13 @@ final class SoundEngine {
     private var windLoL: Float = 0, windBdL: Float = 0, windLoR: Float = 0, windBdR: Float = 0
     private var exhaust: Float = 0, rumble: Float = 0, roar: Float = 0, muffL: Float = 0, muffR: Float = 0, wave: Float = 0
     private var lfo1: Float = 0, lfo2: Float = 0.4, lfo3: Float = 0.7
+    // engine detail: slow pitch flutter, exhaust resonance, duct howl, per-motor warble, ground reflection
+    private var flutter: Float = 0, lope: Float = 1, lopePrev: Float = 0
+    private var exLo: Float = 0, exBd: Float = 0, howlLo: Float = 0, howlBd: Float = 0, lowLo: Float = 0, lowBd: Float = 0
+    private var warble = SIMD4<Float>(0, 0, 0, 0)
+    private var sReflect: Float = 0, sReflectGain: Float = 0
+    private var echo = [Float](repeating: 0, count: 4096), echoPos = 0
+    private var pWhine2: Float = 0, pGear: Float = 0
     // one-shots
     private var crashEnv: Float = 0, crashTone: Float = 0, crashPhase: Float = 0, crackle: Float = 0, splashEnv: Float = 0, splashLo: Float = 0
     private var crashPan: Float = 0
@@ -77,6 +86,14 @@ final class SoundEngine {
         seed = seed &* 1664525 &+ 1013904223
         return Float(Int32(bitPattern: seed)) * (1.0 / 2147483648.0)
     }
+    /// A stack of harmonics on one phase: `tilt` near 1 is buzzy, higher is rounder.
+    @inline(__always) private func stack(_ p: Float, _ n: Int, _ tilt: Float) -> Float {
+        var s: Float = 0
+        let w = 2 * Float.pi * p
+        let a = min(max(tilt - 1, 0), 1)                   // blend between 1/k and 1/k squared: no powers in the audio loop
+        for k in 1...n { let fk = Float(k); s += sin(fk * w + fk * fk * 0.37) * ((1 - a) / fk + a / (fk * fk)) }
+        return s
+    }
     @inline(__always) private func wrap(_ p: inout Float, _ hz: Float) {
         p += hz / sampleRate
         if p >= 1 { p -= floor(p) }
@@ -106,63 +123,96 @@ final class SoundEngine {
             let hz = max(sHz, 0.5)
             var eng: Float = 0
 
+            // every motor hunts a little in speed: turbulence on the blades, the speed controller, the load
+            flutter += (n1 * 0.012 - flutter) * 0.0015
+            let fl = 1 + flutter
             switch st.engine {
             case 0:     // electric motor and propeller
-                wrap(&pBlade, hz * st.blades); wrap(&pWhine, hz * 7)
-                let b = twoPi * pBlade
-                var prop = sin(b) + 0.5 * sin(2 * b + 0.4) + 0.3 * sin(3 * b + 1.1) + 0.16 * sin(4 * b) + 0.09 * sin(5 * b)
-                prop *= 0.22 * (0.35 + 0.65 * sPower) * (1 + 0.12 * n0)
-                let whine = (sin(twoPi * pWhine) + 0.4 * sin(2 * twoPi * pWhine)) * 0.035 * (0.4 + 0.6 * sPower)
-                let wash = bandpass(n0, 500 + 2600 * sPower, 0.9, &propLo, &propBd) * 0.3 * sPower * sPower
-                eng = (prop + whine + wash) * sRun
+                wrap(&pBlade, hz * st.blades * fl); wrap(&pWhine, hz * 7 * fl); wrap(&pWhine2, hz * 14.07 * fl)
+                // the propeller: a buzz that gets brighter and harsher as it is loaded
+                let prop = stack(pBlade, 7, 1.75 - 0.75 * sPower) * 0.2 * (0.3 + 0.7 * sPower)
+                // air torn by each passing blade
+                let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
+                let tear = bandpass(n0, 700 + 2900 * sPower, 0.8, &propLo, &propBd) * (0.25 + 0.75 * beat * beat) * 0.42 * sPower * (0.4 + 0.6 * sPower)
+                // the motor itself: magnet whine and its overtone, strongest when it is working
+                let whine = (sin(twoPi * pWhine) * 0.03 + sin(twoPi * pWhine2) * 0.016) * (0.35 + 0.65 * sPower)
+                eng = (prop + tear + whine) * sRun
             case 1:     // piston engine: exhaust pulses, mechanical rumble, propeller
                 let fire = hz * st.cylinders * 0.5
-                wrap(&pFire, fire); wrap(&pBlade, hz * st.blades); wrap(&pShaft, hz * 0.5)
-                // each firing is a sharp pressure pulse; cylinders are never perfectly even
+                let before = pFire
+                wrap(&pFire, fire * fl); wrap(&pBlade, hz * st.blades * fl); wrap(&pShaft, hz * 0.5)
+                // each firing is a sharp pressure pulse; no two are alike, and at idle some are weak
+                if pFire < before { lope = 1 + (0.38 - 0.3 * sPower) * n0 }
                 let uneven = 1 + (st.radial ? 0.35 : 0.18) * sin(twoPi * pShaft * (st.radial ? 1 : 2))
-                let pulse = exp(-pFire * (5 + 4 * sPower)) * uneven
+                let pulse = exp(-pFire * (5 + 4 * sPower)) * uneven * lope
                 exhaust += (pulse * (0.7 + 0.3 * n0) - exhaust) * 0.35
                 rumble += (n1 * pulse - rumble) * 0.08
-                let b = twoPi * pBlade
-                let prop = (sin(b) + 0.45 * sin(2 * b) + 0.2 * sin(3 * b)) * 0.1 * (0.3 + 0.7 * sPower)
-                let wash = bandpass(n0, 400 + 1800 * sPower, 1.0, &propLo, &propBd) * 0.22 * sPower * sPower
-                eng = ((exhaust - 0.12) * (0.55 + 0.45 * sPower) + rumble * 1.6 + prop + wash) * sRun
+                // the exhaust pipe rings: a bark that rises with the revs
+                let bark = bandpass(pulse - 0.15, 170 + 2.2 * fire, 0.45, &exLo, &exBd) * 0.5
+                let prop = stack(pBlade, 5, 1.7 - 0.5 * sPower) * 0.09 * (0.3 + 0.7 * sPower)
+                let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
+                let wash = bandpass(n0, 400 + 1800 * sPower, 1.0, &propLo, &propBd) * (0.4 + 0.6 * beat) * 0.26 * sPower * sPower
+                eng = ((exhaust - 0.12) * (0.45 + 0.4 * sPower) + bark * (0.5 + 0.5 * sPower) + rumble * 1.6 + prop + wash) * sRun
             case 2, 3:  // ducted fan / jet (2) and turboprop (3)
-                wrap(&pWhine, hz * (st.engine == 2 ? 11 : 28)); wrap(&pBlade, hz * st.blades)
-                let whine = (sin(twoPi * pWhine) + 0.3 * sin(2 * twoPi * pWhine + 0.7)) * (st.engine == 2 ? 0.06 : 0.035) * (0.5 + 0.5 * sPower)
-                let hiss = bandpass(n0, 1400 + 2600 * sPower, 0.7, &jetLo, &jetBd) * (st.engine == 2 ? 0.34 : 0.14) * (0.25 + 0.75 * sPower)
+                let fan = st.engine == 2
+                wrap(&pWhine, hz * (fan ? 11 : 28) * fl); wrap(&pWhine2, hz * (fan ? 11.09 : 41) * fl); wrap(&pBlade, hz * st.blades * fl)
+                // fan or compressor tone, with a second one close by that beats against it
+                var whine = (sin(twoPi * pWhine) + 0.3 * sin(2 * twoPi * pWhine + 0.7) + 0.55 * sin(twoPi * pWhine2)) * (fan ? 0.05 : 0.028) * (0.4 + 0.6 * sPower)
+                whine *= 1 + 0.25 * n1
+                // the rush of air: a high hiss, a deep roar, and the duct howling at a pitch that follows the revs
+                let hiss = bandpass(n0, 1500 + 3200 * sPower, 0.6, &jetLo, &jetBd) * (fan ? 0.36 : 0.14) * (0.2 + 0.8 * sPower)
                 roar += (n1 - roar) * 0.02
-                var s = whine + hiss + roar * (st.engine == 2 ? 1.5 : 0.7) * (0.2 + 0.8 * sPower * sPower)
-                if st.engine == 3 {
-                    let b = twoPi * pBlade
-                    s += (sin(b) + 0.55 * sin(2 * b + 0.3) + 0.3 * sin(3 * b) + 0.15 * sin(4 * b)) * 0.2 * (0.3 + 0.7 * sPower) * (1 + 0.1 * n0)
+                let low = bandpass(n1, 110 + 190 * sPower, 0.5, &lowLo, &lowBd) * (fan ? 0.5 : 0.2) * sPower * sPower
+                let howl = bandpass(n0, 320 + 22 * hz, 0.12, &howlLo, &howlBd) * (fan ? 0.11 : 0.03) * (0.3 + 0.7 * sPower)
+                var s = whine + hiss + low + howl + roar * (fan ? 1.3 : 0.7) * (0.2 + 0.8 * sPower * sPower)
+                if !fan {
+                    let beat = 0.5 + 0.5 * cos(twoPi * pBlade)
+                    s += stack(pBlade, 6, 1.5 - 0.4 * sPower) * 0.17 * (0.3 + 0.7 * sPower) * (0.85 + 0.15 * beat)
                 }
                 eng = s * sRun
-            case 4:     // helicopter: blade slap, rotor wash, tail rotor, motor whine
-                wrap(&pBlade, hz * 2); wrap(&pTail, hz * 9.3); wrap(&pWhine, hz * 33)
+            case 4:     // helicopter: blade slap, rotor wash, tail rotor, gear and motor whine
+                let nb = max(st.blades, 2)
+                wrap(&pBlade, hz * nb * fl); wrap(&pTail, hz * 9.3 * fl); wrap(&pWhine, hz * 33 * fl); wrap(&pGear, hz * 11.6 * fl)
+                // each blade passing: a soft thump always, a hard slap when the rotor is loaded
                 let sl = max(sin(twoPi * pBlade), 0)
                 let slap = sl * sl * sl * sl * sl * sl
-                let wash = bandpass(n0, 300 + 500 * sPower, 0.8, &propLo, &propBd)
-                let tail = (2 * pTail - 1) * 0.05 + sin(twoPi * pTail * 2) * 0.03
-                let whine = sin(twoPi * pWhine) * 0.03
-                eng = (slap * (0.35 + 0.5 * sPower) + wash * (0.25 + 0.55 * sPower) * (0.35 + 0.65 * slap) + tail + whine) * sRun
-            default:    // multirotor: four motors beating against each other
+                let thump = stack(pBlade, 3, 1.4) * 0.16
+                let wash = bandpass(n0, 300 + 600 * sPower, 0.8, &propLo, &propBd)
+                let hissy = bandpass(n1, 1800 + 1500 * sPower, 0.9, &jetLo, &jetBd) * 0.1 * (0.3 + 0.7 * slap)
+                let tail = stack(pTail, 4, 1.3) * 0.045
+                let gears = sin(twoPi * pGear) * 0.022 + sin(twoPi * pWhine) * 0.026 * (0.5 + 0.5 * sPower)
+                eng = (slap * (0.25 + 0.65 * sPower) + thump * (0.5 + 0.5 * sPower) + wash * (0.25 + 0.55 * sPower) * (0.3 + 0.7 * slap) + hissy + tail + gears) * sRun
+            default:    // multirotor: each motor has its own voice, and they beat against one another
                 var s: Float = 0
+                var loud: Float = 0
                 for m in 0..<4 {
                     let lv = sMotor[m]
-                    if lv < 0.005 { continue }
-                    pMotor[m] += hz * (0.35 + 0.9 * lv.squareRoot()) * st.doppler / sampleRate
+                    if lv < 0.01 { continue }
+                    // the flight controller is forever correcting, so no motor holds a steady note
+                    warble[m] += (noise() * 0.02 - warble[m]) * 0.004
+                    pMotor[m] += hz * (0.1 + 0.9 * lv) * (1 + warble[m]) * st.doppler / sampleRate
                     if pMotor[m] >= 1 { pMotor[m] -= 1 }
-                    let ph = twoPi * pMotor[m]
-                    s += (sin(ph) + 0.6 * sin(2 * ph + Float(m)) + 0.35 * sin(3 * ph) + 0.2 * sin(4 * ph)) * (0.25 + 0.75 * lv) * 0.09
+                    let a = lv * (0.3 + 0.7 * lv)
+                    s += stack(pMotor[m], 6, 1.5 - 0.5 * lv) * a * 0.075
+                    loud += a
                 }
-                let wash = bandpass(n0, 900 + 2500 * sPower, 0.8, &propLo, &propBd) * 0.22 * sPower
-                eng = s * (1 + 0.1 * n1) + wash
+                let beat = 0.5 + 0.5 * cos(twoPi * pMotor[0])
+                let wash = bandpass(n0, 1100 + 3000 * sPower, 0.8, &propLo, &propBd) * (0.5 + 0.5 * beat) * 0.07 * loud
+                eng = s * (1 + 0.08 * n1) + wash
             }
 
             // airframe: the hiss of air over the model, and tyres on the ground
             let air = bandpass(n1, 350 + 60 * sAir, 0.6, &airLo, &airBd) * min(sAir * sAir / 2200, 0.5)
-            let src = (eng + air) * sGain
+            var src = (eng + air) * sGain
+            // sound also reaches the pilot by bouncing off the ground, a moment later: the two add up and cancel
+            // at different pitches as the aircraft moves, which is what gives a fly-past its sweeping, hollow tone
+            sReflect += (st.reflect - sReflect) * 0.0006; sReflectGain += (st.reflectGain - sReflectGain) * k
+            echo[echoPos] = src
+            let back = min(sReflect * sampleRate, 4000)
+            let i0 = Int(back), fr = back - Float(i0)
+            let e0 = echo[(echoPos - i0 + 4096) & 4095], e1 = echo[(echoPos - i0 - 1 + 4096) & 4095]
+            src += (e0 + (e1 - e0) * fr) * sReflectGain
+            echoPos = (echoPos + 1) & 4095
 
             // distance: air absorbs the highs
             let cut = 0.9 - 0.82 * sMuffle

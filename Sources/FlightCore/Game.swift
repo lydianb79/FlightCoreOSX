@@ -103,6 +103,8 @@ final class Game {
     var paused = false
     var timeScale: Float = 1
     var cameraMode = 0, zoomMode = 1, flightMode = 0, timeOfDay = 1
+    var rotorSpeed = 1                  // helicopters: 0 low, 1 normal, 2 high head speed
+    static let rotorNames = ["Low (80%)", "Normal (90%)", "High (100%)"]
     var autopilotOn = false
     var autopilot = Autopilot()
     var controls = Controls()
@@ -151,6 +153,8 @@ final class Game {
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
         timeOfDay = site.defaultTime
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
+        flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
+        newSession()
         resetAircraft()
         hud.game = self
     }
@@ -170,6 +174,13 @@ final class Game {
     // MARK: Commands
 
     func say(_ m: String, _ t: Float = 2.5) { message = m; messageTimer = t }
+
+    /// A new aircraft: its own rates, and always the low ones to begin with.
+    private func newSession() {
+        input.aircraftLowRate = aircraft.spec.lowRate; input.aircraftExpo = aircraft.spec.expo
+        input.lowRates = true
+        rotorSpeed = 1
+    }
 
     func resetAircraft() {
         let spec = aircraft.spec
@@ -202,7 +213,8 @@ final class Game {
         guard i >= 0 && i < AircraftLibrary.all.count else { return }
         aircraftIndex = i
         aircraft = Aircraft(AircraftLibrary.all[i])
-        flightMode = 0
+        flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
+        newSession()
         aircraftVersion += 1
         resetAircraft()
         UserDefaults.standard.set(aircraft.spec.name, forKey: "lastAircraft")
@@ -271,7 +283,9 @@ final class Game {
         case 16: smokeOn.toggle(); say(smokeOn ? "Smoke on" : "Smoke off")
         case 32:
             if aircraft.spec.kind == .helicopter { hold.toggle(); say(hold ? "Throttle hold — autorotate!" : "Engine engaged") }
-        case 37: input.lowRates.toggle(); say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.settings.lowRate * 100) : "High rates")
+        case 37: input.lowRates.toggle(); say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.lowRateInUse * 100) : "High rates")
+        case 34:
+            if aircraft.spec.kind == .helicopter { rotorSpeed = (rotorSpeed + 1) % 3; say("Rotor speed: " + Game.rotorNames[rotorSpeed]) }
         case 46: sound.muted.toggle(); say(sound.muted ? "Sound off" : "Sound on")
         case 45: selectSite((siteIndex + 1) % SiteSpec.all.count)
         case 11: toggleChallenge()
@@ -289,6 +303,40 @@ final class Game {
         }
     }
 
+    // MARK: Switches and buttons
+
+    private var bindLast: [String: Int] = [:]
+
+    /// Act on the controller switches and buttons the pilot has assigned. A switch sets its state when it is
+    /// moved; a button steps through the states, or triggers the action, each time it is pressed.
+    private func applyBindings() {
+        guard input.hid.connected, let binds = input.settings.bindings else { return }
+        for a in InputManager.actions where a.states >= 0 {
+            guard let b = binds[a.id] else { bindLast[a.id] = nil; continue }
+            let v = input.value(of: b)
+            let positional = a.states >= 2 && (b.axis || b.follow)
+            let pos: Int
+            if !positional { pos = v > 0.3 ? 1 : 0 }
+            else if a.states == 2 { pos = v > 0 ? 1 : 0 }
+            else { pos = b.axis ? (v < -0.33 ? 0 : (v > 0.33 ? 2 : 1)) : (v > 0 ? 2 : 0) }
+            let last = bindLast[a.id]
+            bindLast[a.id] = pos
+            guard let l = last, l != pos else { continue }
+            if !positional { if pos == 1 { keyDown(a.key) }; continue }
+            let spec = aircraft.spec
+            switch a.id {
+            case "rates": input.lowRates = pos == 0; say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.lowRateInUse * 100) : "High rates")
+            case "mode": if spec.modes.count > 1 { flightMode = min(pos, spec.modes.count - 1); say("Flight mode: " + spec.modes[flightMode]) }
+            case "rotor": if spec.kind == .helicopter { rotorSpeed = pos; say("Rotor speed: " + Game.rotorNames[rotorSpeed]) }
+            case "hold": if spec.kind == .helicopter { hold = pos == 1; say(hold ? "Throttle hold — autorotate!" : "Engine engaged") }
+            case "flaps": if spec.hasFlaps { flapSetting = Float(pos) * 0.5; say(["Flaps up", "Flaps half", "Flaps full"][pos]) }
+            case "gear": if spec.hasRetracts { gearUp = pos == 1; say(gearUp ? "Gear up" : "Gear down") }
+            case "smoke": smokeOn = pos == 1; say(smokeOn ? "Smoke on" : "Smoke off")
+            default: break
+            }
+        }
+    }
+
     // MARK: Frame
 
     func frame(dt realDt: Float) {
@@ -296,12 +344,14 @@ final class Game {
         frames += 1; fpsTime += realDt
         if fpsTime >= 0.5 { fps = Int(Float(frames) / fpsTime + 0.5); frames = 0; fpsTime = 0 }
 
+        applyBindings()
         if autopilotOn && !aircraft.crashed {
             controls = autopilot.update(aircraft, terrain: terrain, dt: dt)
             _ = input.poll(dt: dt, kind: aircraft.spec.kind)
         } else {
             controls = input.poll(dt: dt, kind: aircraft.spec.kind)
             controls.mode = flightMode
+            controls.rotorSpeed = rotorSpeed
         }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
         aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
@@ -500,6 +550,7 @@ final class Game {
         case .helicopter:
             st.engine = 4
             st.shaftHz = spec.soundBase / 2 * aircraft.levels[0]
+            st.blades = Float(max(spec.blades, 2))
             st.power = clampf(abs(2 * controls.throttle - 1) * 0.8 + 0.15, 0, 1)
             st.running = aircraft.levels[0] > 0.05 ? min(aircraft.levels[0], 1) : 0
         case .multirotor:
@@ -527,6 +578,14 @@ final class Game {
             fwd = normalize(fwd)
             let right = V3(-fwd.z, 0, fwd.x)
             st.pan = clampf(dot(rel / d, right) * 1.6, -1, 1)
+        }
+        if !onboard {
+            // the path by way of the ground is a little longer than the direct one
+            let ear = max(eye.y - terrain.height(eye.x, eye.z), 0.3), src = max(aircraft.pos.y - terrain.height(aircraft.pos.x, aircraft.pos.z), 0.05)
+            let flat = max(length(V3(rel.x, 0, rel.z)), 0.5)
+            let direct = sqrt(flat * flat + (src - ear) * (src - ear)), bounced = sqrt(flat * flat + (src + ear) * (src + ear))
+            st.reflect = (bounced - direct) / 343
+            st.reflectGain = 0.4 * direct / bounced * (site.waterLevel != nil ? 1.2 : 1)
         }
         st.airspeed = aircraft.airspeed
         st.groundRoll = aircraft.onGround && !aircraft.crashed ? length(V3(aircraft.vel.x, 0, aircraft.vel.z)) : 0
@@ -563,7 +622,7 @@ final class Game {
         case 4: s.lx = controls.aileron; s.ly = tY; s.rx = controls.rudder; s.ry = eY; s.leftLabel = "THR / AIL"; s.rightLabel = "ELE / RUD"
         default: s.lx = controls.rudder; s.ly = tY; s.rx = controls.aileron; s.ry = eY
         }
-        s.rates = input.lowRates ? "Low" : "High"
+        s.rates = input.lowRates ? String(format: "Low %.0f%%", input.lowRateInUse * 100) : "High"
         var cfg: [String] = []
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }

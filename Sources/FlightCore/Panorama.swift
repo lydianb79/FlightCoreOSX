@@ -130,8 +130,6 @@ enum Panoramas {
                                     info: "A golf-course lawn beside a still pond under streaked cirrus. The pond is to the front right; trees stand to the left."),
         "snow_field": meta("Snow Field", north: 0, wind: (20, 4), start: (-15, -18, 90), category: "Winter", difficulty: 3,
                            info: "A featureless snow-covered plain under a heavy grey sky. Nothing to hit, and almost nothing to judge height or distance by."),
-        "straw_rolls_field_01": meta("Straw Rolls Field", north: 29, wind: (29, 3), start: (-5, -6, 0), category: "Fields", difficulty: 2,
-                                     info: "A straight country lane between stubble fields dotted with straw bales. The lane makes a narrow runway straight ahead."),
         "suburban_football_field": meta("Suburban Football Field", north: 0, wind: (240, 3), start: (-18, -16, 90), category: "Fields", difficulty: 2,
                                         info: "A village football pitch on a grey day, with houses along one side. Short, even grass and painted lines to line up on."),
         "wildflower_field": meta("Wildflower Field", north: 0, wind: (0, 1), start: (0, -8, 0), category: "Fields", difficulty: 2,
@@ -141,16 +139,18 @@ enum Panoramas {
                                    obstacles: ring(45, 100, 4, 85, 8, 14) + ring(-125, -65, 4, 70, 6, 6)),
         "goegap_road": meta("Goegap Road", north: -13, wind: (40, 2), start: (0, -6, 0), category: "Desert", difficulty: 2,
                             info: "An empty road through a flowering semi-desert, with bare rock hills on both sides and the sun low ahead. The road is the runway; everything beside it is sand and scrub."),
-        "snowy_field": meta("Snowy Field", north: 0, wind: (250, 2), start: (-15, -18, 90), category: "Winter", difficulty: 2,
-                            info: "A snow-covered park lawn under a deep blue sky, criss-crossed by footprints. Bare trees ring the field and a lattice tower stands to the left.",
-                            obstacles: ring(-110, -20, 6, 95, 8, 14) + ring(5, 60, 4, 80, 9, 14) + [PanoObstacle(bearing: -140, distance: 110, radius: 4, height: 30)]),
         "grasslands_sunset": meta("Grasslands Sunset", north: 0, wind: (300, 2), start: (-18, -20, 90), category: "Fields", difficulty: 1,
                                   info: "A huge, level pasture at sunset under a sky full of pink cloud. Nothing nearer than the distant tree line: as open and forgiving as a field can be."),
-        "spiaggia_di_mondello": meta("Mondello Beach", north: 180, wind: (0, 4), start: (-12, -14, 90), category: "Water", difficulty: 3,
-                                     info: "A broad sandy beach with the sea on both sides of the view and a steady breeze off the water. Pines, palms and beach houses stand behind you; soft sand makes for short landings.",
-                                     obstacles: ring(-50, 60, 6, 70, 9, 13)),
-        "yellow_field": meta("Yellow Field", north: 0, wind: (310, 3), start: (-18, -20, 90), category: "Fields", difficulty: 1,
-                             info: "A dry, pale-gold field sloping gently up to a line of dark pines. Plenty of open space in front of the trees."),
+        "snowy_hillside_02": meta("Snowy Hillside", north: 0, wind: (270, 3), start: (-15, -18, 90), category: "Winter", difficulty: 2,
+                                  info: "A snow-dusted hillside under a heavy grey sky, looking down a farm track to a village in the valley. Open on every side, with one bare tree off to the right.",
+                                  obstacles: [PanoObstacle(bearing: 48, distance: 45, radius: 4, height: 10)]),
+        "poolbeg": meta("Poolbeg Dunes", north: 0, wind: (0, 5), start: (-12, -16, 90), category: "Water", difficulty: 2,
+                        info: "Marram-grass dunes behind a wide bay, with striped power-station chimneys on the skyline to the left. A steady breeze comes in off the sea in front of you."),
+        "horn-koppe_spring": meta("Horn-Koppe Meadow", north: 0, wind: (240, 2), start: (-18, -20, 90), category: "Fields", difficulty: 1,
+                                  info: "A vast mountain meadow in spring with wooded ridges far away on the horizon. Nothing to hit in any direction: an ideal place for a first flight."),
+        "dreifaltigkeitsberg": meta("Dreifaltigkeitsberg", north: 36, wind: (200, 2), start: (0, -7, 0), category: "Fields", difficulty: 2,
+                                    info: "A mown track across a hilltop meadow on a cloudless summer day, with woods along the far edge. Take off along the track.",
+                                    obstacles: ring(60, 150, 5, 120, 10, 16)),
     ]
 
     private static func meta(_ name: String, north: Float, wind: (Float, Float), start: (Float, Float, Float), category: String, difficulty: Int, info: String,
@@ -164,6 +164,21 @@ enum Panoramas {
         let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
                                      kCGImageSourceThumbnailMaxPixelSize: maxSize]
         return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    }
+
+    /// How much fine detail a panorama really holds, from 0 (soft: an enlarged or heavily compressed photo) to 1
+    /// (pin sharp). Compares the contrast between neighbouring pixels with the contrast four pixels apart in a
+    /// band around the horizon, where the trees, grass and buildings are.
+    static func detail(_ px: [UInt8], width w: Int, height h: Int) -> Float {
+        var g1: Float = 0, g4: Float = 0
+        func lum(_ x: Int, _ y: Int) -> Float { let i = (y * w + x) * 4; return 0.3 * Float(px[i]) + 0.6 * Float(px[i + 1]) + 0.1 * Float(px[i + 2]) }
+        var y = Int(Float(h) * 0.44)
+        while y < Int(Float(h) * 0.6) {
+            var x = 0
+            while x < w - 5 { let a = lum(x, y); g1 += abs(lum(x + 1, y) - a); g4 += abs(lum(x + 4, y) - a); x += 3 }
+            y += 7
+        }
+        return g4 > 0 ? g1 / g4 : 0.5
     }
 
     /// Estimate sun direction and ambient light from the photo so the model is lit to match

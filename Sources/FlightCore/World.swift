@@ -683,7 +683,7 @@ struct Autopilot {
                 let m = ac.spec.multi!
                 c.elevator = clampf(-atan(dot(ad, fh) / gravity) / m.maxAngle, -1, 1)
                 c.aileron = clampf(atan(dot(ad, hr) / gravity) / m.maxAngle, -1, 1)
-                c.throttle = clampf(ac.spec.mass * gravity / (4 * m.maxThrust) + 0.12 * (vy - ac.vel.y), 0.05, 1)
+                c.throttle = clampf(ac.spec.hoverThrottle + 0.1 * (vy - ac.vel.y), 0.02, 1)
             } else {
                 let h = ac.spec.heli!
                 let tgt = normalize(V3(ad.x, gravity, ad.z))
@@ -691,6 +691,7 @@ struct Autopilot {
                 c.elevator = clampf(eb.x * 6 / h.maxRate, -1, 1)
                 c.aileron = clampf(-eb.z * 6 / h.maxRate, -1, 1)
                 c.throttle = clampf(0.67 + 0.1 * (vy - ac.vel.y), 0, 1)
+                c.mode = 1          // the demo pilot flies helicopters in acro
             }
         }
         return c
