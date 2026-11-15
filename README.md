@@ -2,7 +2,7 @@
 
 # FlightCore OSX
 
-A radio-control line-of-sight flight simulator for macOS, written in Swift and rendered with Metal. Created by Rock FPV.
+A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Created by Rock FPV.
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
