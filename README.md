@@ -60,8 +60,8 @@ One hundred and seventy-five aircraft, grouped by category in the aircraft brows
 | Warbirds | 30 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel, F4U Corsair, P-38 Lightning, Ju 87 Stuka, Tempest, B-25 Mitchell, Fokker D.VII |
 | Aerobatic | 17 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7, Extra 330SC, MXS, Sbach 342, Laser, Bücker Jungmeister |
 | Foam 3D | 11 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty, Shock Flyer 800, Sbach 3D Foamy |
-| Wings | 16 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Horten Ho 229, Race Wing 600, Mini Combat Wing 800, Slope Racer 60, Thermal Wing 2.4, B-2 Spirit, Avro Vulcan, Mirage III, Me 163 Komet, Twin Trekker 1.3, Micro Delta 420, Speed Arrow 900 |
-| Jets | 16 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros, T-33, F-5 Tiger, F-15 Eagle, A-10, Hawker Hunter, Alpha Jet, Citation CJ |
+| Wings | 11 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Race Wing 600, Mini Combat Wing 800, Slope Racer 60, Thermal Wing 2.4, Twin Trekker 1.3, Micro Delta 420, Speed Arrow 900 |
+| Jets | 21 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros, T-33, F-5 Tiger, F-15 Eagle, A-10, Hawker Hunter, Alpha Jet, Citation CJ, and five tailless jets: Horten Ho 229, B-2 Spirit, Avro Vulcan, Mirage III, Me 163 Komet |
 | Gliders | 11 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M, ASH 31, Ventus, SGS 2-33 |
 | Helicopters | 10 | Kestrel 550, Sparrow 450, Condor 700, Gnat 150, Swift 380, Talon 500, Fury 600 3D, Raven 770 Speed, Bell 206 JetRanger, MD 500E |
 | Multirotors | 10 | Quad X450, Wasp Racing Quad, Apex 5 Racer, Freestyle 5 HD, Tiny Whoop 65, Whoop 75 Brushless, Cinewhoop 3, Toothpick 3, Long Range 7, Hexa 680 Lifter |

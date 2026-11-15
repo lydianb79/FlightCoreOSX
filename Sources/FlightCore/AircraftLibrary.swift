@@ -1361,6 +1361,7 @@ enum AircraftLibrary {
                 $0.margin = 0.11; $0.ailThrow = 12; $0.elevThrow = 12; $0.endurance = 600; $0.tough = 1.2
                 $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.1, 0.1, 0.12); $0.tail = orange; $0.accent = orange; $0.sound = 150 },
             wing("Horten Ho 229", "Twin-jet flying wing with no fin at all: elegant, fast, and loose in yaw") {
+                $0.category = "Jets";
                 $0.span = 1.5; $0.rootChord = 0.56; $0.tipChord = 0.17; $0.sweep = 0.44; $0.mass = 1.9; $0.thrust = 19; $0.pitchSpeed = 55
                 $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.noFin = true; $0.handLaunch = false; $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.2; $0.wheelR = 0.026
                 $0.retracts = true; $0.fuseLen = 0.62; $0.noseZ = -0.3; $0.fuseW = 0.14; $0.fuseH = 0.1; $0.canopyLen = 0.16; $0.washout = 5; $0.thick = 0.11
@@ -1388,12 +1389,14 @@ enum AircraftLibrary {
                 $0.ailThrow = 12; $0.elevThrow = 11; $0.tough = 1.2
                 $0.fuse = white; $0.wingTop = white; $0.wingBottom = rgb(0.1, 0.45, 0.2); $0.tail = rgb(0.95, 0.75, 0.05); $0.accent = rgb(0.95, 0.75, 0.05); $0.sound = 130 },
             wing("Northrop B-2 Spirit", "Stealth bomber as a ducted-fan flying wing: no fin, a saw-tooth trailing edge and a long, flat approach") {
+                $0.category = "Jets";
                 $0.span = 1.6; $0.rootChord = 0.5; $0.tipChord = 0.14; $0.sweep = 0.5; $0.mass = 2.1; $0.thrust = 20; $0.pitchSpeed = 52
                 $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.noFin = true; $0.handLaunch = false; $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.22; $0.wheelR = 0.026
                 $0.retracts = true; $0.fuseLen = 0.6; $0.noseZ = -0.3; $0.fuseW = 0.16; $0.fuseH = 0.09; $0.canopyLen = 0.12; $0.washout = 5; $0.thick = 0.11
                 $0.margin = 0.12; $0.trimCL = 0.3; $0.ailThrow = 12; $0.elevThrow = 13; $0.tough = 1; $0.airfoil = .reflex
                 $0.fuse = rgb(0.2, 0.22, 0.25); $0.wingTop = rgb(0.2, 0.22, 0.25); $0.accent = rgb(0.13, 0.14, 0.16); $0.wingBottom = rgb(0.24, 0.26, 0.29); $0.tail = rgb(0.2, 0.22, 0.25); $0.sound = 420 },
             wing("Avro Vulcan", "Cold War delta bomber: a vast triangular wing that floats at alarming nose-up angles and howls on the way past") {
+                $0.category = "Jets";
                 $0.span = 1.3; $0.rootChord = 0.78; $0.tipChord = 0.1; $0.sweep = 0.68; $0.mass = 2.3; $0.thrust = 24; $0.pitchSpeed = 55
                 $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.24; $0.finChord = 0.3; $0.finZ = 0.5; $0.handLaunch = false
                 $0.gear = .tricycle; $0.gearH = 0.13; $0.track = 0.2; $0.wheelR = 0.028; $0.retracts = true
@@ -1401,6 +1404,7 @@ enum AircraftLibrary {
                 $0.margin = 0.14; $0.trimCL = 0.25; $0.ailStart = 0; $0.ailFrac = 0.16; $0.ailThrow = 16; $0.elevThrow = 16; $0.tough = 1; $0.scheme = 7
                 $0.fuse = rgb(0.3, 0.33, 0.35); $0.wingTop = rgb(0.3, 0.33, 0.35); $0.accent = rgb(0.22, 0.28, 0.16); $0.wingBottom = rgb(0.85, 0.85, 0.83); $0.tail = rgb(0.3, 0.33, 0.35); $0.sound = 400 },
             wing("Dassault Mirage III", "Tailless delta fighter: a needle fuselage on a sharp triangle; quick, clean, and fast on the approach") {
+                $0.category = "Jets";
                 $0.span = 0.82; $0.rootChord = 0.62; $0.tipChord = 0.05; $0.sweep = 0.56; $0.mass = 1.25; $0.thrust = 17; $0.pitchSpeed = 62
                 $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.2; $0.finChord = 0.26; $0.finZ = 0.42; $0.handLaunch = false
                 $0.gear = .tricycle; $0.gearH = 0.12; $0.track = 0.12; $0.wheelR = 0.024; $0.retracts = true
@@ -1408,6 +1412,7 @@ enum AircraftLibrary {
                 $0.margin = 0.14; $0.trimCL = 0.22; $0.ailStart = 0; $0.ailFrac = 0.16; $0.ailThrow = 16; $0.elevThrow = 15; $0.tough = 1; $0.scheme = 4
                 $0.fuse = metal; $0.wingTop = metal; $0.wingBottom = metal; $0.tail = rgb(0.1, 0.2, 0.55); $0.accent = rgb(0.85, 0.08, 0.08); $0.sound = 430 },
             wing("Messerschmitt Me 163 Komet", "Tailless rocket interceptor of 1944: a fat little fuselage on swept wooden wings, landed on its belly") {
+                $0.category = "Jets"; $0.airfoil = .reflex;
                 $0.span = 1.0; $0.rootChord = 0.34; $0.tipChord = 0.13; $0.sweep = 0.3; $0.mass = 1.1; $0.thrust = 15; $0.pitchSpeed = 50
                 $0.ducted = true; $0.pusher = false; $0.winglets = false; $0.finH = 0.2; $0.finChord = 0.24; $0.finZ = 0.3
                 $0.fuseLen = 0.62; $0.noseZ = -0.3; $0.fuseW = 0.15; $0.fuseH = 0.17; $0.fuseExp = 2; $0.canopyLen = 0.16; $0.thick = 0.11; $0.washout = 4

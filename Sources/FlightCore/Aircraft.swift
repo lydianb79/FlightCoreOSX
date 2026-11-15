@@ -128,7 +128,7 @@ extension AircraftSpec {
         case "Trainers & Sport": return name.contains("Racer") ? 3 : 1
         case "Scale Civil": return 2
         case "Gliders": return 2
-        case "Wings": return ["Ho 229", "Race", "B-2", "Mirage", "Vulcan", "Speed", "Komet"].contains { name.contains($0) } ? 4 : (name.contains("Delta") || name.contains("Slope") ? 3 : 2)
+        case "Wings": return ["Race", "Speed"].contains { name.contains($0) } ? 4 : (name.contains("Delta") || name.contains("Slope") ? 3 : 2)
         case "Aerobatic", "Foam 3D": return 3
         case "Warbirds", "Jets": return 4
         case "Helicopters": return (heli?.maxRate ?? 5) < 4.5 ? 4 : 5
@@ -141,7 +141,7 @@ extension AircraftSpec {
         if hasFlaps { f.append("Flaps") }
         if hasRetracts { f.append("Retractable gear") }
         if hasFloats { f.append("Floats") }
-        if category == "Wings" { f.append("Elevons") }
+        if surfaces.contains(where: { $0.elevGain != 0 }) { f.append("Elevons") }
         if handLaunch { f.append("Hand launch") }
         if props.count > 1 { f.append("Twin engine") }
         if kind == .helicopter { f.append("Collective pitch"); f.append("Autorotation") }
