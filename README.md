@@ -132,7 +132,7 @@ For your own photos, the `.json` file next to the image can also set where aircr
 
 `bearing` is measured in the photo (0° at the image centre, positive to the right). An obstacle only says how far away a tree or building is. What is solid is decided by the picture itself: FlightCore works out which parts of the photo are open sky and which hold something, and the model hits an obstacle only where, from the pilot's position, it is in front of the object. Gaps between crowns, the sky beside a pointed treetop and the air above a hedge are open, and a top that reaches higher than the stand-in shape is still solid. (`FlightCore --maskcheck <folder>` writes each photo with the solid parts tinted.) The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
 
-The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
+The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. Photos taken on level or evenly sloping ground work best; a summit or a ledge above a valley does not, because the model then meets the invisible ground in what looks like mid-air. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
 ## Controls
 
@@ -260,7 +260,9 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--parktest`, `--panocheck <folder>` and `--panostats` for photo sites; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+
+Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
 
 ## Not yet implemented
 
@@ -268,7 +270,8 @@ Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balan
 - Aircraft and airport editors
 - Flight recording and playback
 - Flight-instructor lessons
-- Uneven ground (anything other than one level or tilted plane) and occlusion by photographed objects on photo sites
+- Uneven ground on photo sites: the ground is one level or tilted plane, so a summit, a gully or a valley below the camera cannot be followed
+- Occlusion by photographed objects: the model is always drawn in front of the photo, even when it has flown behind a tree
 
 ## Credits
 
