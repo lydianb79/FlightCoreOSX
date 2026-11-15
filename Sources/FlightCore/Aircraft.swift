@@ -55,6 +55,7 @@ struct Propulsor {
     var tau: Float = 0.7            // rotor inertia: larger = slower to change speed
     var momentum: Float = 0         // angular momentum at full speed (kg m^2/s), for gyroscopic effects
     var spinDir: Float = 1          // +1 clockwise seen from behind
+    var axis = V3(0, 0, -1)         // thrust direction: models other than flat foamies have the motor angled right and down
     var pFactor: Float = 0.18       // sideways shift of the thrust centre per radian of inflow angle, in diameters
 }
 
@@ -157,6 +158,7 @@ struct AircraftSpec {
     var hasFlaps = false
     var hasRetracts = false
     var hasFloats = false
+    var construction = "Balsa and film"
     var wingArea: Float = 0.4
     var downwashK: Float = 0        // downwash angle at the tail per unit wing lift coefficient
     var endurance: Float = 240      // seconds of full-throttle running on a fresh battery
@@ -279,7 +281,11 @@ final class Aircraft {
         let clLin = s.liftSlope * a * s.load * (1 + 0.1 * (1 - ge))
         let cdLin = s.cd0 + clLin * clLin / (.pi * s.ar * 0.8) * ge
         let sa = sin(a)
-        let clP = 1.1 * s.postStall * sin(2 * a)
+        // Past the stall a model wing keeps most of its lift and sheds it gradually as the angle grows,
+        // until it is just a flat plate in the airflow.
+        let plate = 1.1 * abs(sin(2 * a))
+        let keep = s.liftSlope * s.stall * s.postStall * (1 - 0.5 * smoothstep(s.stall, s.stall + 0.6, aL))
+        let clP = (abs(a) < .pi / 2 ? max(plate, keep) : plate) * (sin(2 * a) < 0 ? -1 : 1)
         let cdP = s.cd0 + 1.5 * sa * sa
         return (clLin + (clP - clLin) * t, cdLin + (cdP - cdLin) * t)
     }
@@ -318,7 +324,7 @@ final class Aircraft {
                 levels[i] = clampf(n + (qm - ql) / p.tau * dt, 0, 1.4)
                 loadSum += clampf(qm, 0, 1.5)
                 draw += max(qm, 0) * n
-                let f = V3(0, 0, -T)
+                let f = p.axis * T
                 // P-factor: the down-going blade bites harder, so thrust acts off-centre
                 let off = T > 0 ? V3(aoa, slip, 0) * (p.pFactor * p.diameter * p.spinDir) : V3.zero
                 fb += f; tb += cross(p.pos + off, f)
@@ -329,7 +335,7 @@ final class Aircraft {
                     let v0 = max(vfwd, 0)
                     let w = -v0 + sqrt(v0 * v0 + 2 * T / (rho * A))
                     washV = max(washV, w)
-                    if abs(p.pos.x) < 0.01 { swirlV = 0.07 * w * p.spinDir }          // spiral slipstream
+                    if abs(p.pos.x) < 0.01 { swirlV = 0.04 * w * p.spinDir }          // spiral slipstream
                 }
                 spin[i] += (n > 0.01 ? 12 + 45 * sqrt(min(n, 1)) : 0) * dt
             }
@@ -356,8 +362,8 @@ final class Aircraft {
                 let sp = sqrt(sp2)
                 var alpha = atan2(-vn, vf) + s.alpha0 - s.downwash * eps
                 // control surfaces lose their bite in separated flow
-                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.6 * stallT[i]) }
-                let dElev = s.elevGain * servo[1] * (1 - 0.6 * stallT[i])
+                if s.flapCh >= 0 { alpha += s.flapGain * servo[s.flapCh] * (1 - 0.3 * stallT[i]) }
+                let dElev = s.elevGain * servo[1] * (1 - 0.3 * stallT[i])
                 alpha += dElev
                 alpha += s.flapsGain * flap
                 var (cl, cd) = liftDrag(alpha, s, i, speed: sp, dt: dt)
@@ -369,10 +375,12 @@ final class Aircraft {
                 let u = (s.chordDir * vf + s.normal * vn) / sp
                 let l = (s.normal * vf - s.chordDir * vn) / sp
                 let f = (l * cl - u * cd) * qS
-                fb += f; tb += cross(s.pos, f)
+                // in separated flow the centre of pressure moves back toward mid-chord, which steadies a stalled wing
+                let cp = s.pos - s.chordDir * (0.25 * s.chord * stallT[i])
+                fb += f; tb += cross(cp, f)
             }
             // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
-            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea * groundPhi - eps) * min(1, dt / 0.04) }
+            if wingArea > 0 { eps += (spec.downwashK * wingCl / wingArea * groundPhi - eps) * min(1, dt / 0.15) }
             fb -= va * (0.5 * rho * (spec.cdA + (spec.hasRetracts ? 0.004 * (1 - gear) : 0)) * airspeed)
 
         case .multirotor:

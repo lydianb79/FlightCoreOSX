@@ -93,28 +93,29 @@ func runPhysicsTest() {
     for name in ["Skylark Trainer", "North American T-6 Texan", "P-51D Mustang", "Piper J-3 Cub", "Extra 300", "Flatty 3D"] {
         guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
         print("== \(name)")
-        // 1. power-off stall from level flight: hold the nose up as the speed bleeds away
+        // 1. stalls the way a pilot meets them: hold height as the speed bleeds off, and when the wing lets go
+        //    keep the stick where it is for two seconds. Power off, then with 60% power.
         let ac = Aircraft(spec); ac.unlimitedBattery = true
-        ac.reset(pos: V3(0, 150, 0), heading: 0, speed: spec.stallSpeed * 1.6)
-        var minV: Float = 99, breakV: Float = 0, maxBank: Float = 0, pitchAtBreak: Float = 0, lowestPitch: Float = 9
-        fly(ac, 14, { t in
-            var c = Controls()
-            c.elevator = clampf(0.1 + t * 0.09, -1, 1)
-            c.aileron = clampf(-1.5 * ac.roll, -0.3, 0.3) * (ac.wingStall > 0.3 ? 0 : 1)
-            return c
-        }, each: { _ in
-            minV = min(minV, ac.airspeed)
-            if breakV == 0 && ac.wingStall > 0.5 { breakV = ac.airspeed; pitchAtBreak = ac.pitch }
-            if breakV > 0 { maxBank = max(maxBank, abs(ac.roll)); lowestPitch = min(lowestPitch, ac.pitch) }
-        })
-        print(String(format: "   stall: wing lets go at %.0f km/h (predicted %.0f), nose %.0f° -> %.0f°, wing drop up to %.0f°",
-                     breakV * 3.6, spec.stallSpeed * 3.6, pitchAtBreak / deg, lowestPitch / deg, maxBank / deg))
-        // 1b. the same with power on: torque and slipstream make one wing go first
-        ac.reset(pos: V3(0, 150, 0), heading: 0, speed: spec.stallSpeed * 1.5)
-        var bank2: Float = 0, went = false
-        fly(ac, 12, { t in var c = Controls(); c.throttle = 0.7; c.elevator = clampf(0.1 + t * 0.1, -1, 1); return c },
-            each: { _ in if ac.wingStall > 0.4 { went = true }; if went && abs(bank2) < abs(ac.roll) { bank2 = ac.roll } })
-        print(String(format: "   power-on stall, ailerons neutral: rolls %.0f° %@", abs(bank2) / deg, bank2 < 0 ? "left" : "right"))
+        for power in [Float(0), 0.6] {
+            ac.reset(pos: V3(0, 150, 0), heading: 0, speed: spec.stallSpeed * 1.5)
+            var elevI: Float = 0, held: Float? = nil, tBreak: Float = 0
+            var breakV: Float = 0, pitch0: Float = 0, y0: Float = 0, minPitch: Float = 9, maxBank: Float = 0, done = false
+            fly(ac, 25, { t in
+                var c = Controls(); c.throttle = power
+                if let h = held { c.elevator = h; return c }
+                elevI = clampf(elevI + 0.6 * (-ac.vel.y - (power > 0 ? -0.3 : 0)) * 0.001, -0.3, 1)
+                c.elevator = clampf(elevI + 0.12 * -ac.vel.y - 0.15 * ac.omega.x, -1, 1)
+                c.aileron = clampf(-1.5 * ac.roll, -0.3, 0.3)
+                if ac.wingStall > 0.45 || (t > 3 && elevI >= 0.999) { held = c.elevator; tBreak = t; breakV = ac.airspeed; pitch0 = ac.pitch; y0 = ac.pos.y }
+                return c
+            }, each: { t in
+                guard held != nil, !done else { return }
+                if t - tBreak > 2 { done = true; print(String(format: "   stall %@: breaks at %.0f km/h (predicted %.0f) with the nose %.0f° up; in the next 2 s the nose reaches %.0f°, bank up to %.0f°, height lost %.0f m",
+                                                   power > 0 ? "with power" : "power off ", breakV * 3.6, spec.stallSpeed * 3.6, pitch0 / deg, minPitch / deg, maxBank / deg, y0 - ac.pos.y)); return }
+                minPitch = min(minPitch, ac.pitch); maxBank = max(maxBank, abs(ac.roll))
+            })
+            if !done { print("   stall \(power > 0 ? "with power" : "power off "): did not stall in 25 s — it has the power to hold height") }
+        }
         // 2. spin: stall it, then full rudder and up elevator; then neutralise and count the recovery
         ac.reset(pos: V3(0, 250, 0), heading: 0, speed: spec.stallSpeed * 1.15)
         var yawTurned: Float = 0, startY: Float = 0
@@ -265,6 +266,87 @@ func runEnvTest() {
         for i in 0..<400 { let p = V3(Float(i % 20) * 40 - 400, 120, Float(i / 20) * 28 - 460); let w = env.wind(at: p, terrain: terrain).y; up = max(up, w); down = min(down, w) }
         print(String(format: "THERMALS at 120 m: strongest lift %.1f m/s, strongest sink %.1f m/s, %d active", up, down, env.thermals.count))
     }
+}
+
+/// Handling diagnostics: control rates for every airplane, and the balance of forces in a prop-hang.
+func runHandlingTest() {
+    let terrain = Terrain(site: SiteSpec.all[0])
+    print("name                            roll deg/s  pitch deg/s  yaw deg/s   (full stick at 1.6 x stall speed)")
+    var rolls: [(String, Float)] = []
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let m = measureRates(spec)
+        let r = m.roll, p = m.pitch, y = m.yaw
+        rolls.append((spec.name, r))
+        print(String(format: "%@  %6.0f      %6.0f      %6.0f", spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), r, p, y))
+    }
+    let sorted = rolls.sorted { $0.1 < $1.1 }
+    print(String(format: "ROLL RATE RANGE: slowest %@ %.0f deg/s, fastest %@ %.0f deg/s", sorted.first!.0, sorted.first!.1, sorted.last!.0, sorted.last!.1))
+
+    // prop-hang: nose straight up, motionless, thrust equal to weight. What does the aircraft do untouched, and how much can the controls push back?
+    for name in ["Flatty 3D", "Vortex 3D", "Extra 300"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        func accel(_ c0: Controls) -> V3 {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            ac.reset(pos: V3(0, 100, 0), heading: 0)
+            ac.q = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0))
+            let n = sqrt(spec.mass * gravity / spec.props[0].staticThrust)
+            ac.levels[0] = n
+            var c = c0; c.throttle = 0.82 * n + 0.18 * n * n            // throttle that holds this shaft speed
+            for _ in 0..<60 { ac.vel = .zero; ac.omega = .zero; ac.q = simd_quatf(angle: .pi / 2, axis: V3(1, 0, 0)); ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0) }
+            ac.omega = .zero; ac.vel = .zero
+            ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+            return ac.omega / 0.001 / deg
+        }
+        let rest = accel(Controls())
+        var ca = Controls(); ca.aileron = 1; var ce = Controls(); ce.elevator = 1; var cr = Controls(); cr.rudder = 1
+        let a = accel(ca) - rest, e = accel(ce) - rest, r = accel(cr) - rest
+        print(String(format: "HOVER %@ (hover needs %.0f%% shaft speed): untouched it accelerates roll %.0f, pitch %.0f, yaw %.0f deg/s2; full stick can add roll %.0f, pitch %.0f, yaw %.0f deg/s2",
+                     name, sqrt(spec.mass * gravity / spec.props[0].staticThrust) * 100, rest.z, rest.x, rest.y, abs(a.z), abs(e.x), abs(r.y)))
+    }
+    // continuous roll at speed: hold full aileron for three rolls and see how far the nose wanders off the direction of flight
+    for name in ["Flatty 3D", "Vortex 3D", "Extra 300", "Skylark Trainer"] {
+        guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        ac.reset(pos: V3(0, 300, 0), heading: 0, speed: spec.stallSpeed * 2.6)
+        var c = Controls(); c.throttle = 0.8
+        for _ in 0..<400 { ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0) }
+        let dir0 = normalize(V3(ac.vel.x, 0, ac.vel.z))
+        c.aileron = 1
+        var turns: Float = 0, cone: Float = 0, t: Float = 0
+        while turns < 3 && t < 6 {
+            ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+            turns += abs(ac.omega.z) * 0.001 / (2 * .pi); t += 0.001
+            cone = max(cone, acos(clampf(dot(ac.forward, normalize(ac.vel)), -1, 1)) / deg)
+        }
+        let hv = normalize(V3(ac.vel.x, 0, ac.vel.z))
+        print(String(format: "ROLLS %@: 3 rolls in %.1f s; nose up to %.0f° off the direction of flight; heading drifts %.0f°; height lost %.0f m",
+                     name, t, cone, acos(clampf(dot(hv, dir0), -1, 1)) / deg, 300 - ac.pos.y))
+    }
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--pitchdebug"), i + 2 < CommandLine.arguments.count {
+    // step response in pitch: aircraft name, elevator amount
+    let spec = AircraftLibrary.all.first { $0.name == CommandLine.arguments[i + 1] }!
+    let terrain = Terrain(site: SiteSpec.all[0])
+    let ac = Aircraft(spec); ac.unlimitedBattery = true
+    ac.reset(pos: V3(0, 200, 0), heading: 0, speed: spec.stallSpeed * 1.6)
+    var c = Controls(); c.throttle = 0.5
+    for k in 0..<1000 {
+        if k == 300 { c.elevator = Float(CommandLine.arguments[i + 2]) ?? 0.2 }
+        ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0)
+        if k % 50 == 0 {
+            let va = simd_float3x3(ac.q).transpose * ac.vel
+            print(String(format: "t=%.2f pitch rate %6.0f deg/s  alpha %5.1f  speed %4.1f  wing stall %.2f  pitch %5.1f", Float(k) / 1000, ac.omega.x / deg, atan2(-va.y, -va.z) / deg, ac.airspeed, ac.wingStall, ac.pitch / deg))
+        }
+    }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--handlingtest") {
+    let t0 = Date(); _ = AircraftLibrary.all.count
+    print(String(format: "LIBRARY built and calibrated in %.2f s", Date().timeIntervalSince(t0)))
+    runHandlingTest()
+    exit(0)
 }
 
 if CommandLine.arguments.contains("--envtest") {

@@ -380,6 +380,7 @@ struct AircraftBrowser: View {
                         specRow(spec.sizeLabel, String(format: "%.2f m", spec.span))
                         specRow("Flying weight", spec.mass < 1 ? String(format: "%.0f g", spec.mass * 1000) : String(format: "%.1f kg", spec.mass))
                         if spec.kind == .airplane {
+                            specRow("Construction", spec.construction)
                             specRow("Wing loading", String(format: "%.0f g/dm²", spec.mass / spec.wingArea * 10))
                             specRow("Stall speed", String(format: "%.0f km/h", spec.stallSpeed * 3.6))
                         }

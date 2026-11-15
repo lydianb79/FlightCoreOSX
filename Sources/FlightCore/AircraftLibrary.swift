@@ -1,6 +1,29 @@
 import simd
 import Foundation
 
+/// What the airframe is made of. It sets where the weight sits, and so how readily the model rotates.
+enum Construction {
+    case foam           // EPP / depron: featherweight airframe, most of the mass is motor and battery at the middle
+    case balsa          // built-up wood with film covering
+    case composite      // moulded glass or carbon: heavy, stiff wings
+    var label: String { self == .foam ? "Foam" : (self == .balsa ? "Balsa and film" : "Composite") }
+    /// Fractions of the flying weight in the wing, fuselage, tail and power unit; the rest is battery and radio.
+    var split: (wing: Float, fuse: Float, tail: Float, engine: Float) {
+        switch self {
+        case .foam: return (0.15, 0.13, 0.035, 0.2)
+        case .balsa: return (0.24, 0.24, 0.065, 0.17)
+        case .composite: return (0.33, 0.25, 0.05, 0.11)
+        }
+    }
+}
+
+/// Peak roll, pitch and yaw rates (degrees per second, full stick, at 1.6 times the stall speed) that each
+/// kind of model is set up for. Control throws are scaled until the simulated aircraft matches.
+let rateTargets: [String: (roll: Float, pitch: Float, yaw: Float)] = [
+    "Trainers & Sport": (150, 120, 70), "Scale Civil": (110, 100, 60), "Warbirds": (200, 130, 70), "Aerobatic": (380, 240, 150),
+    "Foam 3D": (330, 300, 200), "Wings": (230, 170, 60), "Jets": (240, 120, 60), "Gliders": (95, 85, 60),
+]
+
 enum GearType { case tricycle, taildragger, none, floats }
 
 /// Wing section families. Each sets the zero-lift offset, where and how sharply the section stalls,
@@ -153,6 +176,9 @@ struct PlaneGeom {
     var noFin = false
     var pusher = false              // propeller at the tail
     var trimCL: Float = 0.4         // lift coefficient a tailless wing flies at with the stick centred
+    var build: Construction? = nil  // nil = chosen from the type
+    var rightThrust: Float? = nil   // motor offset in degrees; nil = typical for the type (none on flat foamies)
+    var downThrust: Float? = nil
     var dataKey: String? = nil      // full-size aircraft to take figures from, when the name differs
     var washout: Float = 1.5        // degrees of twist reducing the tip's incidence
     var margin: Float? = nil        // static margin as a fraction of mean chord; nil = by category
@@ -250,7 +276,8 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     do {
         var sum: Float = 0, wsum: Float = 0
         for k in 0..<nPan { let c = chord((Float(k) + 0.5) / Float(nPan)); sum += loads[k] * c; wsum += c }
-        loads = loads.map { $0 * wsum / sum }
+        // model-size wings at low Reynolds numbers let go gradually, so only half of the theoretical unevenness is used
+        loads = loads.map { 1 + 0.5 * ($0 * wsum / sum - 1) }
     }
     for wg in wings { for side in [Float(-1), 1] {
         for k in 0..<nPan {
@@ -261,9 +288,10 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
             var s = AeroSurface(pos: V3(x, wg.y + abs(x) * tan(dih), g.wingLE + wg.z + g.sweep * fm + 0.25 * ch),
                                 normal: n0 * cos(incL) - c0 * sin(incL), chordDir: c0 * cos(incL) + n0 * sin(incL),
                                 area: ch * hs / Float(nPan) * wingEff, ar: ar, liftSlope: slope,
-                                stall: g.stall * pow(ch / meanChord, 0.12), cd0: g.cd0, alpha0: g.camber * deg)
+                                stall: g.stall * pow(ch / meanChord, 0.06), cd0: g.cd0, alpha0: g.camber * deg)
             s.isWing = true; s.load = loads[k]; s.chord = ch
-            s.stallWidth = afp.width; s.hyst = afp.hyst; s.postStall = afp.post
+            // small models stall softly: a wider break, little hysteresis, and most of the lift kept afterwards
+            s.stallWidth = max(afp.width * 1.6, 0.14); s.hyst = afp.hyst * 0.35; s.postStall = clampf(afp.post - 0.1, 0.72, 0.92)
             if f0 >= g.ailStart - 0.01 { s.flapCh = 0; s.flapGain = -side * flapTau(g.ailFrac) * g.ailThrow * deg }
             s.wash = fm < 0.34 ? g.washWing : 0
             if g.flaps && g.ailStart > 0.4 && f0 < g.ailStart - 0.01 { s.flapsGain = 0.14 }
@@ -289,7 +317,7 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     for fp in finSpots {
         surfaces.append(AeroSurface(pos: fp, normal: V3(1, 0, 0), area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
                                     stall: 0.27, cd0: 0.012, flapCh: g.flyingWing ? -1 : 2, flapGain: g.flyingWing ? 0 : -flapTau(g.rudFrac) * g.rudThrow * deg,
-                                    wash: g.flyingWing ? 0 : g.washTail, chord: g.finChord, swirl: g.ducted || g.twin > 0 || g.flyingWing ? 0 : 1))
+                                    wash: g.flyingWing ? 0 : g.washTail, chord: g.finChord, swirl: g.ducted || g.twin > 0 || g.flyingWing || g.profile ? 0 : 1))
     }
     if g.noFin {
         // a finless swept wing is kept straight by its tips: the advancing one gains drag
@@ -344,7 +372,10 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     // on its centre of gravity. The moments of inertia follow from where the mass sits.
     let engZ = g.ducted ? tz - 0.15 : (g.twin > 0 ? g.wingLE - 0.1 : nz + 0.04)
     let glider = g.category == "Gliders"
-    let mWing = g.mass * (glider ? 0.34 : 0.22), mFuse = g.mass * 0.24, mTail = g.mass * 0.06, mEng = g.mass * (glider ? 0.1 : 0.16)
+    let construction: Construction = g.build ?? (g.profile || g.category == "Foam 3D" || g.tough > 1.3 || (g.category == "Wings" && !g.ducted) ? .foam
+        : (glider || g.category == "Jets" ? .composite : .balsa))
+    let split = construction.split
+    let mWing = g.mass * split.wing, mFuse = g.mass * split.fuse, mTail = g.mass * split.tail, mEng = g.mass * split.engine
     let mBatt = g.mass - mWing - mFuse - mTail - mEng
     let zWing = g.wingLE + g.sweep * 0.42 + 0.4 * mac, zFuse = nz + 0.45 * L, zTail = g.stabZ + 0.4 * g.stabChord
     let zBatt = clampf(-(mWing * zWing + mFuse * zFuse + mTail * zTail + mEng * engZ) / mBatt, nz + 0.05, tz - 0.2)
@@ -357,19 +388,26 @@ func makeAirplane(_ g0: PlaneGeom) -> AircraftSpec {
     var spec = AircraftSpec(name: g.name, kind: .airplane, blurb: g.blurb, mass: g.mass, inertia: V3(ixx, ixx + izz * 0.92, izz), span: g.span)
     spec.surfaces = surfaces
     spec.props = engines.enumerated().map { i, pos in
-        var p = Propulsor(pos: pos, staticThrust: g.thrust / Float(engines.count), pitchSpeed: g.pitchSpeed, diameter: g.propDia, torqueK: g.ducted ? 0 : 0.03)
+        var p = Propulsor(pos: pos, staticThrust: g.thrust / Float(engines.count), pitchSpeed: g.pitchSpeed, diameter: g.propDia, torqueK: g.ducted ? 0 : 0.02)
         let d = g.ducted ? Float(0.08) : g.propDia
         p.tau = g.ducted ? 0.5 : 0.35 + 1.2 * g.propDia
         // propeller and motor rotor as a spinning mass; speed from the pitch speed and a typical pitch of 0.62 diameters
         let revs = g.pitchSpeed / (0.62 * (g.ducted ? 0.12 : g.propDia))
         p.momentum = 0.6 * pow(d, 2.5) * d * d / 12 * 1.5 * revs * 2 * .pi
         p.spinDir = g.twin > 0 && i == 1 ? -1 : 1            // twins have handed propellers
-        p.pFactor = g.ducted ? 0 : 0.18
+        p.pFactor = g.ducted ? 0 : 0.1
+        // Motor offset: built-up and scale models have the motor angled a little right and down so that power
+        // changes do not pull them off line. Flat foamies are built with the thrust line dead straight.
+        if !g.profile && !g.ducted && !g.pusher && g.twin == 0 {
+            let rt = (g.rightThrust ?? 1.2) * deg, dn = (g.downThrust ?? (g.wingY > g.fuseH * 0.3 ? 2.5 : 0.8)) * deg
+            p.axis = normalize(V3(sin(rt), -sin(dn), -cos(rt) * cos(dn)))
+        }
         if g.pusher { p.spinDir = -1 }
         return p
     }
     spec.wingArea = area * nWings
     spec.downwashK = downK * (nWings > 1 ? 1.3 : 1)
+    spec.construction = construction.label
     spec.endurance = g.endurance ?? (glider ? 420 : (g.profile ? 200 : 240))
     if g.ducted || g.pusher { for i in spec.surfaces.indices { spec.surfaces[i].wash = 0 } }
     spec.contacts = contacts
@@ -461,6 +499,63 @@ func sized(_ base: PlaneGeom, span: Float, _ edit: (inout PlaneGeom) -> Void = {
     g.mass *= m; g.thrust *= m; g.cdA *= k * k
     edit(&g)
     return g
+}
+
+/// Flat, empty ground for test flights made while the library is being built.
+private let calibrationGround: Terrain = {
+    var s = SiteSpec.builtIn[0]
+    s.panorama = URL(fileURLWithPath: "/"); s.treeCount = 0; s.waterLevel = nil
+    return Terrain(site: s)
+}()
+
+/// Peak roll, pitch and yaw rate (deg/s) at full stick from level flight at 1.6 times the stall speed.
+func measureRates(_ spec: AircraftSpec) -> (roll: Float, pitch: Float, yaw: Float) {
+    // `early` reads the rate a fifth of a second after the stick moves: in pitch the rate keeps building as the
+    // aircraft slows and stalls, and it is the initial response that the pilot feels.
+    func rate(_ set: (inout Controls) -> Void, _ pick: (Aircraft) -> Float, early: Bool = false) -> Float {
+        let ac = Aircraft(spec); ac.unlimitedBattery = true
+        ac.reset(pos: V3(0, 200, 0), heading: 0, speed: spec.stallSpeed * 1.6)
+        var c = Controls(); c.throttle = 0.5
+        for _ in 0..<150 { ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0) }
+        let base = pick(ac)
+        set(&c)
+        var peak: Float = 0
+        for i in 0..<(early ? 200 : 450) {
+            ac.step(dt: 0.001, c: c, terrain: calibrationGround, wind: .zero, rollMu: 0)
+            peak = early ? (i == 199 ? abs(pick(ac) - base) : 0) : max(peak, abs(pick(ac)))
+        }
+        return peak / deg
+    }
+    return (rate({ $0.aileron = 1 }, { $0.omega.z }), rate({ $0.elevator = 1 }, { $0.omega.x }, early: true), rate({ $0.rudder = 1 }, { $0.omega.y }))
+}
+
+/// Scale the control throws so the aircraft rolls, pitches and yaws at the rates its category is set up for.
+func calibrateRates(_ spec0: AircraftSpec) -> AircraftSpec {
+    var spec = spec0
+    guard spec.kind == .airplane, let target = rateTargets[spec.category] else { return spec }
+    // long wings roll more slowly than the category norm, short ones faster
+    let sizeK = clampf(pow(1.4 / spec.span, 0.35), 0.75, 1.3)
+    for _ in 0..<2 {
+        let m = measureRates(spec)
+        let kr = clampf(target.roll * sizeK / max(m.roll, 1), 0.4, 2.2), kp = clampf(target.pitch / max(m.pitch, 1), 0.4, 2.2), ky = clampf(target.yaw / max(m.yaw, 1), 0.4, 2.2)
+        for i in spec.surfaces.indices {
+            switch spec.surfaces[i].flapCh {
+            case 0: spec.surfaces[i].flapGain *= kr
+            case 1: spec.surfaces[i].flapGain *= kp
+            case 2: spec.surfaces[i].flapGain *= ky
+            default: break
+            }
+            spec.surfaces[i].elevGain *= kp
+        }
+        // keep the visible deflections in step with the aerodynamic ones
+        for i in spec.parts.indices {
+            if case .hinge(let ch, let a) = spec.parts[i].anim {
+                let k: Float = ch == 0 || ch == 5 || ch == 6 ? kr : (ch == 1 ? kp : (ch == 2 ? ky : 1))
+                spec.parts[i].anim = .hinge(ch, clampf(a * k, -55 * deg, 55 * deg))
+            }
+        }
+    }
+    return spec
 }
 
 enum AircraftLibrary {
@@ -940,8 +1035,9 @@ enum AircraftLibrary {
 
         var heli = makeHeli(); heli.category = "Helicopters"
         var quad = makeQuad(); quad.category = "Multirotors"
-        return [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
+        let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
                 makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane)
+        return everything.map(calibrateRates)
     }()
 }
