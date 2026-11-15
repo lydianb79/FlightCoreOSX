@@ -718,6 +718,26 @@ if let ci = CommandLine.arguments.firstIndex(of: "--maskcheck"), ci + 1 < Comman
     }
     exit(0)
 }
+if let ci = CommandLine.arguments.firstIndex(of: "--musictest"), ci + 1 < CommandLine.arguments.count {
+    // render 80 seconds of the menu music to a WAV file and report its level and how long it took
+    let m = MusicSynth()
+    var pcm: [Int16] = [], peak: Float = 0, sumSq: Double = 0, bad = false
+    let t0 = Date(), total = 44100 * 80
+    var quiet = 0, quietMax = 0
+    for i in 0..<total {
+        let s = m.next()
+        if !s.0.isFinite || !s.1.isFinite { bad = true }
+        peak = max(peak, abs(s.0), abs(s.1)); sumSq += Double(s.0 * s.0 + s.1 * s.1)
+        if abs(s.0) < 0.002 && abs(s.1) < 0.002 { quiet += 1; quietMax = max(quietMax, quiet) } else { quiet = 0 }
+        pcm.append(Int16(max(-1, min(1, s.0)) * 30000)); pcm.append(Int16(max(-1, min(1, s.1)) * 30000))
+        if i % (44100 * 10) == 44100 * 10 - 1 { print(String(format: "  to %2d s: peak %.2f", (i + 1) / 44100, peak)) }
+    }
+    let took = Date().timeIntervalSince(t0)
+    writeWav(pcm, sampleRate: 44100, to: CommandLine.arguments[ci + 1])
+    print(String(format: "MUSIC 80 s: peak %.2f rms %.3f, longest silence %.2f s, %@; rendered in %.2f s (%.1f%% of real time)", peak, sqrt(sumSq / Double(total * 2)),
+                 Float(quietMax) / 44100, bad ? "NON-FINITE SAMPLES" : "ok", took, took / 80 * 100))
+    exit(0)
+}
 if CommandLine.arguments.contains("--obstaclelist") {
     // every photo site: how close the nearest solid thing is to the pilot and to the start, and how tall the tallest is
     for site in SiteSpec.all where site.panorama != nil {
@@ -1244,6 +1264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         siteItems.append(ClosureMenuItem("Photo: Show / Hide Obstacles") { g.showObstacles.toggle(); g.say(g.site.obstacles.isEmpty ? "This site has no obstacles defined" : (g.showObstacles ? "Obstacles shown" : "Obstacles hidden")) })
         menu("Flying Site", siteItems)
         menu("Simulation", [
+            ClosureMenuItem("Menu Music On / Off") { g.musicEnabled.toggle(); g.say(g.musicEnabled ? "Menu music on" : "Menu music off") },
             ClosureMenuItem("Main Menu") { g.cameFromMenu = false; g.hud.overlay = .menu },
             ClosureMenuItem("Weather…", key: "e", mods: [.command, .shift]) { g.cameFromMenu = g.hud.overlay == .menu; g.hud.overlay = .environment },
             .separator(),

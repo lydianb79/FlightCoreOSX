@@ -180,6 +180,8 @@ final class Game {
     var renderScale: Float = 1, gpuMs: Float = 0       // reported by the renderer
     var advanceMs: [Float] = []
     static let noInterp = CommandLine.arguments.contains("--no-interp")
+    /// Menu music on or off (remembered).
+    var musicEnabled = !UserDefaults.standard.bool(forKey: "musicOff") { didSet { UserDefaults.standard.set(!musicEnabled, forKey: "musicOff") } }
     var cameFromMenu = false        // browsers and panels return to the main menu when opened from it
     /// The flight is held: a menu or browser is open, or a panel that was opened from the main menu.
     var simHeld: Bool { hud.overlay.pausesSim || (cameFromMenu && (hud.overlay == .environment || hud.overlay == .help)) }
@@ -745,6 +747,7 @@ final class Game {
         st.windSpeed = env.windSpeed
         st.ambience = site.panorama != nil ? siteAmbience : siteAmbience.at(time: timeOfDay)
         st.paused = paused || simHeld
+        sound.musicOn = simHeld && musicEnabled
         sound.state = st
     }
 

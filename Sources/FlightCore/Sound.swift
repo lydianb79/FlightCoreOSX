@@ -134,6 +134,10 @@ final class SoundEngine {
     private var node: AVAudioSourceNode?
     var state = SoundState()
     var muted = false
+    /// Menu music: plays while `musicOn`, fading in and out; it carries on from where it left off.
+    var musicOn = false
+    let music = MusicSynth()
+    private var sMusic: Float = 0
     let sampleRate: Float = 44100
 
     // smoothed parameters
@@ -589,6 +593,10 @@ final class SoundEngine {
 
             // soft limiter
             L *= sMaster * 0.9; R *= sMaster * 0.9
+            // menu music, over the top of the (silent, while a menu is open) flight sound
+            let musicTarget: Float = musicOn && !muted ? 1 : 0
+            sMusic += (musicTarget - sMusic) * (musicTarget > sMusic ? 0.00006 : 0.00004)
+            if sMusic > 0.0004 { let m = music.next(); L += m.0 * sMusic; R += m.1 * sMusic }
             left[i] = L / (1 + abs(L)) * 1.6
             right[i] = R / (1 + abs(R)) * 1.6
         }

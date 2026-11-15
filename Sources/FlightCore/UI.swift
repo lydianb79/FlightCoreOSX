@@ -554,10 +554,11 @@ struct SiteBrowser: View {
 struct SplashView: View {
     @ObservedObject var m: HUDModel
     @State private var arrived = false      // the artwork has flown in
+    @State private var sweep = false        // a band of light crosses the artwork
     @State private var pulse = false
     @State private var progress: CGFloat = 0
     private static let image: NSImage? = resourceURL("Splash.jpg").flatMap { NSImage(contentsOf: $0) }
-    private static let hold: Double = 3.0
+    private static let hold: Double = 4.0
 
     var body: some View {
         GeometryReader { g in
@@ -566,8 +567,8 @@ struct SplashView: View {
                 if let img = Self.image {
                     // the artwork rushes toward the viewer and settles, then keeps drifting very slowly
                     Image(nsImage: img).resizable().scaledToFill().frame(width: g.size.width, height: g.size.height)
-                        .scaleEffect(arrived ? 1.0 : 1.12)
-                        .blur(radius: arrived ? 0 : 8)
+                        .scaleEffect(arrived ? 1.0 : 1.22)
+                        .blur(radius: arrived ? 0 : 14)
                         .opacity(arrived ? 1 : 0)
                         .scaleEffect(1 + 0.035 * progress)
                         .clipped()
@@ -575,6 +576,13 @@ struct SplashView: View {
                     Text("FLIGHT CORE OSX").font(.system(size: 90, weight: .black)).foregroundColor(Theme.cream)
                         .scaleEffect(arrived ? 1 : 1.3).opacity(arrived ? 1 : 0)
                 }
+                // a slanted band of light sweeps across, like sun glinting off a wing
+                LinearGradient(colors: [.clear, Theme.cream.opacity(0.0), Theme.cream.opacity(0.42), Theme.cream.opacity(0.0), .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: g.size.width * 0.55, height: g.size.height * 2.2)
+                    .rotationEffect(.degrees(24))
+                    .offset(x: sweep ? g.size.width * 1.1 : -g.size.width * 1.1)
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
                 // a soft dark edge that eases off as the picture arrives
                 RadialGradient(colors: [.clear, .black.opacity(arrived ? 0.28 : 0.75)], center: .center, startRadius: g.size.height * 0.35, endRadius: g.size.height * 1.05)
                     .allowsHitTesting(false)
@@ -603,7 +611,8 @@ struct SplashView: View {
 
     private func start() {
         guard !arrived else { return }
-        withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.7)) { arrived = true }
+        withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 1.1)) { arrived = true }
+        withAnimation(.easeInOut(duration: 1.2).delay(0.35)) { sweep = true }
         withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true).delay(0.5)) { pulse = true }
         withAnimation(.linear(duration: Self.hold)) { progress = 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.hold) { if m.overlay == .splash { m.overlay = .menu } }
@@ -683,6 +692,8 @@ struct MainMenu: View {
                     Button { m.game.cameFromMenu = true; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(InkButton())
                     Button { m.openControllerSetup?() } label: { Label("Controller", systemImage: "gamecontroller") }.buttonStyle(InkButton())
                     Button { m.game.cameFromMenu = true; m.overlay = .help } label: { Label("Controls", systemImage: "keyboard") }.buttonStyle(InkButton())
+                    Button { m.game.musicEnabled.toggle(); m.objectWillChange.send() } label: { Label("Music", systemImage: m.game.musicEnabled ? "music.note" : "speaker.slash") }.buttonStyle(InkButton())
+                        .help(m.game.musicEnabled ? "Turn the menu music off" : "Turn the menu music on")
                     Spacer()
                     Button { NSApp.terminate(nil) } label: { Text("Quit") }.buttonStyle(InkButton())
                 }

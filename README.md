@@ -42,7 +42,8 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 ## Interface
 
-- **Splash screen** at launch: the artwork flies in and settles, then gives way to the main menu. Any key or click continues, or it moves on by itself after a few seconds.
+- **Splash screen** at launch: the artwork flies in and settles, a band of light sweeps across it, and it gives way to the main menu. Any key or click continues, or it moves on by itself after a few seconds.
+- **Menu music** starts with the splash screen and plays in the main menu and the browsers. It fades out when you are cleared for take-off and fades back in when you return to the menu. The Music button in the main menu (or Simulation ▸ Menu Music On / Off) turns it off.
 - **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures, including what powers the model: a brushless electric motor, an electric ducted fan, a piston engine or a turboprop. **Select** takes the aircraft and returns to the main menu.
 - **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama. **Select** takes the site and returns to the main menu.
@@ -230,6 +231,7 @@ Press **H** in the app for this list.
   - crashes (impact, debris) and splashes.
   - the engine goes quiet as soon as the throttle is closed, while its pitch winds down with the propeller; an idling engine is much quieter than one at full throttle, and a crashed model is silent.
   `FlightCore --soundtest out.wav` renders a fly-past of each engine type to a file; `FlightCore --flightsound out.wav <site> <aircraft>` records what the game plays during a demo flight, a throttle cut and a crash; `--perf` also prints the load of the audio thread.
+- **Music** is synthesized too: a pad, a plucked arpeggio with a ping-pong echo, bass, soft drums, a melody and a reverb, in a sixteen-bar round (`FlightCore --musictest out.wav` renders it to a file).
 - **Touchdowns** sound like what the model lands on: a tyre chirp or a scrape on asphalt, a rustle on grass, a crunch on snow, a hiss on sand, a gritty thud on bare earth and a splash on water, louder the harder it comes down and deeper the heavier the model. On photo sites the ground is taken from the kind of place it is. `FlightCore --touchtest` lists what every 3D site is made of.
 - **Flying into a tree** swishes through the leaves and snaps twigs, and a burst of leaves in the colour of whatever was hit flutters down; a goal post or bin gives a hard knock.
 - **Crashes** break the model apart: wings, control surfaces, propellers and rotor blades come off and tumble, with a dust cloud and an impact sound.
@@ -250,6 +252,7 @@ Press **H** in the app for this list.
 | `UI.swift` | Main menu, aircraft and site browsers, weather panel, in-flight display |
 | `Input.swift` | Keyboard, gamepad, USB joystick input |
 | `Sound.swift` | Sound synthesis |
+| `Music.swift` | Menu music |
 | `main.swift` | App window, menus, controller setup |
 
 ### Testing
