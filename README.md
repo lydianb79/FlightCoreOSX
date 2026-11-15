@@ -18,7 +18,7 @@ The app is not signed with an Apple developer certificate or notarised, so macOS
 xattr -dr com.apple.quarantine /Applications/FlightCore.app
 ```
 
-The release is built for Apple silicon Macs running macOS 13 or later. This page describes the current source, which can be ahead of the latest release; build from source to get everything listed here.
+The release is built for Apple silicon Macs running macOS 13 or later. This page describes version 1.3.0.
 
 ## Build from source
 
@@ -254,6 +254,8 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 ```bash
 swift run -c release FlightCore --selftest
 ```
+
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--parktest`, `--panocheck <folder>` and `--panostats` for photo sites; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
 
 ## Not yet implemented
 
