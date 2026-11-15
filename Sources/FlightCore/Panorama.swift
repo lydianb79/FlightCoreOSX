@@ -210,10 +210,30 @@ enum Panoramas {
             obstacles: ring(-131, -78, 3, 32, 6, 20), slope: (5.5, -165)),
     ]
 
+    /// Distances read off a photo are uncertain, and too near is the costly mistake: the model then crashes in what
+    /// looks like open air. An obstacle keeps its place and size in the picture but is moved out along the line of
+    /// sight, more the farther away it was judged to be, and never so far that a tree would have to be a giant.
+    /// Small things of known size (goals, bins, fence posts) stay where they are.
+    static func farther(_ o: PanoObstacle, eye: Float) -> PanoObstacle {
+        guard o.height > 3 else { return o }
+        var f = 1.15 + 0.55 * clampf((o.distance - 15) / 35, 0, 1)
+        if o.height > 6 { f = min(f, max(26 / o.height, 1)) }
+        return PanoObstacle(bearing: o.bearing, distance: o.distance * f, radius: o.radius * f, height: eye + (o.height - eye) * f)
+    }
+
+    /// The part of an obstacle that is solid at a given height above its base: the dense core of a tree, narrowing
+    /// toward the top. The airy edge of the crown and the space beside a pointed top are open.
+    static func solidRadius(_ o: PanoObstacle, at y: Float) -> Float {
+        guard y >= 0, y <= o.height else { return 0 }
+        let core = o.radius * (o.height > 3 ? 0.75 : 1)
+        let t = y / o.height
+        return o.height > 6 && t > 0.55 ? core * (1 - 0.7 * (t - 0.55) / 0.45) : core
+    }
+
     private static func meta(_ name: String, north: Float, wind: (Float, Float), start: (Float, Float, Float), category: String, difficulty: Int, info: String,
                              obstacles: [PanoObstacle]? = nil, eye: Float = 1.6, slope: (Float, Float)? = nil) -> PanoMeta {
         PanoMeta(name: name, north: north, horizon: 0, eyeHeight: eye, slope: slope?.0, uphill: slope?.1, windFrom: wind.0, windSpeed: wind.1, startX: start.0, startZ: start.1, startHeading: start.2,
-                 obstacles: obstacles, category: category, info: info, difficulty: difficulty)
+                 obstacles: obstacles?.map { farther($0, eye: eye) }, category: category, info: info, difficulty: difficulty)
     }
 
     static func image(_ url: URL, maxSize: Int) -> CGImage? {

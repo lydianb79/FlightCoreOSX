@@ -111,7 +111,7 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 - The sun direction and ambient light are estimated from the photo, so the model is lit to match and casts a shadow on the photographed ground.
 - The **Photo:** items in the Flying Site menu rotate the panorama, shift its horizon and set the camera height. The settings are saved in a `.json` file next to the image.
 - A photo taken on a hillside can have sloping ground: `"slope"` (degrees) and `"uphill"` (the bearing in the photo that the ground rises toward) in the `.json` file. On a slope the model is held until you open the throttle.
-- **Photo: Show / Hide Obstacles** draws the invisible ground as rings at 5, 10, 20 … 320 m together with the solid obstacles, to check them against the photo. `FlightCore --panocheck <folder>` writes the same overlay for every photo as an image, and `FlightCore --parktest` checks that the model sits still on the ground at every photo site.
+- **Photo: Show / Hide Obstacles** draws the invisible ground as rings at 5, 10, 20 … 320 m together with the solid obstacles, to check them against the photo. `FlightCore --panocheck <folder>` writes the same overlay for every photo as an image, `FlightCore --panocrop <out.jpg> <name> <from> <to>` draws a close-up of a range of bearings with labelled distances, `FlightCore --obstaclelist` lists how near the closest obstacle is at every site, and `FlightCore --parktest` checks that the model sits still on the ground at every photo site.
 
 Photos are shown as they are, without added sharpening; `FlightCore --panostats` lists how much real detail each one holds, which helps to pick sharp ones.
 
@@ -130,7 +130,7 @@ For your own photos, the `.json` file next to the image can also set where aircr
 }
 ```
 
-`bearing` is measured in the photo (0° at the image centre, positive to the right). **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
+`bearing` is measured in the photo (0° at the image centre, positive to the right). Only the dense core of an obstacle is solid: three quarters of its radius, narrowing toward the top of a tree, so the airy edge of a crown can be brushed past. The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
 
 The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
@@ -219,7 +219,7 @@ Press **H** in the app for this list.
   - bloom, filmic tone mapping, a light colour grade, vignette and dithering are applied in a final pass.
   The sky and clouds are procedural and rendered at half resolution; grass and trees are frustum-culled in chunks. Render resolution adjusts automatically to hold the frame rate, up to a ceiling set by the Graphics quality level (Low, Medium, High). Shaders are compiled from source at launch.
 - **Frame pacing:** the simulation advances by exact display refresh periods, and the aircraft is drawn at its physics state carried forward by the fraction of a step not yet simulated, so motion is even from frame to frame. `FlightCore --perf` prints frame-pacing and motion statistics once a second.
-- **The app starts in full screen.** Press ⌃⌘F to switch to a window.
+- **The app starts in full screen.** Press ⌃⌘F to switch to a window. The mouse pointer hides after five seconds without the mouse being touched and returns when it moves.
 - **Sound** is synthesized in stereo, with nothing sampled:
   - engine types: electric motor and propeller, piston engines (inline, flat and radial, which idle; every cylinder fires with its own strength in a repeating pattern, through a silencer that opens up with the throttle), ducted fans, turboprops, helicopter rotor with blade slap that follows the blade count, tail rotor and gear whine, and four separate multirotor motors that warble as the flight controller corrects;
   - propeller and motor tones brighten and harshen with load, each blade tears the air as it passes, ducted fans howl, and piston engines lope at idle;

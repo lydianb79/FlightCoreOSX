@@ -672,6 +672,68 @@ if CommandLine.arguments.contains("--panostats") {
     }
     exit(0)
 }
+if CommandLine.arguments.contains("--obstaclelist") {
+    // every photo site: how close the nearest solid thing is to the pilot and to the start, and how tall the tallest is
+    for site in SiteSpec.all where site.panorama != nil {
+        guard !site.obstacles.isEmpty else { print("\(site.displayName.padding(toLength: 30, withPad: " ", startingAt: 0)) no obstacles"); continue }
+        let edge = site.obstacles.map { $0.distance - Panoramas.solidRadius($0, at: 0) }.min() ?? 0
+        let start = site.obstacles.map { o -> Float in let c = Panoramas.position(o, north: site.north); return hypot(site.startX - c.x, site.startZ - c.y) - Panoramas.solidRadius(o, at: 0) }.min() ?? 0
+        let within60 = site.obstacles.filter { $0.distance - Panoramas.solidRadius($0, at: 0) < 60 }.count
+        print(String(format: "%@ %2d obstacles, nearest solid edge %5.1f m from the pilot, %5.1f m from the start; %2d within 60 m; tallest %4.1f m",
+                     site.displayName.padding(toLength: 30, withPad: " ", startingAt: 0), site.obstacles.count, edge, start, within60, site.obstacles.map { $0.height }.max() ?? 0))
+    }
+    exit(0)
+}
+if let ci = CommandLine.arguments.firstIndex(of: "--panocrop"), ci + 4 < CommandLine.arguments.count {
+    // a close look at part of a photo site: --panocrop <out.jpg> <file name part> <bearing from> <bearing to>
+    // draws the ground at labelled distances and the obstacles, at high resolution, to judge how far things are
+    let a = CommandLine.arguments
+    guard let site = SiteSpec.all.first(where: { $0.panorama?.lastPathComponent.contains(a[ci + 2]) == true }), let url = site.panorama,
+          let img = Panoramas.image(url, maxSize: 8192), let b0 = Double(a[ci + 3]), let b1 = Double(a[ci + 4]), b1 > b0 else { print("no such site"); exit(1) }
+    let W = 1900, ppd = CGFloat(W) / CGFloat(b1 - b0)
+    let top = CGFloat(b1 - b0) * 0.2, bottom = -CGFloat(b1 - b0) * 0.12
+    let H = Int((top - bottom) * ppd)
+    guard let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { exit(1) }
+    let eye = CGFloat(site.eyeHeight), hor = CGFloat(site.horizon), grad = site.groundGradient
+    func ground(_ b: CGFloat, _ d: CGFloat) -> CGFloat { let t = Float(b - CGFloat(site.north)) * deg; return CGFloat(grad.x * sin(t) - grad.y * cos(t)) * d }
+    func elev(_ b: CGFloat, _ d: CGFloat, _ h: CGFloat = 0) -> CGFloat { atan((ground(b, d) + h - eye) / d) * 180 / .pi }
+    func X(_ b: CGFloat) -> CGFloat { (b - CGFloat(b0)) * ppd }
+    func Y(_ el: CGFloat) -> CGFloat { CGFloat(H) - (top - el) * ppd }          // CoreGraphics origin is bottom-left
+    // the photo: full image spans 360 x 180 degrees; place it so bearing b0 is at x = 0 and elevation `top` at the top
+    for shift: CGFloat in [-360, 0, 360] {
+        ctx.draw(img, in: CGRect(x: X(-180 + shift), y: Y(-90 - hor), width: 360 * ppd, height: 180 * ppd))
+    }
+    ctx.setLineWidth(1.5)
+    ctx.setStrokeColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.9)); ctx.stroke(CGRect(x: 0, y: Y(0), width: CGFloat(W), height: 0))
+    for r in [8, 12, 16, 20, 25, 30, 40, 50, 60, 80, 100, 150, 250] as [CGFloat] {
+        ctx.setStrokeColor(CGColor(srgbRed: 0.1, green: 0.95, blue: 1, alpha: 0.85))
+        ctx.beginPath()
+        for i in 0...200 { let b = CGFloat(b0) + CGFloat(b1 - b0) * CGFloat(i) / 200; let pt = CGPoint(x: X(b), y: Y(elev(b, r))); if i == 0 { ctx.move(to: pt) } else { ctx.addLine(to: pt) } }
+        ctx.strokePath()
+        let label = NSAttributedString(string: "\(Int(r)) m", attributes: [.font: NSFont.boldSystemFont(ofSize: 13), .foregroundColor: NSColor.yellow])
+        let line = CTLineCreateWithAttributedString(label)
+        for fx in [0.02, 0.5] as [CGFloat] { let b = CGFloat(b0) + CGFloat(b1 - b0) * fx; ctx.textPosition = CGPoint(x: X(b), y: Y(elev(b, r)) + 2); CTLineDraw(line, ctx) }
+    }
+    for o in site.obstacles {
+        let d = CGFloat(o.distance), hw = asin(min(CGFloat(o.radius) / d, 1)) * 180 / .pi
+        for shift: CGFloat in [-360, 0, 360] {
+            let b = CGFloat(o.bearing) + shift
+            // near edge on the ground, and the top
+            let lo = elev(b, max(d - CGFloat(o.radius), 0.5)), hi = elev(b, d, CGFloat(o.height))
+            let r = CGRect(x: X(b - hw), y: Y(lo), width: 2 * hw * ppd, height: (hi - lo) * ppd)
+            ctx.setFillColor(CGColor(srgbRed: 1, green: 0.2, blue: 0.1, alpha: 0.22)); ctx.fill(r)
+            ctx.setStrokeColor(CGColor(srgbRed: 1, green: 0.2, blue: 0.1, alpha: 1)); ctx.stroke(r)
+            let label = NSAttributedString(string: String(format: "%.0f m, r %.0f, h %.0f", o.distance, o.radius, o.height), attributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.white])
+            ctx.textPosition = CGPoint(x: X(b - hw) + 3, y: Y(hi) - 14); CTLineDraw(CTLineCreateWithAttributedString(label), ctx)
+        }
+    }
+    if let out = ctx.makeImage(), let d = CGImageDestinationCreateWithURL(URL(fileURLWithPath: a[ci + 1]) as CFURL, "public.jpeg" as CFString, 1, nil) {
+        CGImageDestinationAddImage(d, out, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary); CGImageDestinationFinalize(d)
+    }
+    print("\(url.lastPathComponent): bearings \(b0)...\(b1), \(Int(ppd)) px per degree, eye \(site.eyeHeight) m")
+    exit(0)
+}
 if let ci = CommandLine.arguments.firstIndex(of: "--panocheck"), ci + 1 < CommandLine.arguments.count {
     // draw each photo site's invisible ground (rings), obstacles and start point onto its photo, to check them by eye
     let dir = URL(fileURLWithPath: CommandLine.arguments[ci + 1])
@@ -986,6 +1048,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if CommandLine.arguments.contains("--printwin") { print("WINDOW \(window.windowNumber)"); fflush(stdout) }
 
+        // the mouse pointer gets out of the way after five seconds without the mouse being touched, and comes
+        // back the moment it moves; only while the flight window itself is in front
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [unowned self] _ in
+            guard NSApp.isActive, self.window.isKeyWindow else { return }
+            let kinds: [CGEventType] = [.mouseMoved, .leftMouseDown, .leftMouseDragged, .rightMouseDown, .rightMouseDragged, .scrollWheel]
+            let idle = kinds.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? 0
+            if idle >= 5 { NSCursor.setHiddenUntilMouseMoves(true) }
+        }
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [unowned self] e in
             guard e.window === self.window else { return e }
             // while a menu or browser is open the keyboard belongs to it; Esc steps back

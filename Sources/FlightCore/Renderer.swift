@@ -483,7 +483,10 @@ final class Renderer: NSObject, MTKViewDelegate {
                     let c = Panoramas.position(o, north: game.site.north)
                     let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
                     let gy = game.terrain.height(c.x, c.y)
-                    ob.cylinder(from: V3(c.x, gy, c.y), to: V3(c.x, gy + o.height, c.y), r0: o.radius, r1: o.radius, seg: 20, color: col)
+                    // drawn as what is solid: the core, narrowing toward the top of a tree
+                    let r0 = Panoramas.solidRadius(o, at: 0), mid = o.height * 0.55
+                    ob.cylinder(from: V3(c.x, gy, c.y), to: V3(c.x, gy + mid, c.y), r0: r0, r1: r0, seg: 20, color: col)
+                    ob.cylinder(from: V3(c.x, gy + mid, c.y), to: V3(c.x, gy + o.height, c.y), r0: r0, r1: Panoramas.solidRadius(o, at: o.height), seg: 20, color: col)
                 }
                 if let om = GPUMesh(device, ob) { drawItems(enc, [DrawItem(mesh: om, model: .identity, material: 4)], fragment: true) }
             }

@@ -485,7 +485,8 @@ final class Game {
             for o in site.obstacles {
                 let c = Panoramas.position(o, north: site.north)
                 let dx = p.x - c.x, dz = p.z - c.y
-                if p.y < terrain.height(c.x, c.y) + o.height && dx * dx + dz * dz < o.radius * o.radius {
+                let rs = Panoramas.solidRadius(o, at: p.y - terrain.height(c.x, c.y))
+                if rs > 0 && dx * dx + dz * dz < rs * rs {
                     aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
                     break
                 }
