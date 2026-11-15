@@ -67,6 +67,50 @@ private func rd(_ span: Float, _ area: Float, _ length: Float, _ mass: Float, _ 
     RealData(span: span, area: area, length: length, mass: mass, power: power, vmax: vmax, taper: taper, airfoil: af, washout: washout, jetTW: tw)
 }
 let realData: [String: RealData] = [
+    // --- second set
+    "Aviat Husky": rd(10.82, 17.0, 6.88, 998, 134, 233, 1.0, .flatBottom, washout: 2),
+    "Maule M-7": rd(10.03, 15.4, 7.16, 1134, 175, 264, 1.0, .flatBottom, washout: 2),
+    "Cessna 185 Skywagon": rd(10.92, 16.2, 7.85, 1520, 224, 287, 0.7, .semiSymmetric, washout: 2.5),
+    "Zenith STOL CH 701": rd(8.23, 11.4, 6.38, 500, 60, 153, 1.0, .flatBottom, washout: 1),
+    "Tecnam P2008": rd(9.0, 12.2, 6.97, 600, 73, 222, 0.8, .semiSymmetric, washout: 2),
+    "Ryan NYP": rd(14.02, 29.7, 8.41, 2330, 166, 214, 1.0, .flatBottom, washout: 1.5),
+    "Piper PA-25 Pawnee": rd(11.02, 17.0, 7.55, 1317, 175, 188, 1.0, .flatBottom, washout: 2),
+    "Air Tractor AT-802": rd(18.06, 37.3, 10.95, 7257, 1007, 356, 1.0, .semiSymmetric, washout: 2),
+    "Mooney M20": rd(11.0, 16.3, 8.15, 1528, 209, 389, 0.5, .laminar, washout: 2),
+    "Van's RV-8": rd(7.32, 10.8, 6.4, 816, 149, 356, 1.0, .semiSymmetric, washout: 1),
+    "Piper PA-34 Seneca": rd(11.86, 19.4, 8.72, 2155, 328, 361, 1.0, .semiSymmetric, washout: 2),
+    "Britten-Norman Islander": rd(14.94, 30.2, 10.86, 2994, 388, 273, 1.0, .semiSymmetric, washout: 2),
+    "Lockheed Model 10 Electra": rd(16.76, 42.6, 11.76, 4672, 670, 325, 0.4, .semiSymmetric, washout: 3),
+    "ATR 72": rd(27.05, 61.0, 27.17, 22800, 3700, 510, 0.5, .semiSymmetric, washout: 3),
+    "Vought F4U Corsair": rd(12.5, 29.17, 10.26, 5626, 1678, 717, 0.6, .semiSymmetric, washout: 2),
+    "Lockheed P-38 Lightning": rd(15.85, 30.43, 11.53, 7940, 2386, 667, 0.35, .semiSymmetric, washout: 2),
+    "Grumman F4F Wildcat": rd(11.58, 24.15, 8.76, 3367, 895, 515, 0.6, .semiSymmetric, washout: 2),
+    "Junkers Ju 87 Stuka": rd(13.8, 31.9, 11.0, 4250, 883, 390, 0.6, .semiSymmetric, washout: 2),
+    "Macchi C.202 Folgore": rd(10.58, 16.82, 8.85, 2930, 864, 600, 0.5, .semiSymmetric, washout: 2),
+    "Kawasaki Ki-61 Hien": rd(12.0, 20.0, 8.94, 3470, 864, 580, 0.5, .semiSymmetric, washout: 2),
+    "Hawker Tempest": rd(12.49, 28.0, 10.26, 5176, 1625, 695, 0.5, .laminar, washout: 2),
+    "Polikarpov I-16": rd(9.0, 14.5, 6.13, 1941, 820, 525, 0.5, .semiSymmetric, washout: 1),
+    "Westland Lysander": rd(15.24, 24.2, 9.29, 2866, 664, 341, 0.6, .flatBottom, washout: 2),
+    "Bristol Beaufighter": rd(17.65, 46.7, 12.6, 9435, 2386, 515, 0.45, .semiSymmetric, washout: 2),
+    "North American B-25 Mitchell": rd(20.6, 56.7, 16.13, 15876, 2536, 438, 0.45, .semiSymmetric, washout: 3),
+    "Fokker D.VII": rd(8.9, 20.5, 6.95, 906, 136, 189, 1.0, .flatBottom, washout: 0),
+    "Nieuport 17": rd(8.16, 14.75, 5.8, 560, 82, 177, 1.0, .thin, washout: 0),
+    "Extra 330SC": rd(7.5, 9.8, 6.67, 870, 235, 407, 0.45, .symmetric, washout: 0),
+    "MX Aircraft MXS": rd(7.32, 9.48, 6.51, 834, 283, 426, 0.5, .symmetric, washout: 0),
+    "XtremeAir Sbach 342": rd(7.5, 11.25, 6.67, 850, 235, 416, 0.45, .symmetric, washout: 0),
+    "Stephens Akro Laser": rd(7.47, 9.1, 6.2, 545, 149, 370, 0.55, .symmetric, washout: 0),
+    "Bücker Jungmeister": rd(6.6, 12.0, 5.9, 585, 119, 220, 1.0, .symmetric, washout: 0),
+    "Ultimate 10-300": rd(5.94, 12.3, 5.72, 780, 224, 330, 1.0, .symmetric, washout: 0),
+    "Lockheed T-33 Shooting Star": rd(11.85, 21.81, 11.51, 6865, 0, 965, 0.4, .laminar, washout: 2, tw: 0.36),
+    "Northrop F-5 Tiger": rd(8.13, 17.28, 14.45, 7000, 0, 1700, 0.25, .laminar, washout: 0, tw: 0.65),
+    "McDonnell Douglas F-15 Eagle": rd(13.05, 56.5, 19.43, 20200, 0, 2655, 0.25, .laminar, washout: 0, tw: 1.05),
+    "Fairchild A-10 Thunderbolt II": rd(17.53, 47.0, 16.26, 13782, 0, 706, 0.65, .semiSymmetric, washout: 2, tw: 0.36),
+    "Hawker Hunter": rd(10.26, 32.42, 14.0, 8050, 0, 1150, 0.4, .laminar, washout: 2, tw: 0.56),
+    "Dassault-Dornier Alpha Jet": rd(9.11, 17.5, 11.75, 5000, 0, 1000, 0.4, .laminar, washout: 2, tw: 0.5),
+    "Cessna Citation CJ": rd(14.3, 22.3, 12.98, 4853, 0, 720, 0.45, .laminar, washout: 2.5, tw: 0.38),
+    "Schleicher ASH 31": rd(21.0, 13.2, 7.1, 700, 0, 270, 0.35, .glider, washout: 2.5),
+    "Schempp-Hirth Ventus": rd(18.0, 11.0, 6.8, 525, 0, 280, 0.35, .glider, washout: 2.5),
+    "Schweizer SGS 2-33": rd(15.54, 20.4, 7.85, 472, 0, 158, 0.6, .flatBottom, washout: 3),
     "Piper J-3 Cub": rd(10.74, 16.58, 6.83, 550, 48, 140, 1.0, .flatBottom, washout: 2),
     "Piper PA-18 Super Cub": rd(10.73, 16.58, 6.88, 794, 112, 210, 1.0, .flatBottom, washout: 2),
     "Cessna 152": rd(10.2, 14.9, 7.3, 757, 82, 200, 0.7, .semiSymmetric, washout: 2),
@@ -1083,6 +1127,120 @@ enum AircraftLibrary {
             mk(flatty, 1.3, "Foam Extra XL", "Foam 3D", "A 1.3-metre profile giant: big, slow, visible and still fully 3D", fuse: white, top: white, bottom: white, tail: red, accent: black) { $0.mass = 0.95; $0.thrust = 22; $0.pitchSpeed = 15; $0.sound = 170 },
             mk(flatty, 0.9, "Katana Foamy", "Foam 3D", "Lightly loaded profile with extra power for vertical work", fuse: white, top: white, bottom: white, tail: rgb(0.6, 0.15, 0.8), accent: rgb(0.1, 0.8, 0.5)) { $0.thrust *= 1.35 },
         ]
+        // ---- fifty more again: bush and utility types, twins, more warbirds, aerobats, jets, sailplanes and originals
+        let camoGreen = rgb(0.22, 0.28, 0.16), camoBrown = rgb(0.34, 0.27, 0.17), sky = rgb(0.5, 0.6, 0.68), seaBlue = rgb(0.1, 0.17, 0.3), metal = rgb(0.55, 0.57, 0.6)
+        let more2: [PlaneGeom] = [
+            // Scale civil
+            mk(bush, 1.6, "Aviat Husky", "Scale Civil", "Modern two-seat bush plane: tandem cockpit, big flaps and a short take-off run", scheme: 6, fuse: yellow, top: yellow, bottom: yellow, tail: yellow, accent: black) {
+                $0.struts = true; $0.fuseExp = 2.6; $0.wheelR = 0.055; $0.spinnerColor = black; $0.canopyLen = 0.13 },
+            mk(bush, 1.55, "Maule M-7", "Scale Civil", "Slab-sided back-country hauler that leaps off in a few lengths", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.55, 0.08, 0.1)) {
+                $0.struts = true; $0.fuseExp = 3.2; $0.fuseW *= 1.1; $0.wheelR = 0.055; $0.spinnerColor = white; $0.finH *= 1.1 },
+            mk(bush, 1.7, "Cessna 185 Skywagon", "Scale Civil", "Powerful tailwheel Cessna with no struts in the way: fast for a bush plane, firm on the rudder", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.1, 0.4, 0.3)) {
+                $0.struts = true; $0.fuseExp = 2.5; $0.blades = 3; $0.spinnerColor = grey; $0.canopyLen = 0.13; $0.wheelR = 0.05 },
+            mk(bush, 1.3, "Zenith STOL CH 701", "Scale Civil", "Kit-built STOL with a thick slatted wing: flies at a walking pace and lands on the spot", scheme: 6, fuse: metal, top: metal, bottom: metal, tail: metal, accent: orange) {
+                $0.gear = .tricycle; $0.gearH = 0.2; $0.struts = true; $0.thick = 0.17; $0.fuseExp = 3.4; $0.wheelR = 0.055; $0.canopyLen = 0.15; $0.spinnerColor = orange; $0.elevThrow = 24 },
+            mk(trainer, 1.45, "Tecnam P2008", "Scale Civil", "Italian composite light-sport two-seater with a strut-braced metal wing", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.1, 0.45, 0.75)) {
+                $0.struts = true; $0.pants = true; $0.fuseExp = 2.2; $0.canopyLen = 0.15; $0.spinnerColor = white },
+            mk(bush, 2.0, "Ryan NYP", "Scale Civil", "The 1927 Atlantic long-ranger: no forward windscreen, a huge wing and a great deal of fuel", scheme: 8, fuse: metal, top: metal, bottom: metal, tail: metal, accent: rgb(0.8, 0.65, 0.3)) {
+                $0.struts = true; $0.fuseExp = 2.4; $0.canopyLen = 0.0; $0.spinnerScale = 0.16; $0.spinnerColor = metal; $0.wheelR = 0.06; $0.flaps = false; $0.sound = 80 },
+            mk(warbird, 1.6, "Piper PA-25 Pawnee", "Scale Civil", "Crop duster and glider tug: strut-braced low wing, high cockpit, lots of slow-speed pull", scheme: 6, fuse: yellow, top: yellow, bottom: yellow, tail: yellow, accent: red) {
+                $0.retracts = false; $0.struts = true; $0.tipChord = $0.rootChord; $0.fuseExp = 3; $0.canopyLen = 0.08; $0.camber = 3.5; $0.incidence = 2; $0.blades = 2
+                $0.wheelR = 0.05; $0.spinnerColor = red; $0.ailThrow = 20; $0.elevThrow = 20 },
+            mk(warbird, 2.0, "Air Tractor AT-802", "Scale Civil", "Turboprop fire bomber: a very big single with a hopper where the passengers would be", scheme: 6, fuse: yellow, top: yellow, bottom: yellow, tail: yellow, accent: rgb(0.1, 0.2, 0.55)) {
+                $0.retracts = false; $0.tipChord = $0.rootChord; $0.fuseExp = 2.6; $0.canopyLen = 0.07; $0.camber = 3; $0.incidence = 2; $0.blades = 5; $0.spinnerScale = 0.28
+                $0.noseZ *= 1.15; $0.wheelR = 0.055; $0.spinnerColor = grey; $0.finH *= 1.15; $0.sound = 170 },
+            mk(warbird, 1.55, "Mooney M20", "Scale Civil", "Slippery four-seat tourer with its trademark forward-raked fin", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.6, 0.1, 0.12)) {
+                $0.gear = .tricycle; $0.gearH = 0.16; $0.blades = 3; $0.canopyLen = 0.15; $0.spinnerColor = grey; $0.cdA *= 0.8; $0.finChord *= 0.9 },
+            mk(warbird, 1.25, "Van's RV-8", "Scale Civil", "Tandem kit-built sport plane: quick, crisp and happy upside down", scheme: 1, fuse: white, top: rgb(0.1, 0.3, 0.7), bottom: white, tail: rgb(0.1, 0.3, 0.7), accent: yellow) {
+                $0.retracts = false; $0.pants = true; $0.flaps = true; $0.tipChord = $0.rootChord; $0.canopyLen = 0.17; $0.blades = 2; $0.spinnerColor = yellow; $0.ailThrow = 24; $0.elevThrow = 20; $0.rudThrow = 28 },
+            mk(twin, 1.7, "Piper PA-34 Seneca", "Scale Civil", "Low-wing piston twin for training and touring", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.12, 0.3, 0.6)) {
+                $0.wingY = -0.04; $0.tipChord = $0.rootChord; $0.blades = 3; $0.canopyLen = 0.1; $0.fuseExp = 2.6 },
+            mk(twin, 1.9, "Britten-Norman Islander", "Scale Civil", "Boxy high-wing island hopper with fixed gear and a constant-chord wing", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.9, 0.5, 0.05)) {
+                $0.wingY = 0.1; $0.retracts = false; $0.tipChord = $0.rootChord; $0.fuseExp = 3.4; $0.canopyLen = 0.06; $0.camber = 4; $0.wheelR = 0.045; $0.finH *= 1.1 },
+            mk(twin, 1.9, "Lockheed Model 10 Electra", "Scale Civil", "Polished-metal 1930s twin airliner: elegant, tail-down, and a handful in a crosswind", scheme: 8, fuse: metal, top: metal, bottom: metal, tail: metal, accent: red) {
+                $0.wingY = -0.04; $0.gear = .taildragger; $0.gearH = 0.22; $0.fuseExp = 2.1; $0.canopyLen = 0.06; $0.spinnerScale = 0.2; $0.dihedral = 6; $0.sound = 100 },
+            mk(twin, 2.3, "ATR 72", "Scale Civil", "Regional turboprop airliner: long thin wing on top, T-tail, six-blade propellers", scheme: 6, fuse: white, top: white, bottom: white, tail: rgb(0.1, 0.3, 0.6), accent: rgb(0.1, 0.3, 0.6)) {
+                $0.wingY = 0.11; $0.tTail = true; $0.blades = 6; $0.fuseExp = 2.0; $0.canopyLen = 0.04; $0.dihedral = 2; $0.cdA *= 0.8; $0.fuseW *= 1.05; $0.sound = 175 },
+            // Warbirds
+            mk(warbird, 1.5, "Vought F4U Corsair", "Warbirds", "Long-nosed carrier fighter: fast and heavy, with a wicked left wing drop if you let it get slow", scheme: 2, fuse: seaBlue, top: seaBlue, bottom: seaBlue, tail: seaBlue, accent: white) {
+                $0.fuseExp = 2; $0.spinnerScale = 0.18; $0.blades = 4; $0.noseZ *= 1.12; $0.dihedral = 7; $0.canopyLen = 0.09; $0.spinnerColor = grey; $0.sound = 100 },
+            mk(twin, 1.7, "Lockheed P-38 Lightning", "Warbirds", "Twin-engined, twin-boom interceptor: no torque swing and a climb like a lift", scheme: 2, fuse: metal, top: metal, bottom: metal, tail: metal, accent: red) {
+                $0.wingY = -0.02; $0.blades = 3; $0.fuseExp = 2.2; $0.canopyLen = 0.12; $0.fuseW *= 0.8; $0.thrust *= 1.2; $0.pitchSpeed = 36; $0.cdA *= 0.7; $0.dihedral = 5 },
+            mk(warbird, 1.35, "Grumman F4F Wildcat", "Warbirds", "Barrel-bodied naval fighter with a mid wing and a narrow undercarriage", scheme: 2, fuse: rgb(0.3, 0.4, 0.5), top: rgb(0.3, 0.4, 0.5), bottom: rgb(0.75, 0.78, 0.8), tail: rgb(0.3, 0.4, 0.5), accent: white) {
+                $0.fuseExp = 2; $0.fuseW *= 1.25; $0.fuseH *= 1.2; $0.wingY = 0.0; $0.spinnerScale = 0.16; $0.blades = 3; $0.track *= 0.75; $0.tipChord *= 1.1; $0.spinnerColor = grey; $0.sound = 105 },
+            mk(warbird, 1.6, "Junkers Ju 87 Stuka", "Warbirds", "Cranked-wing dive bomber with fixed spatted legs: slow, steady and draggy", scheme: 7, fuse: rgb(0.24, 0.29, 0.22), top: rgb(0.24, 0.29, 0.22), bottom: sky, tail: rgb(0.24, 0.29, 0.22), accent: rgb(0.14, 0.18, 0.15)) {
+                $0.retracts = false; $0.pants = true; $0.blades = 3; $0.canopyLen = 0.17; $0.dihedral = 7; $0.cdA *= 1.5; $0.wheelR = 0.05; $0.finH *= 1.1; $0.spinnerColor = yellow },
+            mk(warbird, 1.35, "Macchi C.202 Folgore", "Warbirds", "Slim Italian fighter in desert mottle: light on the controls and quick in the turn", scheme: 7, fuse: sand, top: sand, bottom: sky, tail: sand, accent: rgb(0.25, 0.33, 0.2)) {
+                $0.blades = 3; $0.fuseW *= 0.92; $0.spinnerColor = white },
+            mk(warbird, 1.45, "Kawasaki Ki-61 Hien", "Warbirds", "Long-nosed inline-engined Japanese fighter in bare metal with green blotches", scheme: 7, fuse: metal, top: metal, bottom: metal, tail: metal, accent: rgb(0.2, 0.33, 0.2)) {
+                $0.blades = 3; $0.noseZ *= 1.08; $0.spinnerColor = rgb(0.45, 0.25, 0.15) },
+            mk(warbird, 1.5, "Hawker Tempest", "Warbirds", "Big, brutal late-war fighter with a thin wing: very fast low down, and lands fast too", scheme: 7, fuse: rgb(0.3, 0.33, 0.35), top: rgb(0.3, 0.33, 0.35), bottom: rgb(0.6, 0.66, 0.7), tail: rgb(0.3, 0.33, 0.35), accent: camoGreen) {
+                $0.blades = 4; $0.thick = 0.1; $0.fuseH *= 1.1; $0.spinnerColor = black; $0.sound = 110 },
+            mk(warbird, 1.15, "Polikarpov I-16", "Warbirds", "Stubby 1930s monoplane fighter: tiny, twitchy and short-coupled", scheme: 2, fuse: rgb(0.2, 0.36, 0.2), top: rgb(0.2, 0.36, 0.2), bottom: sky, tail: rgb(0.2, 0.36, 0.2), accent: red) {
+                $0.fuseExp = 2; $0.fuseW *= 1.3; $0.fuseH *= 1.2; $0.spinnerScale = 0.2; $0.canopyLen = 0.07; $0.stabZ *= 0.92; $0.finZ *= 0.92; $0.spinnerColor = red; $0.sound = 115 },
+            mk(bush, 1.9, "Westland Lysander", "Warbirds", "High-wing army co-operation aircraft that could land in a moonlit field: enormous spatted wheels and a tapered parasol wing", scheme: 7,
+               fuse: camoGreen, top: camoGreen, bottom: black, tail: camoGreen, accent: camoBrown) {
+                $0.struts = true; $0.pants = true; $0.fuseExp = 2.2; $0.spinnerScale = 0.16; $0.blades = 3; $0.canopyLen = 0.16; $0.wheelR = 0.055; $0.wingY *= 1.15; $0.spinnerColor = black; $0.sound = 95 },
+            mk(twin, 1.8, "Bristol Beaufighter", "Warbirds", "Heavy twin-engined strike fighter with a stub nose between two big radials", scheme: 7, fuse: rgb(0.3, 0.33, 0.35), top: rgb(0.3, 0.33, 0.35), bottom: sky, tail: rgb(0.3, 0.33, 0.35), accent: camoGreen) {
+                $0.wingY = 0.0; $0.gear = .taildragger; $0.gearH = 0.22; $0.blades = 3; $0.spinnerScale = 0.18; $0.noseZ *= 0.85; $0.canopyLen = 0.08; $0.thrust *= 1.15; $0.sound = 105 },
+            mk(twin, 2.0, "North American B-25 Mitchell", "Warbirds", "Twin-engined medium bomber on tricycle gear: stately, loud and steady as a rock", scheme: 2, fuse: olive, top: olive, bottom: rgb(0.5, 0.52, 0.5), tail: olive, accent: yellow) {
+                $0.wingY = 0.03; $0.blades = 3; $0.spinnerScale = 0.16; $0.fuseExp = 2.6; $0.canopyLen = 0.07; $0.fuseW *= 1.1; $0.dihedral = 5; $0.sound = 95 },
+            mk(bipe, 1.3, "Fokker D.VII", "Warbirds", "The best fighter of 1918: thick wings, no bracing wires and a forgiving stall", scheme: 8, fuse: rgb(0.7, 0.1, 0.1), top: rgb(0.32, 0.36, 0.2), bottom: cream, tail: white, accent: black) {
+                $0.pants = false; $0.fuseExp = 3.2; $0.incidence = 2; $0.camber = 4; $0.thick = 0.15; $0.dihedral = 1; $0.ailThrow = 18; $0.elevThrow = 20; $0.rudThrow = 28
+                $0.wheelR = 0.055; $0.gearH *= 1.1; $0.spinnerScale = 0.12; $0.spinnerColor = grey; $0.sound = 85 },
+            mk(bipe, 1.2, "Nieuport 17", "Warbirds", "Dainty French scout of 1916 with a narrow lower wing: light, nimble and fragile", scheme: 8, fuse: metal, top: metal, bottom: metal, tail: metal, accent: rgb(0.1, 0.2, 0.6)) {
+                $0.pants = false; $0.fuseExp = 2.4; $0.incidence = 2; $0.camber = 3.5; $0.dihedral = 2; $0.ailThrow = 20; $0.elevThrow = 22; $0.rudThrow = 30
+                $0.wheelR = 0.055; $0.gearH *= 1.1; $0.spinnerScale = 0.14; $0.spinnerColor = metal; $0.sound = 85 },
+            // Aerobatic
+            mk(acro, 1.5, "Extra 330SC", "Aerobatic", "Single-seat unlimited competition machine: the roll rate of a drill bit", fuse: white, top: rgb(0.85, 0.08, 0.08), bottom: black, tail: rgb(0.85, 0.08, 0.08), accent: black) { $0.blades = 3; $0.ailThrow = 36 },
+            mk(acro, 1.4, "MX Aircraft MXS", "Aerobatic", "Carbon-fibre air racer and aerobat with a tiny frontal area", fuse: black, top: rgb(0.1, 0.75, 0.9), bottom: white, tail: rgb(0.1, 0.75, 0.9), accent: white) { $0.fuseW *= 0.9; $0.blades = 3; $0.cdA *= 0.85 },
+            mk(acro, 1.55, "XtremeAir Sbach 342", "Aerobatic", "Two-seat carbon aerobat with a broad wing: big, smooth figures and soft 3D", fuse: white, top: rgb(0.95, 0.55, 0.05), bottom: rgb(0.2, 0.2, 0.22), tail: rgb(0.95, 0.55, 0.05), accent: rgb(0.2, 0.2, 0.22)) {
+                $0.canopyLen = 0.17; $0.blades = 3 },
+            mk(acro, 1.3, "Stephens Akro Laser", "Aerobatic", "The 1970s mid-wing design that every modern aerobat descends from: light and razor precise", fuse: white, top: rgb(0.1, 0.2, 0.6), bottom: white, tail: red, accent: red) {
+                $0.fuseW *= 0.9; $0.canopyLen = 0.1 },
+            mk(bipe, 1.1, "Bücker Jungmeister", "Aerobatic", "1930s aerobatic biplane with a radial engine: the classic pre-war champion", scheme: 8, fuse: rgb(0.1, 0.2, 0.55), top: metal, bottom: metal, tail: rgb(0.1, 0.2, 0.55), accent: white) {
+                $0.pants = false; $0.fuseExp = 2.1; $0.spinnerScale = 0.14; $0.dihedral = 2; $0.spinnerColor = metal; $0.sound = 95 },
+            mk(bipe, 1.0, "Ultimate 10-300", "Aerobatic", "Stubby unlimited biplane: rolls in a blink, flies vertical for ever", fuse: rgb(0.55, 0.1, 0.6), top: yellow, bottom: yellow, tail: rgb(0.55, 0.1, 0.6), accent: white) {
+                $0.fuseExp = 2.2; $0.canopyLen = 0.15; $0.blades = 3; $0.ailThrow = 28 },
+            // Jets
+            mk(jet, 1.1, "Lockheed T-33 Shooting Star", "Jets", "Straight-winged jet trainer from the dawn of the jet age, with tip tanks", fuse: metal, top: metal, bottom: metal, tail: metal, accent: rgb(0.9, 0.45, 0.05)) {
+                $0.sweep *= 0.25; $0.tipChord *= 1.3; $0.canopyLen = 0.17; $0.camber = 2; $0.dihedral = 3 },
+            mk(f16, 0.72, "Northrop F-5 Tiger", "Jets", "Slim supersonic lightweight with small thin wings: fast, clean and quick on the roll", fuse: rgb(0.45, 0.47, 0.5), top: rgb(0.45, 0.47, 0.5), bottom: rgb(0.7, 0.72, 0.75), tail: rgb(0.45, 0.47, 0.5), accent: rgb(0.3, 0.32, 0.36)) {
+                $0.sweep *= 0.6; $0.rootChord *= 0.8; $0.fuseW *= 0.85; $0.canopyLen = 0.13; $0.ailThrow = 18 },
+            mk(f16, 1.0, "McDonnell Douglas F-15 Eagle", "Jets", "Big twin-engined air-superiority fighter: a huge wing, enormous thrust, and room needed to turn it", fuse: rgb(0.52, 0.56, 0.6), top: rgb(0.52, 0.56, 0.6), bottom: rgb(0.62, 0.66, 0.7), tail: rgb(0.52, 0.56, 0.6), accent: rgb(0.4, 0.44, 0.5)) {
+                $0.fuseW *= 1.5; $0.wingY = 0.03; $0.canopyLen = 0.12; $0.finH *= 1.1; $0.tipChord *= 1.4 },
+            mk(jet, 1.4, "Fairchild A-10 Thunderbolt II", "Jets", "Straight-winged ground-attack jet: slow for a jet, tough, and turns on a wingtip", fuse: rgb(0.4, 0.44, 0.42), top: rgb(0.4, 0.44, 0.42), bottom: rgb(0.55, 0.58, 0.58), tail: rgb(0.4, 0.44, 0.42), accent: rgb(0.28, 0.32, 0.3)) {
+                $0.sweep = 0; $0.tipChord = $0.rootChord * 0.7; $0.camber = 3; $0.dihedral = 5; $0.thick = 0.14; $0.canopyLen = 0.1; $0.flaps = true; $0.stabSpan *= 1.2; $0.wheelR = 0.03 },
+            mk(sabre, 1.05, "Hawker Hunter", "Jets", "Graceful swept-wing fighter of the 1950s: smooth, fast and beautifully balanced", fuse: camoGreen, top: camoGreen, bottom: metal, tail: camoGreen, accent: rgb(0.3, 0.33, 0.35)) {
+                $0.noseIntake = false; $0.canopyLen = 0.11; $0.rootChord *= 1.1 },
+            mk(jet, 0.95, "Dassault-Dornier Alpha Jet", "Jets", "Shoulder-winged Franco-German jet trainer with drooping wings and nimble handling", fuse: rgb(0.1, 0.2, 0.55), top: rgb(0.1, 0.2, 0.55), bottom: white, tail: red, accent: white) {
+                $0.wingY = 0.03; $0.dihedral = -5; $0.canopyLen = 0.18; $0.sweep *= 0.9 },
+            mk(jet, 1.3, "Cessna Citation CJ", "Jets", "Light business jet with a straight wing and a T-tail: docile, quiet and easy to land", scheme: 6, fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.55, 0.45, 0.2)) {
+                $0.sweep *= 0.2; $0.tTail = true; $0.camber = 2.5; $0.dihedral = 4; $0.canopyLen = 0.06; $0.fuseW *= 1.2; $0.fuseH *= 1.2; $0.flaps = true; $0.tipChord *= 1.2 },
+            // Gliders
+            mk(sail, 4.2, "Schleicher ASH 31", "Gliders", "Open-class self-launching sailplane with a twenty-one-metre wing: stays up on almost nothing", fuse: white, top: white, bottom: white, tail: white, accent: red) {
+                $0.tTail = true; $0.tipChord *= 0.7 },
+            mk(sail, 3.6, "Schempp-Hirth Ventus", "Gliders", "Eighteen-metre racing sailplane with thin, flexing wings and upturned tips", fuse: white, top: white, bottom: white, tail: white, accent: rgb(0.1, 0.3, 0.7)) {
+                $0.tTail = true; $0.tipChord *= 0.75; $0.dihedral = 4 },
+            mk(glider, 2.5, "Schweizer SGS 2-33", "Gliders", "Strut-braced metal training glider: slow, sturdy and patient with beginners", fuse: yellow, top: white, bottom: white, tail: yellow, accent: rgb(0.1, 0.3, 0.6)) {
+                $0.wingY = 0.09; $0.struts = true; $0.fuseExp = 2.8; $0.rootChord *= 1.3; $0.tipChord *= 1.2; $0.fuseW *= 1.2; $0.fuseH *= 1.3; $0.canopyLen = 0.14 },
+            // Trainers & sport (original designs)
+            mk(trainer, 1.5, "Pathfinder 1.5", "Trainers & Sport", "Original design: foam high-wing trainer with flaps and big tyres, for the step up from a first model", fuse: white, top: rgb(0.1, 0.5, 0.85), bottom: orange, tail: rgb(0.1, 0.5, 0.85), accent: white) {
+                $0.flaps = true; $0.wheelR = 0.05; $0.tough = 1.4; $0.thrust *= 1.15 },
+            mk(warbird, 1.45, "Bandit 50", "Trainers & Sport", "Original design: low-wing club aerobat with a thick symmetrical wing; loops, rolls and stall turns all day", scheme: 1, fuse: white, top: rgb(0.9, 0.1, 0.45), bottom: white, tail: rgb(0.2, 0.2, 0.24), accent: rgb(0.2, 0.2, 0.24)) {
+                $0.gear = .tricycle; $0.gearH = 0.17; $0.retracts = false; $0.flaps = false; $0.tipChord = $0.rootChord * 0.85; $0.mass *= 0.75; $0.thrust *= 0.85; $0.pitchSpeed = 28; $0.blades = 2
+                $0.camber = 0; $0.incidence = 0.5; $0.thick = 0.15; $0.airfoil = .symmetric; $0.ailThrow = 26; $0.elevThrow = 22; $0.rudThrow = 30; $0.fuseExp = 3; $0.spinnerColor = white },
+            mk(racer, 1.25, "Quickie 500", "Trainers & Sport", "Original design: club pylon racer with a plank wing and a V-shaped turn of speed", fuse: white, top: rgb(0.95, 0.75, 0.05), bottom: rgb(0.1, 0.1, 0.12), tail: red, accent: red) {
+                $0.tipChord = $0.rootChord; $0.wheelR = 0.03; $0.gearH = 0.14; $0.fuseExp = 3 },
+            mk(park, 1.8, "Old Timer 1.8", "Trainers & Sport", "Original design: vintage-style cabin model in translucent covering; climbs gently, floats for ever", scheme: 8, fuse: cream, top: rgb(0.85, 0.3, 0.1), bottom: cream, tail: rgb(0.85, 0.3, 0.1), accent: cream) {
+                $0.dihedral = 8; $0.camber = 4.5; $0.gear = .taildragger; $0.build = .balsa; $0.ailThrow = 14; $0.rudThrow = 30; $0.sound = 110 },
+            mk(twin, 1.4, "Gemini Twin Trainer", "Trainers & Sport", "Original design: foam high-wing twin with fixed gear; teaches twin-engine handling without the drama", scheme: 0, fuse: white, top: rgb(0.1, 0.65, 0.3), bottom: yellow, tail: rgb(0.1, 0.65, 0.3), accent: white) {
+                $0.wingY = 0.1; $0.retracts = false; $0.flaps = false; $0.tipChord = $0.rootChord; $0.mass *= 0.8; $0.thrust *= 0.9; $0.tough = 1.4; $0.build = .foam; $0.canopyLen = 0.1; $0.wheelR = 0.04 },
+            // Foam 3D
+            mk(flatty, 0.8, "Shock Flyer 800", "Foam 3D", "Depron profile with air-brake cut-outs: the slowest, tightest indoor tumbler", fuse: white, top: white, bottom: white, tail: rgb(0.95, 0.4, 0.05), accent: rgb(0.1, 0.1, 0.12)) { $0.mass = 0.14; $0.thrust = 3.6; $0.pitchSpeed = 8.5; $0.cdA *= 1.6 },
+            mk(flatty, 1.0, "Sbach 3D Foamy", "Foam 3D", "Metre-span EPP profile with a deep fuselage for knife-edge and a wide wing for harriers", fuse: white, top: white, bottom: white, tail: rgb(0.1, 0.6, 0.3), accent: rgb(0.9, 0.1, 0.1)) {
+                $0.mass = 0.36; $0.thrust = 8.6; $0.pitchSpeed = 12; $0.fuseH *= 1.2; $0.rootChord *= 1.08; $0.sound = 205 },
+        ]
         // floatplanes: start on the water at sites that have it
         let seaplanes: [PlaneGeom] = [
             mk(bush, 1.8, "Beaver Floatplane", "Scale Civil", "The classic bush seaplane: takes off from and lands on water", scheme: 6,
@@ -1159,7 +1317,7 @@ enum AircraftLibrary {
         var quad = makeQuad(); quad.category = "Multirotors"
         let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
-                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane)
+                makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.map(makeAirplane) + foamies.map(makeAirplane) + more.map(makeAirplane) + seaplanes.map(makeAirplane) + flyingWings.map(makeAirplane) + more2.map(makeAirplane)
         return everything.map { calibrateRates(trimForCruise($0)) }
     }()
 }

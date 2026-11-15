@@ -88,12 +88,14 @@ extension Terrain {
 
     // MARK: Vegetation
 
-    private func deciduous(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool) {
+    private func deciduous(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool, autumn: Bool = false) {
         let h = t.h, g = rng.next()
         let bark = leaf(0.27 + 0.06 * g, 0.2 + 0.04 * g, 0.14)
         b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.45, 0), r0: h * 0.035, r1: h * 0.018, seg: detail ? 7 : 5, color: bark)
         let hue = rng.next()
-        let green = leaf(0.13 + 0.14 * hue, 0.30 + 0.14 * g, 0.07 + 0.05 * hue)
+        // autumn woods run from yellow through orange to deep red, with the odd tree still green
+        let green = !autumn ? leaf(0.13 + 0.14 * hue, 0.30 + 0.14 * g, 0.07 + 0.05 * hue)
+            : (hue < 0.12 ? leaf(0.3, 0.4, 0.12) : leaf(0.5 + 0.3 * g, 0.16 + 0.4 * hue * (0.5 + 0.5 * g), 0.05))
         let seed = Int32(truncatingIfNeeded: Int(t.p.x * 13 + t.p.z * 7))
         if detail {
             for k in 0..<3 {     // a few visible limbs
@@ -211,6 +213,8 @@ extension Terrain {
                 if rng.next() < 0.55 { cypress(&b, t, &rng, detail: near) }
                 else { deciduous(&b, Tree(p: t.p, h: t.h * 0.55), &rng, detail: near) }       // olive
             case 6: conifer(&b, t, &rng, detail: near, snow: true)
+            case 8:
+                if rng.next() < 0.8 { deciduous(&b, t, &rng, detail: near, autumn: true) } else { conifer(&b, t, &rng, detail: near) }
             case 7:
                 if rng.next() < 0.68 { deciduous(&b, t, &rng, detail: near) } else { conifer(&b, t, &rng, detail: near) }
             default:

@@ -6,7 +6,7 @@ A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Creat
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 100 aircraft, 13 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 150 aircraft, 20 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Download
 
@@ -51,18 +51,18 @@ The last aircraft and site are remembered between launches. The interface uses t
 
 ## Aircraft
 
-One hundred aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
+One hundred and fifty aircraft, grouped by category in the aircraft browser and the Aircraft menu. Step through them with `[` and `]`.
 
 | Category | Count | Examples |
 |---|---|---|
-| Trainers & Sport | 9 | Skylark Trainer, Cadet 1200, Stick 40, Tundra Trainer, Stiletto Racer |
-| Scale Civil | 26 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, Pilatus PC-12, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth, and three floatplanes |
-| Warbirds | 17 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel |
-| Aerobatic | 11 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7 |
-| Foam 3D | 9 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty |
+| Trainers & Sport | 14 | Skylark Trainer, Cadet 1200, Stick 40, Tundra Trainer, Stiletto Racer, Pathfinder 1.5, Bandit 50, Gemini Twin Trainer |
+| Scale Civil | 40 | Piper J-3 Cub, Cessna 172, Pilatus PC-6 Porter, Pilatus PC-12, DHC-2 Beaver, Cirrus SR22, DHC-6 Twin Otter, Douglas DC-3, Antonov An-2, Tiger Moth, and three floatplanes, Aviat Husky, Cessna 185, Mooney M20, Van's RV-8, Islander, ATR 72, Air Tractor AT-802 |
+| Warbirds | 30 | P-51D Mustang, Spitfire, Bf 109, Fw 190, Hurricane, P-47, Zero, Sea Fury, Mosquito, T-6 Texan, Sopwith Camel, F4U Corsair, P-38 Lightning, Ju 87 Stuka, Tempest, B-25 Mitchell, Fokker D.VII |
+| Aerobatic | 17 | Extra 300, Edge 540, Sukhoi Su-26, Yak-54, CAP 232, Pitts Special, Pilatus PC-7, Extra 330SC, MXS, Sbach 342, Laser, Bücker Jungmeister |
+| Foam 3D | 11 | Flatty 3D, F3P Indoor Aerobat, Slick 3D Profile, Foam Extra XL, Micro Flatty, Shock Flyer 800, Sbach 3D Foamy |
 | Wings | 6 | Sweep 48 Combat Wing, Plank 1.5 Soarer, Delta Dart, Voyager 2.1 FPV Wing, Horten Ho 229, Race Wing 600 |
-| Jets | 9 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros |
-| Gliders | 8 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M |
+| Jets | 16 | F-16, F-86 Sabre, MiG-15, F-104 Starfighter, BAe Hawk, L-39 Albatros, T-33, F-5 Tiger, F-15 Eagle, A-10, Hawker Hunter, Alpha Jet, Citation CJ |
+| Gliders | 11 | ASK 21, ASW 28, DG-1000, Discus, Ka 8, Thermal 2M, ASH 31, Ventus, SGS 2-33 |
 | Helicopters | 3 | Kestrel 550, Sparrow 450, Condor 700 |
 | Multirotors | 2 | Quad X450, Wasp Racing Quad |
 
@@ -89,6 +89,13 @@ The site browser filters by type (3D or photo) and by landscape (Fields, Airfiel
 | Red Canyon | Desert | Mesa-top strip beside a deep canyon |
 | Savanna | Desert | Golden grassland with acacias and strong thermals |
 | Winter Field | Winter | Packed-snow strip under high peaks |
+| Autumn Valley | Fields | Mown strip in a wooded valley in autumn colour |
+| Lava Fields | Mountains | Cinder strip on a black lava plain under a volcano |
+| Fjord | Water | Grass shelf above deep water between rock walls |
+| Wetlands | Water | Dry rise in a reed marsh laced with channels and pools |
+| Sea Cliffs | Water | Clifftop strip seventy metres above the sea; strong slope lift |
+| Salt Flats | Desert | 400 m strip on a dead-flat white salt pan |
+| Sand Sea | Desert | Packed-sand strip between great dunes |
 
 Wind, turbulence, thermals and time of day are set from the Weather panel. An aircraft that comes down in water is lost.
 
@@ -102,7 +109,7 @@ Any 360° equirectangular panorama (2:1 aspect ratio; JPG, PNG, HEIC or TIFF) ca
 
 No photos are included in this repository. [Poly Haven](https://polyhaven.com/hdris) offers CC0 panoramas; download the tone-mapped JPG version.
 
-Fifteen Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dry_hay_field`, `farm_field`, `hochsal_field`, `limpopo_golf_course`, `snow_field`, `straw_rolls_field_01`, `suburban_football_field`, `wildflower_field` and `yellow_field`.
+Twenty Poly Haven panoramas have built-in presets (name, description, rotation, start point, take-off direction and, for some, obstacles) that apply automatically when the file keeps its original name: `alps_field`, `autumn_field`, `belfast_open_field`, `derelict_airfield_01`, `derelict_airfield_02`, `dry_cracked_lake`, `dry_hay_field`, `farm_field`, `goegap_road`, `grasslands_sunset`, `hochsal_field`, `limpopo_golf_course`, `rural_asphalt_road`, `snow_field`, `snowy_field`, `spiaggia_di_mondello`, `straw_rolls_field_01`, `suburban_football_field`, `wildflower_field` and `yellow_field`.
 
 For your own photos, the `.json` file next to the image can also set where aircraft start and add obstacles — upright cylinders standing in for photographed trees and buildings, which the aircraft crashes into:
 
@@ -183,7 +190,7 @@ Press **H** in the app for this list.
 - **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
 - **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.
 - **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m). Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
-- **Scale data:** the 57 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --handlingtest` lists every airplane's control rates and checks hovering and continuous rolls; `FlightCore --balancetest` lists every airplane's measured static margin, trim speed and response to full up elevator; `FlightCore --ruddertest` lists every airplane's rudder, elevator and aileron authority in the propeller blast, and flies a hover hands-off, with a perfect pilot and with one who reacts a fifth of a second late, in still air and in wind; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
+- **Scale data:** the 100 models of real aircraft are shaped from approximate published figures for the full-size type: aspect ratio, taper, length, wing loading, power loading and top speed, plus a wing-section family and washout. A Cub model comes out light and slow, a Starfighter model heavy and fast. `FlightCore --physicstest` prints every airplane's figures and runs stall, spin, take-off and battery tests on a sample; `FlightCore --handlingtest` lists every airplane's control rates and checks hovering and continuous rolls; `FlightCore --balancetest` lists every airplane's measured static margin, trim speed and response to full up elevator; `FlightCore --ruddertest` lists every airplane's rudder, elevator and aileron authority in the propeller blast, and flies a hover hands-off, with a perfect pilot and with one who reacts a fifth of a second late, in still air and in wind; `FlightCore --envtest` tests water take-offs, landing rolls, ground effect, vortex ring state and the weather.
 - **Aircraft are parametric.** One set of numbers per airplane drives both its aerodynamics and its 3D model, so adding an aircraft is mostly a matter of new parameters.
 - **Models are generated in code:** airfoil-section wings with rounded tips, shaped fuselages, canopies, sprung gear legs, wheel spats, lift struts, twisted propellers that blur into a translucent disc at speed, flat-foam profile airframes, and ten trim schemes including camouflage. Surfaces are shaded as glossy film covering with sky reflections.
 - **Scenery** on the 3D sites includes a clubhouse, car park with vehicles, pit tables, people, fences, power lines, long grass that sways in the wind, wild flowers and bushes. Each site has its own terrain shape, ground colours and trees (deciduous, conifers, palms, acacias, cypresses, cacti), and some have water, a farm, or an airport with hangars and a tower.

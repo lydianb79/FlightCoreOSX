@@ -33,7 +33,7 @@ struct SiteSpec {
     // landscape
     var terrain = -1                    // height function; -1 = the one belonging to `style`
     var palette = -1                    // ground colours; -1 = by style
-    var treeKind = -1                   // -1 by style, 0 deciduous, 1 scrub and cactus, 2 conifer, 3 palm, 4 acacia, 5 cypress and olive, 6 snowy conifer, 7 mixed forest
+    var treeKind = -1                   // -1 by style, 0 deciduous, 1 scrub and cactus, 2 conifer, 3 palm, 4 acacia, 5 cypress and olive, 6 snowy conifer, 7 mixed forest, 8 autumn woods
     var treeThreshold: Float = 0.5      // lower = denser tree cover
     var treeClear = SIMD2<Float>(55, 35)   // tree-free margin beyond the runway ends and the field sides
     var keepFrontClear = true           // keep the area in front of the pilot free of trees
@@ -42,6 +42,7 @@ struct SiteSpec {
     var facility = 0                    // 0 club field, 1 airport with hangars and tower
     var extras = -1                     // surroundings: -1 by style, 0 farm, 1 desert camp, 2 alpine, 3 none
     var defaultTime = 1                 // 0 morning, 1 midday, 2 evening
+    var flatBlend: Float? = nil         // distance over which the levelled field merges into the landscape
 
     static var all: [SiteSpec] = builtIn + Panoramas.discover()
 
@@ -116,6 +117,41 @@ struct SiteSpec {
              info: "A short grass strip cut into tall forest. Sheltered from the wind, but the trees stand close on every side: steep approaches and no room for a wide circuit.") {
             $0.terrain = 12; $0.palette = 10; $0.treeKind = 7; $0.treeThreshold = 0.22; $0.treeClear = SIMD2(22, 2); $0.keepFrontClear = false; $0.extras = 3
         },
+        make("Fjord", key: "fjord", style: 2, seed: 211, runway: (130, 11, 1), flat: (14, 30), trees: 900, wind: (270, 4, 0.35), mu: 0.06, cloud: 0.5, fog: 0.00012,
+             category: "Water", difficulty: 4,
+             info: "A grass strip on a narrow shelf above a deep fjord. Dark water starts a short way in front of you and rock walls climb hundreds of metres on both shores; the wind funnels along the water.") {
+            $0.terrain = 13; $0.waterLevel = -9; $0.waterColor = V3(0.02, 0.09, 0.12); $0.treeKind = 2; $0.flatBlend = 90; $0.treeThreshold = 0.42
+        },
+        make("Lava Fields", key: "lava", style: 1, seed: 223, runway: (200, 16, 2), flat: (10, 60), trees: 120, wind: (140, 5, 0.35), mu: 0.055, cloud: 0.6, fog: 0.00013,
+             category: "Mountains", difficulty: 3,
+             info: "A cinder strip on a black lava plain patched with moss, under a volcano and a row of cinder cones. Dark ground and a grey sky make a bright model easy to see and a dark one vanish.") {
+            $0.terrain = 14; $0.palette = 11; $0.extras = 3
+        },
+        make("Salt Flats", key: "salt", style: 1, seed: 239, runway: (400, 30, 0), flat: (0, 150), trees: 0, wind: (60, 5, 0.15), mu: 0.04, cloud: 0.1, fog: 0.00005,
+             category: "Desert", difficulty: 2,
+             info: "A black-topped strip on a dead-flat white salt pan that runs to mountains on the horizon. Unlimited room for speed runs, a steady breeze, and glare that hides how high you are.") {
+            $0.terrain = 15; $0.palette = 12; $0.extras = 1
+        },
+        make("Autumn Valley", key: "autumn", style: 0, seed: 251, runway: (160, 12, 1), flat: (12, 42), trees: 2800, wind: (240, 2, 0.25), mu: 0.06, cloud: 0.35, fog: 0.00014,
+             category: "Fields", difficulty: 2,
+             info: "A mown strip on the floor of a wooded valley in full autumn colour. Low evening sun, light wind along the valley and gentle lift off the slopes on either side.") {
+            $0.terrain = 16; $0.palette = 13; $0.treeKind = 8; $0.defaultTime = 2; $0.treeThreshold = 0.3
+        },
+        make("Wetlands", key: "marsh", style: 0, seed: 263, runway: (140, 12, 1), flat: (12, 34), trees: 260, wind: (300, 3, 0.2), mu: 0.065, cloud: 0.55, fog: 0.00018,
+             category: "Water", difficulty: 3,
+             info: "A grass strip on a dry rise in a reed marsh laced with channels and pools. Flat and open, with soft morning haze; land short or long and you are in the water.") {
+            $0.terrain = 17; $0.palette = 14; $0.waterLevel = -1.1; $0.waterColor = V3(0.05, 0.1, 0.07); $0.defaultTime = 0; $0.treeThreshold = 0.6; $0.extras = 3; $0.flatBlend = 110
+        },
+        make("Sand Sea", key: "dunes", style: 1, seed: 277, runway: (240, 20, 4), flat: (0, 70), trees: 0, wind: (0, 6, 0.4), mu: 0.07, cloud: 0.05, fog: 0.00008,
+             category: "Desert", difficulty: 3,
+             info: "A packed-sand strip in a hollow between great dunes. The wind climbing the dune faces gives strong slope lift along the crests and rough air in their lee.") {
+            $0.terrain = 18; $0.palette = 15; $0.extras = 1; $0.defaultTime = 2
+        },
+        make("Sea Cliffs", key: "cliffs", style: 0, seed: 293, runway: (150, 12, 1), flat: (22, 34), trees: 180, wind: (0, 7, 0.3), mu: 0.06, cloud: 0.45, fog: 0.00011,
+             category: "Water", difficulty: 4,
+             info: "A grass strip on a clifftop seventy metres above the sea. The onshore wind is forced up the cliff face just in front of you: superb slope soaring, and a long way down if you sink below the edge.") {
+            $0.terrain = 19; $0.palette = 3; $0.waterLevel = -72; $0.waterColor = V3(0.03, 0.15, 0.22); $0.flatBlend = 62; $0.treeThreshold = 0.6; $0.treeKind = 1
+        },
     ]
 }
 
@@ -169,6 +205,21 @@ struct Palette {
         // 10 forest
         Palette(a: rgb(0.18, 0.34, 0.11), b: rgb(0.28, 0.42, 0.14), rock: rgb(0.38, 0.37, 0.34), high: rgb(0.1, 0.22, 0.1), highFrom: 60, highTo: 200,
                 grassBase: rgb(0.12, 0.25, 0.08), grassTip: rgb(0.3, 0.46, 0.16), bush: rgb(0.14, 0.3, 0.1), bushCount: 240),
+        // 11 lava field
+        Palette(a: rgb(0.10, 0.10, 0.10), b: rgb(0.19, 0.18, 0.16), rock: rgb(0.16, 0.13, 0.12), high: rgb(0.34, 0.15, 0.1), highFrom: 90, highTo: 420,
+                grassBase: rgb(0.2, 0.27, 0.1), grassTip: rgb(0.42, 0.5, 0.2), grassCount: 9000, bush: rgb(0.3, 0.38, 0.18), bushCount: 70, flowers: false, dust: rgb(0.25, 0.23, 0.22)),
+        // 12 salt pan
+        Palette(a: rgb(0.90, 0.90, 0.87), b: rgb(0.80, 0.80, 0.77), rock: rgb(0.5, 0.42, 0.36), high: rgb(0.52, 0.42, 0.36), highFrom: 25, highTo: 160,
+                grassBase: rgb(0.6, 0.58, 0.5), grassTip: rgb(0.8, 0.78, 0.7), grassCount: 0, bush: rgb(0.5, 0.5, 0.4), bushCount: 0, flowers: false, dust: rgb(0.92, 0.92, 0.9)),
+        // 13 autumn
+        Palette(a: rgb(0.33, 0.42, 0.15), b: rgb(0.50, 0.47, 0.18), rock: rgb(0.42, 0.4, 0.36), high: rgb(0.40, 0.36, 0.14), highFrom: 60, highTo: 200,
+                grassBase: rgb(0.26, 0.28, 0.09), grassTip: rgb(0.6, 0.52, 0.22), bush: rgb(0.52, 0.26, 0.1), bushCount: 200, flowers: false),
+        // 14 marsh
+        Palette(a: rgb(0.30, 0.40, 0.15), b: rgb(0.46, 0.46, 0.20), rock: rgb(0.36, 0.34, 0.3), high: rgb(0.2, 0.32, 0.14), highFrom: 40, highTo: 140, shore: rgb(0.27, 0.25, 0.17),
+                grassBase: rgb(0.22, 0.3, 0.1), grassTip: rgb(0.64, 0.62, 0.3), grassCount: 42000, bush: rgb(0.34, 0.4, 0.16), bushCount: 260, flowers: false),
+        // 15 dune sand
+        Palette(a: rgb(0.86, 0.62, 0.36), b: rgb(0.80, 0.55, 0.30), rock: rgb(0.74, 0.5, 0.28), high: rgb(0.84, 0.6, 0.34), highFrom: 200, highTo: 400,
+                grassBase: rgb(0.5, 0.42, 0.24), grassTip: rgb(0.7, 0.6, 0.36), grassCount: 0, bush: rgb(0.42, 0.42, 0.25), bushCount: 12, flowers: false, dust: rgb(0.86, 0.66, 0.42)),
     ]
 }
 
@@ -259,12 +310,43 @@ final class Terrain {
         case 11:    // close-set rolling hills
             y = 62 * (fbm(x / 420, z / 420, s) - 0.46) + 7 * (fbm(x / 120, z / 120, s + 7) - 0.5)
             y += smoothstep(1400, 2900, r) * 300 * fbm(x / 1300, z / 1300, s + 3)
+        case 13:    // fjord: a shelf above deep water between rock walls
+            let mid = -z - 340 + 70 * (fbm(x / 520, 0.7, s + 5) - 0.5)          // distance from the middle of the water
+            y = 8 * (fbm(x / 240, z / 240, s) - 0.5)
+            y += 600 * smoothstep(225, 1000, abs(mid)) * (0.35 + 1.3 * fbm(x / 600, z / 600, s + 3))
+            y -= 55 * smoothstep(255, 170, abs(mid))
+        case 14:    // lava plain, cinder cones and a volcano
+            y = 5 * (fbm(x / 110, z / 110, s) - 0.5) + 9 * (fbm(x / 420, z / 420, s + 2) - 0.5)
+            y += smoothstep(450, 1300, r) * 230 * smoothstep(0.6, 0.78, fbm(x / 520, z / 520, s + 5))
+            let dv = sqrt((x - 900) * (x - 900) + (z + 2100) * (z + 2100))
+            y += 950 * max(0, 1 - dv / 1700) * max(0, 1 - dv / 1700) - 160 * smoothstep(260, 60, dv)
+        case 15:    // salt pan with ranges on the horizon
+            y = 0.25 * (fbm(x / 200, z / 200, s) - 0.5)
+            let rd = 1 - abs(2 * fbm(x / 1500, z / 1500, s + 11) - 1)
+            y += smoothstep(1700, 3000, r) * 620 * rd * rd
+        case 16:    // valley running left to right between wooded slopes
+            let side = abs(z - 20 + 60 * (fbm(x / 600, 0.3, s + 4) - 0.5))
+            y = 5 * (fbm(x / 150, z / 150, s + 7) - 0.5) + 250 * smoothstep(130, 1000, side) * (0.5 + fbm(x / 700, z / 700, s))
+            y += smoothstep(1500, 2900, r) * 260 * fbm(x / 1300, z / 1300, s + 3)
+        case 17:    // marsh: a plain a little above the water, cut by channels and pools
+            y = 3.2 * (fbm(x / 230, z / 230, s) - 0.42)
+            y -= 3.5 * smoothstep(0.035, 0.0, abs(fbm(x / 420, z / 420, s + 4) - 0.5))
+            y -= 3 * smoothstep(0.7, 0.8, fbm(x / 300, z / 300, s + 8))
+            y += smoothstep(1500, 2900, r) * 160 * fbm(x / 1400, z / 1400, s + 3)
+        case 18:    // dune field
+            let wob = 140 * (fbm(x / 700, z / 700, s + 2) - 0.5)
+            let rd = 1 - abs(2 * fbm((x + wob) / 330, (z + 0.6 * wob) / 620, s) - 1)
+            y = (8 + 62 * smoothstep(120, 900, r)) * rd * rd + 16 * (fbm(x / 900, z / 900, s + 5) - 0.5)
+        case 19:    // clifftop above the sea
+            let edge = -z - 78 + 26 * (fbm(x / 210, 0.4, s + 5) - 0.5)          // positive beyond the cliff edge
+            y = 9 * (fbm(x / 260, z / 260, s) - 0.5) + 55 * smoothstep(200, 1200, z) * fbm(x / 600, z / 600, s + 3)
+            y -= 74 * smoothstep(-4, 22, edge) + 30 * smoothstep(22, 400, edge)
         default:    // forest floor
             y = 24 * (fbm(x / 600, z / 600, s) - 0.45) + 4 * (fbm(x / 120, z / 120, s + 7) - 0.5)
             y += smoothstep(1300, 2900, r) * 300 * fbm(x / 1400, z / 1400, s + 3)
         }
         let dx = max(abs(x) - (site.runwayLen / 2 + 25), 0), dz = max(abs(z - site.flatCenterZ) - site.flatHalfZ, 0)
-        return y * smoothstep(34, site.style == 2 ? 110 : 190, sqrt(dx * dx + dz * dz))
+        return y * smoothstep(34, site.flatBlend ?? (site.style == 2 ? 110 : 190), sqrt(dx * dx + dz * dz))
     }
 
     func height(_ x: Float, _ z: Float) -> Float {
@@ -295,7 +377,8 @@ final class Terrain {
         }
         let pal = site.palette >= 0 ? site.palette : site.style
         if pal == 4 { return (0.14, 0.3, 0.02) }                 // soft snow
-        if pal == 1 || pal == 5 { return (0.07, 0.55, 0.012) }   // desert
+        if pal == 1 || pal == 5 || pal == 11 || pal == 12 { return (0.07, 0.55, 0.012) }   // desert, lava, salt
+        if pal == 15 { return (0.16, 0.45, 0.02) }               // loose sand
         return (0.09, 0.6, 0.02)                                 // long grass
     }
 
