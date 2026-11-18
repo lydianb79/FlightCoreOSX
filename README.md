@@ -8,6 +8,19 @@ A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Creat
 
 You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 175 aircraft, 20 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Main menu](Resources/Screenshots/menu.jpg) | ![Aircraft browser](Resources/Screenshots/aircraft.jpg) |
+| The main menu: aircraft, flying site, weather, controller and graphics | The aircraft browser: 175 models with previews and key figures |
+| ![Flying at a 3D site](Resources/Screenshots/flight.jpg) | ![Flying at a photo site](Resources/Screenshots/photo.jpg) |
+| A P-51 climbing out at Alpine Ridge, seen from the pilot's position | A Pitts Special at a 360° photo site, Spaichingen Hill |
+
+![Weather panel](Resources/Screenshots/weather.jpg)
+
+The weather panel, here at Lakeside with a Piper J-3 Cub.
+
 ## Download
 
 Get `FlightCore-OSX.zip` from the [latest release](https://github.com/lydianb79/FlightCoreOSX/releases/latest), unzip it and move `FlightCore.app` to your Applications folder.
