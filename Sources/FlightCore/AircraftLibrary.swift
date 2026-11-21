@@ -207,6 +207,11 @@ struct PlaneGeom {
     var noseZ: Float = -0.48, fuseLen: Float = 1.4, fuseW: Float = 0.13, fuseH: Float = 0.17
     var stabSpan: Float = 0.56, stabChord: Float = 0.16, stabZ: Float = 0.74, elevFrac: Float = 0.4
     var finH: Float = 0.24, finChord: Float = 0.18, finZ: Float = 0.72, rudFrac: Float = 0.4
+    /// How much of the fin and rudder reaches below the fuselage line, as a share of its height. 3D foamies carry
+    /// their rudder well below the fuselage, as real profile 3D designs do: that puts the fin's centre close to the
+    /// roll axis, so rudder hardly rolls the model and a spinning hover does not keep tipping the nose over.
+    var finDrop: Float? = nil
+    var finDropShare: Float { finDrop ?? (category == "Foam 3D" ? 0.45 : 0) }
     var ailFrac: Float = 0.25, ailStart: Float = 0.5
     var ailThrow: Float = 20, elevThrow: Float = 20, rudThrow: Float = 25
     var thrust: Float = 18, pitchSpeed: Float = 24, propDia: Float = 0.28
@@ -377,7 +382,7 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
     let tipY0 = g.wingY + hs * tan(dih)
     let finSpots: [V3] = g.noFin ? [] : (g.winglets
         ? [V3(hs, tipY0 + g.finH / 2, g.wingLE + g.sweep + 0.5 * g.tipChord), V3(-hs, tipY0 + g.finH / 2, g.wingLE + g.sweep + 0.5 * g.tipChord)]
-        : [V3(0, finY + g.finH / 2, g.finZ + 0.25 * g.finChord)])
+        : [V3(0, finY + g.finH * (0.5 - g.finDropShare), g.finZ + 0.25 * g.finChord)])
     for fp in finSpots {
         surfaces.append(AeroSurface(pos: fp, normal: V3(1, 0, 0), area: g.finH * g.finChord, ar: far, liftSlope: 2 * .pi * far / (far + 2),
                                     stall: 0.27, cd0: 0.012, flapCh: g.flyingWing ? -1 : 2, flapGain: g.flyingWing ? 0 : -flapTau(g.rudFrac) * g.rudThrow * deg,
@@ -425,7 +430,8 @@ func buildAirplane(_ g0: PlaneGeom, cgShift: Float = 0) -> AircraftSpec {
     contacts.append(Contact(pos: V3(0, h * 0.2, tz), crashSpeed: 3.5))
     contacts.append(Contact(pos: V3(hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
     contacts.append(Contact(pos: V3(-hs, tipY, g.wingLE + g.sweep + g.tipChord / 2), crashSpeed: 3))
-    contacts.append(Contact(pos: V3(0, finY + g.finH, g.finZ + g.finChord * 0.6), crashSpeed: 2.5))
+    contacts.append(Contact(pos: V3(0, finY + g.finH * (1 - g.finDropShare), g.finZ + g.finChord * 0.6), crashSpeed: 2.5))
+    if g.finDropShare > 0.05 { contacts.append(Contact(pos: V3(0, finY - g.finH * g.finDropShare, g.finZ + g.finChord * 0.6), crashSpeed: 2.5)) }
     contacts = contacts.map { var c = $0; c.crashSpeed *= g.tough; return c }
     contacts.append(Contact(pos: V3(0, max(h, g.wingY) + 0.03, nz + 0.3 * L), crashSpeed: 2.5))
 
@@ -767,6 +773,10 @@ func tuneThrustLine(_ spec0: AircraftSpec) -> AircraftSpec {
 func trimForCruise(_ spec0: AircraftSpec, powered: Bool = false) -> AircraftSpec {
     var spec = spec0
     guard spec.kind == .airplane else { return spec }
+    // 3D foam planes are built with zero incidence everywhere, as real ones are, so that they hang straight in a
+    // hover. A tail angle chosen for hands-off cruise sits in the full prop blast there and pushes the nose over;
+    // in forward flight they need a touch of up elevator or trim instead.
+    if spec.category == "Foam 3D" { return spec }
     let glider = spec.category == "Gliders"
     // near-neutral aerobats and 3D models barely change speed with trim, and fast jets need a margin above the stall
     let quick = spec.category == "Aerobatic" || spec.category == "Foam 3D"
