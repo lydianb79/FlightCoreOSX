@@ -169,7 +169,13 @@ For your own photos, the `.json` file next to the image can also set where aircr
 }
 ```
 
-`bearing` is measured in the photo (0° at the image centre, positive to the right). An obstacle only says how far away a tree or building is. What is solid is decided by the picture itself: FlightCore works out which parts of the photo are open sky and which hold something, and the model hits an obstacle only where, from the pilot's position, it is in front of the object. Gaps between crowns, the sky beside a pointed treetop and the air above a hedge are open, and a top that reaches higher than the stand-in shape is still solid. (`FlightCore --maskcheck <folder>` writes each photo with the solid parts tinted.) The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
+`bearing` is measured in the photo (0° at the image centre, positive to the right). Collisions on a photo site are worked out from the photo itself:
+
+- **Direction, outline and height** come from the picture: FlightCore works out which parts of the photo are open sky and which hold something. Gaps between crowns, the sky beside a pointed treetop and the air above a hedge are open.
+- **Distance** is measured where the object's foot meets the ground. The ground is a known plane and the camera's height above it is known, so the angle below the horizon at which a tree trunk or a wall meets the grass gives how far away it stands. A lone tree is as deep as it is wide; a wood or a row of houses has no far side.
+- **Where** to measure comes from the preset's obstacles: they mark the directions in which something near really stands. Elsewhere a change of colour in the ground (a field boundary, a track, the lip of a gully) could be mistaken for a foot, and a crash in open air is the worst mistake. If the foot cannot be made out, or the measurement disagrees wildly with the preset, the preset's distance is used.
+
+The model has hit something when, seen from the camera, it is in front of it, has reached its distance and has not passed its far side. **Photo: Show / Hide Obstacles** draws the result as walls: cyan where the distance was measured, orange where it comes from the preset. `FlightCore --depthcheck <folder>` writes each photo with the foot line and the distances marked, and `FlightCore --collisiontest` flies out in 72 directions at every photo site and checks that nothing stops the model in open air. (`FlightCore --maskcheck <folder>` writes each photo with the solid parts tinted.) The built-in presets place obstacles on the far side of what the photo allows, because a crash in what looks like open air is worse than a near miss. **Photo: Show / Hide Obstacles** draws the cylinders over the photo so you can line them up.
 
 The ground of a photo site is an invisible plane, level or tilted to match a hillside, that only receives the model's shadow; humps and hollows in the photo are not followed. Photo sites use the pilot camera only. Photos taken on level or evenly sloping ground work best; a summit or a ledge above a valley does not, because the model then meets the invisible ground in what looks like mid-air. The aircraft is always drawn in front of the photo, so it never disappears behind a photographed object.
 
@@ -190,6 +196,7 @@ Press **H** in the app for this list.
 | `[` `]`, 1–9 | Previous / next aircraft, or pick one |
 | N | Next flying site |
 | C | Camera: pilot, chase, onboard |
+| F8 | FPV (onboard camera) / back to the view from outside; also a button in the top bar. 3D sites only |
 | Z | Zoom: auto, keep ground in view, fixed |
 | F | Flight mode: self-level / acro (multirotors), stabilized / acro (helicopters) |
 | I | Helicopter rotor speed: low, normal, high |
@@ -304,7 +311,7 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
 
 Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
 

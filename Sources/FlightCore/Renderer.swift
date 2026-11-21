@@ -483,7 +483,26 @@ final class Renderer: NSObject, MTKViewDelegate {
                         ob.quad(pt(a0, r - w), pt(a0, r + w), pt(a1, r + w), pt(a1, r - w), V4(0.1, 0.9, 1, 0.8))
                     }
                 }
-                for (i, o) in game.site.obstacles.enumerated() {
+                // what is solid, as measured from the photo: a wall at the distance of each thing, as high as it reaches
+                if let mask = game.panoMask, mask.measured {
+                    let step = mask.w / 720
+                    func at(_ x: Int, _ d: Float, _ el: Float) -> V3 {
+                        let a = ((Float(x) + 0.5) / Float(mask.w) - 0.5) * 2 * .pi - game.site.north * deg
+                        return V3(sin(a) * d, game.site.eyeHeight + d * tan(el), -cos(a) * d)
+                    }
+                    var x = 0
+                    while x + step < mask.w {
+                        let d0 = mask.depth[x], d1 = mask.depth[x + step]
+                        if d0.isFinite && d1.isFinite && abs(d0 - d1) < 0.3 * d0 {
+                            let g0 = V3(at(x, d0, 0).x, game.terrain.height(at(x, d0, 0).x, at(x, d0, 0).z), at(x, d0, 0).z)
+                            let g1 = V3(at(x + step, d1, 0).x, game.terrain.height(at(x + step, d1, 0).x, at(x + step, d1, 0).z), at(x + step, d1, 0).z)
+                            let col: V4 = mask.baseRow[x] >= 0 ? V4(0.1, 0.9, 1, 0.3) : V4(1, 0.6, 0.1, 0.3)        // measured : from the preset
+                            ob.quad(g0, g1, at(x + step, d1, mask.topEl[x + step]), at(x, d0, mask.topEl[x]), col)
+                        }
+                        x += step
+                    }
+                }
+                for (i, o) in game.site.obstacles.enumerated() where o.height <= 3 || game.panoMask?.measured != true {
                     let c = Panoramas.position(o, north: game.site.north)
                     let col: V4 = i % 2 == 0 ? V4(1, 0.2, 0.2, 0.35) : V4(1, 0.6, 0.1, 0.35)
                     let gy = game.terrain.height(c.x, c.y)

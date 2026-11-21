@@ -181,6 +181,11 @@ struct HUDView: View {
                         }
                         .padding(.trailing, 4).allowsHitTesting(false)
                         HStack(spacing: 5) {
+                            if m.game.site.panorama == nil {
+                                BarButton(icon: m.game.isFPV ? "person.fill" : "video.fill", help: m.game.isFPV ? "Back to the view from outside (F8)" : "FPV: fly from the onboard camera (F8)") {
+                                    m.game.toggleFPV(); m.objectWillChange.send()
+                                }
+                            }
                             BarButton(icon: "wind", help: "Wind, weather and time of day") { m.game.cameFromMenu = false; m.overlay = m.overlay == .environment ? .none : .environment }
                             BarButton(icon: "gamecontroller", help: "Controller setup") { m.openControllerSetup?() }
                             BarButton(icon: "questionmark", help: "Keyboard controls (H)") { m.game.cameFromMenu = false; m.overlay = m.overlay == .help ? .none : .help }
@@ -828,7 +833,7 @@ struct HelpView: View {
                     ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Reset aircraft")]),
         ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Helicopter rotor speed: low, normal, high"),
                       ("F", "Quadcopter flight mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
-        ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),
+        ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("F8", "FPV / outside view (3D sites)"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),
                                  ("T", "Slow motion"), (",  .", "Less / more wind"), ("N", "Next flying site"), ("B", "Balloon Burst challenge"),
                                  ("K", "Demo pilot"), ("M", "Mute sound"), ("Esc", "Main menu")]),
     ]

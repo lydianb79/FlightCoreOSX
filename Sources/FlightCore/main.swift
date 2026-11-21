@@ -760,6 +760,93 @@ if CommandLine.arguments.contains("--districttest") {
     print(bad == 0 ? "DISTRICT all ok" : "DISTRICT \(bad) sites failed")
     exit(0)
 }
+if let ci = CommandLine.arguments.firstIndex(of: "--depthcheck"), ci + 1 < CommandLine.arguments.count {
+    // every photo site: where the foot of each object was found (cyan), how high it reaches (yellow), and the
+    // distance that gives, written along the bottom. Two strips per site, left half and right half of the photo.
+    let dir = URL(fileURLWithPath: CommandLine.arguments[ci + 1])
+    let only = ci + 2 < CommandLine.arguments.count ? CommandLine.arguments[ci + 2] : ""
+    for site in SiteSpec.all {
+        guard let url = site.panorama, only.isEmpty || url.lastPathComponent.contains(only), let mask = PanoMask(url: url), let img = Panoramas.image(url, maxSize: 8192) else { continue }
+        mask.measure(site)
+        let W = 2880, topF = 0.40, botF = 0.60                      // the band of the picture round the horizon
+        let stripH = Int(Double(W) * (botF - topF)), H = stripH * 2
+        guard let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { continue }
+        let fullW = CGFloat(W) * 2, fullH = CGFloat(W)
+        for half in 0..<2 {
+            let oy = CGFloat(half == 0 ? stripH : 0)                 // CoreGraphics origin is bottom-left: first strip on top
+            ctx.saveGState(); ctx.clip(to: CGRect(x: 0, y: oy, width: CGFloat(W), height: CGFloat(stripH)))
+            ctx.draw(img, in: CGRect(x: -CGFloat(half) * CGFloat(W), y: oy - (1 - CGFloat(botF)) * fullH, width: fullW, height: fullH))
+            func Y(_ rowFrac: CGFloat) -> CGFloat { oy + (CGFloat(botF) - rowFrac) * fullH }
+            let x0 = half * mask.w / 2
+            var lastLabel = -1000
+            for k in 0..<(mask.w / 2) {
+                let x = x0 + k, sx = CGFloat(k) / CGFloat(mask.w / 2) * CGFloat(W)
+                let dpt = mask.depth[x]
+                if dpt.isFinite {
+                    if mask.baseRow[x] >= 0 {
+                        ctx.setFillColor(CGColor(srgbRed: 0, green: 1, blue: 1, alpha: 1))
+                        ctx.fill(CGRect(x: sx, y: Y(CGFloat(mask.baseRow[x]) / CGFloat(mask.h)) - 1.5, width: 2, height: 3))
+                    }
+                    let tr = 0.5 - CGFloat(mask.topEl[x] + site.horizon * deg) / .pi
+                    ctx.setFillColor(CGColor(srgbRed: 1, green: 0.9, blue: 0, alpha: 1))
+                    ctx.fill(CGRect(x: sx, y: Y(tr) - 1, width: 2, height: 2))
+                    if k - lastLabel > 70 {
+                        lastLabel = k
+                        let t = mask.thickness[x].isFinite ? String(format: "%.0f m (%.0f)", dpt, mask.thickness[x]) : String(format: "%.0f m", dpt)
+                        let line = CTLineCreateWithAttributedString(NSAttributedString(string: t, attributes: [.font: NSFont.boldSystemFont(ofSize: 20), .foregroundColor: NSColor.white,
+                                                                                                                 .strokeColor: NSColor.black, .strokeWidth: -3]))
+                        ctx.textPosition = CGPoint(x: sx, y: oy + 8 + CGFloat((k / 70) % 2) * 24); CTLineDraw(line, ctx)
+                    }
+                }
+            }
+            ctx.restoreGState()
+        }
+        if let out = ctx.makeImage(), let d = CGImageDestinationCreateWithURL(dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_depth.jpg") as CFURL, "public.jpeg" as CFString, 1, nil) {
+            CGImageDestinationAddImage(d, out, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary); CGImageDestinationFinalize(d)
+        }
+        let found = mask.depth.filter { $0.isFinite }
+        let sorted = found.sorted()
+        print(String(format: "%@ objects in %2.0f%% of directions; nearest %5.1f m, median %5.1f m", url.lastPathComponent.padding(toLength: 30, withPad: " ", startingAt: 0),
+                     Float(found.count) / Float(mask.w) * 100, sorted.first ?? 0, sorted.isEmpty ? 0 : sorted[sorted.count / 2]))
+    }
+    exit(0)
+}
+if CommandLine.arguments.contains("--collisiontest") {
+    // Photo sites: fly straight out from the pilot at four metres in 72 directions. Where the photo shows open
+    // sky at that height the model must get through; where it shows a tree or a wall it must be stopped at the
+    // distance measured for it, not before.
+    var early = 0, total = 0
+    for (i, site) in SiteSpec.all.enumerated() where site.panorama != nil {
+        guard let url = site.panorama, let mask = PanoMask(url: url) else { continue }
+        mask.measure(site)
+        let g = Game(site: i, aircraft: 0); g.panoMask = mask
+        let eyePos = g.terrain.pilotPos + V3(0, site.eyeHeight, 0)
+        var hits = 0, tooEarly = 0, nearest: Float = .infinity
+        for k in 0..<72 {
+            let a = Float(k) * 5 * deg, dir = V3(sin(a), 0, -cos(a))
+            var d: Float = 4
+            while d < 200 {
+                let p = dir * d + V3(0, g.terrain.height(dir.x * d, dir.z * d) + 4, 0)
+                if mask.hits(p - eyePos, north: site.north, horizon: site.horizon) {
+                    hits += 1; nearest = min(nearest, d)
+                    // a hit is too early if, in the picture, the model is not in front of anything there
+                    if !mask.isSolid(p - eyePos, north: site.north, horizon: site.horizon) { tooEarly += 1 }
+                    let col = min(max(Int(((Float(k) * 5 + site.north) / 360 + 0.5).truncatingRemainder(dividingBy: 1) * Float(mask.w)), 0), mask.w - 1)
+                    _ = col
+                    break
+                }
+                d += 0.5
+            }
+        }
+        total += 1; early += tooEarly
+        print(String(format: "COLLISION %@ stopped in %2d of 72 directions, nearest at %5.1f m; measured in %2.0f%% of marked directions; in open air %d %@",
+                     site.displayName.padding(toLength: 30, withPad: " ", startingAt: 0), hits, nearest.isFinite ? nearest : 0,
+                     Float(mask.baseRow.filter { $0 >= 0 }.count) / Float(max(mask.depth.filter { $0.isFinite }.count, 1)) * 100, tooEarly, tooEarly == 0 ? "ok" : "FAIL"))
+    }
+    print(early == 0 ? "COLLISION all \(total) sites ok" : "COLLISION \(early) hits in open air")
+    exit(0)
+}
 if CommandLine.arguments.contains("--obstaclelist") {
     // every photo site: how close the nearest solid thing is to the pilot and to the start, and how tall the tallest is
     for site in SiteSpec.all where site.panorama != nil {
@@ -1093,23 +1180,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--flaps") { game.flapSetting = 1 }
         if let ff = Float(arg("--ff") ?? "") { for _ in 0..<Int(ff * 60) { game.frame(dt: 1 / 60) } }
         if args.contains("--treehit") {     // test hook: fly into the first tree of a photo site
-            if let url = game.site.panorama { game.panoMask = PanoMask(url: url) }
+            if let url = game.site.panorama { let m = PanoMask(url: url); m?.measure(game.site); game.panoMask = m }
             let eyePos = game.terrain.pilotPos + V3(0, game.site.eyeHeight, 0)
-            if let o = game.site.obstacles.first(where: { $0.height > 6 }) {
-                let c = Panoramas.position(o, north: game.site.north)
-                let away = normalize(V3(c.x, 0, c.y))
-                // approach from the pilot's side at a height where the picture shows the tree
-                var hgt = o.height * 0.5
-                for k in stride(from: Float(0.2), through: 1.2, by: 0.1) {
-                    let probe = V3(c.x, game.terrain.height(c.x, c.y) + o.height * k, c.y) - away * (o.radius * 0.5)
-                    if game.panoMask?.isSolid(probe - eyePos, north: game.site.north, horizon: game.site.horizon) == true { hgt = o.height * k; break }
+            if let o = game.site.obstacles.first(where: { $0.height > 6 }), let mask = game.panoMask {
+                // where the photo says that tree stands
+                let col = min(max(Int((o.bearing / 360 + 0.5) * Float(mask.w)), 0), mask.w - 1)
+                let dist = mask.depth[col].isFinite ? mask.depth[col] : o.distance
+                let a = (o.bearing - game.site.north) * deg
+                let away = V3(sin(a), 0, -cos(a))
+                // fly straight away from the pilot at a height where the picture shows the tree
+                var hgt: Float = 3
+                for k in stride(from: Float(2), through: 30, by: 1) {
+                    let probe = away * (dist + 1) + V3(0, game.terrain.height(away.x * dist, away.z * dist) + k, 0)
+                    if mask.isSolid(probe - eyePos, north: game.site.north, horizon: game.site.horizon) { hgt = k + 1; break }
                 }
-                let from = V3(c.x, game.terrain.height(c.x, c.y) + hgt, c.y) - away * (o.radius * 0.75 + 4)
-                game.aircraft.reset(pos: from, heading: atan2(-away.x, -away.z), speed: 12)
+                let start = away * max(dist - 9, 2)
+                game.aircraft.reset(pos: start + V3(0, game.terrain.height(start.x, start.z) + hgt, 0), heading: atan2(-away.x, -away.z), speed: 12)
                 var frames = 0
-                while frames < 120 && !game.aircraft.crashed { game.frame(dt: 1 / 60); frames += 1 }
-                print(String(format: "TREEHIT %@: tree %.0f m away, %.0f m tall; %@ after %.2f s at %.1f m up; %d particles", game.site.displayName, o.distance, o.height,
-                             game.aircraft.crashed ? "hit" : "NOT hit", Float(frames) / 60, game.aircraft.pos.y - game.terrain.height(c.x, c.y), game.particles.count))
+                while frames < 150 && !game.aircraft.crashed { game.frame(dt: 1 / 60); frames += 1 }
+                let p = game.aircraft.pos
+                print(String(format: "TREEHIT %@: preset said %.0f m, the photo says %.0f m; %@ at %.1f m from the pilot, %.1f m up, after %.2f s; %d particles", game.site.displayName,
+                             o.distance, dist, game.aircraft.crashed ? "hit" : "NOT hit", hypot(p.x, p.z), p.y - game.terrain.height(p.x, p.z), Float(frames) / 60, game.particles.count))
                 for _ in 0..<18 { game.frame(dt: 1 / 60) }
             }
         }

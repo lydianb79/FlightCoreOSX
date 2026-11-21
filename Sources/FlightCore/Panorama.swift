@@ -295,12 +295,12 @@ enum Panoramas {
 /// in the way where it can actually be seen: the model hits an obstacle when, from where the pilot stands, it is
 /// in front of the object in the picture, not merely inside the rough shape that stands in for it.
 final class PanoMask {
-    let w = 1440, h = 720
+    let w = 2880, h = 1440
     private(set) var solid: [Bool]
     private var px: [UInt8]
 
     init?(url: URL) {
-        guard let img = Panoramas.image(url, maxSize: 2048) else { return nil }
+        guard let img = Panoramas.image(url, maxSize: 4096) else { return nil }
         px = [UInt8](repeating: 0, count: w * h * 4)
         solid = [Bool](repeating: true, count: w * h)
         guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -366,16 +366,175 @@ final class PanoMask {
     func isSolid(_ dir: V3, north: Float, horizon: Float) -> Bool {
         let p = pixel(dir, north: north, horizon: horizon)
         var n = 0
-        for dy in -1...1 { for dx in -1...1 {
+        for dy in -2...2 { for dx in -2...2 {
             let y = min(max(p.y + dy, 0), h - 1), x = (p.x + dx + w) % w
             if solid[y * w + x] { n += 1 }
         } }
-        return n >= 3
+        return n >= 7
     }
 
     /// The photo's colour in this direction (linear-ish 0...1), for effects that should match what was hit.
     func color(_ dir: V3, north: Float, horizon: Float) -> V3 {
         let p = pixel(dir, north: north, horizon: horizon), i = (p.y * w + p.x) * 4
         return V3(Float(px[i]), Float(px[i + 1]), Float(px[i + 2])) / 255
+    }
+
+    // MARK: Measured distances
+
+    /// For every column of the photo: how far away the thing standing there is, measured from where its foot meets
+    /// the ground (`.infinity` where nothing stands, or where it is too far to matter).
+    private(set) var depth: [Float] = []
+    /// How deep that thing is, front to back: a lone tree is as deep as it is wide, a wood has no far side.
+    private(set) var thickness: [Float] = []
+    /// The elevation (radians) up to which the nearest thing in a column reaches; above it is something farther off.
+    private(set) var topEl: [Float] = []
+    /// Where the foot was found in each column (row in the picture; -1 if none), for the check pictures.
+    private(set) var baseRow: [Int] = []
+    private(set) var measured = false
+
+    /// Distance from the camera to the point on the ground seen at elevation `el` (radians) in a direction where
+    /// the ground rises with gradient `rise` (height gained per metre away from the camera).
+    static func groundDistance(el: Float, eye: Float, rise: Float) -> Float {
+        let k = rise - tan(el)
+        return k > 1e-4 ? eye / k : .infinity
+    }
+
+    /// Work out the distances for a site. A photograph says exactly in which direction a thing lies and how big it
+    /// looks, but not how far away it is. One point of it can be placed, though: where it stands on the ground,
+    /// because the ground is a known plane and the camera's height above it is known. So in every column of the
+    /// picture the foot of whatever stands there is found (the row where "looks like the thing" gives way to
+    /// "looks like the ground") and its angle below the horizon gives the distance.
+    func measure(_ site: SiteSpec) {
+        let w = self.w, h = self.h
+        var d = [Float](repeating: .infinity, count: w), known = [Bool](repeating: true, count: w)
+        var top = [Float](repeating: 0, count: w), base = [Int](repeating: -1, count: w)
+        let hor = site.horizon * deg, eye = site.eyeHeight, grad = site.groundGradient
+        func row(_ el: Float) -> Int { min(max(Int((0.5 - (el + hor) / .pi) * Float(h)), 0), h - 1) }
+        func elev(_ y: Int) -> Float { (0.5 - (Float(y) + 0.5) / Float(h)) * .pi - hor }
+        // colour in terms that separate foliage, soil, snow and masonry: lightness counts half, hue in full
+        func feat(_ x: Int, _ y: Int) -> SIMD3<Float> {
+            let i = (y * w + (x + w) % w) * 4
+            let r = Float(px[i]), g = Float(px[i + 1]), b = Float(px[i + 2])
+            return SIMD3((r + g + b) / 3 * 0.7, r - g, (r + g) / 2 - b)
+        }
+        for x in 0..<w {
+            let a = ((Float(x) + 0.5) / Float(w) - 0.5) * 2 * .pi - site.north * deg
+            let rise = grad.x * sin(a) - grad.y * cos(a)
+            let e0 = atan(rise)                                  // where the ground meets the sky in this direction
+            let r0 = row(e0)
+            // is anything standing above eye level here?
+            var yTop = 0
+            while yTop < r0 && !solid[yTop * w + x] { yTop += 1 }
+            if elev(yTop) < e0 + 0.6 * deg { continue }
+            // what the thing looks like: just above the horizon; what the ground looks like: close to the camera
+            var obj = SIMD3<Float>.zero, on: Float = 0
+            for y in max(yTop, row(e0 + 3.5 * deg))..<row(e0 + 0.3 * deg) { for dx in -2...2 where solid[y * w + (x + dx + w) % w] { obj += feat(x + dx, y); on += 1 } }
+            var gnd = SIMD3<Float>.zero, gn: Float = 0, gvar: Float = 0
+            let g0 = row(e0 - 11 * deg), g1 = row(e0 - 28 * deg)
+            for y in stride(from: g0, to: g1, by: 2) { for dx in -2...2 { gnd += feat(x + dx, y); gn += 1 } }
+            guard on > 4, gn > 4 else { known[x] = false; continue }
+            obj /= on; gnd /= gn
+            for y in stride(from: g0, to: g1, by: 2) { gvar += simd_length_squared(feat(x, y) - gnd) }
+            gvar = gvar / Float(max((g1 - g0) / 2, 1))
+            let sep = simd_length_squared(obj - gnd)
+            // thing and ground must look different, by more than the ground varies within itself
+            if sep < 260 || sep < gvar * 1.6 { known[x] = false; continue }
+            // the one row that best splits "thing above, ground below" between the horizon and close by
+            let lo = g0
+            var score = [Float](repeating: 0, count: lo - r0 + 1)          // > 0: looks like ground
+            for y in r0...lo {
+                let f = feat(x, y)
+                score[y - r0] = clampf((simd_length_squared(f - obj) - simd_length_squared(f - gnd)) / sep, -1, 1)
+            }
+            var best = r0, bestV = -Float.infinity, above: Float = 0
+            let total = score.reduce(0, +)
+            for y in r0...lo {
+                // rows above y count as thing (want score < 0), rows from y down as ground (want score > 0)
+                let v = -above + (total - above)
+                if v > bestV { bestV = v; best = y }
+                above += score[y - r0]
+            }
+            // how cleanly it splits: above the foot nearly every row must look like the thing, below it like the
+            // ground. A dark shadow or a track across the field fails this and is not taken for a foot.
+            var objOK: Float = 0, gndOK: Float = 0
+            for y in r0...lo { if y < best { if score[y - r0] < 0 { objOK += 1 } } else if score[y - r0] > 0 { gndOK += 1 } }
+            let nObj = Float(best - r0), nGnd = Float(lo - best + 1)
+            if best >= lo - 2 || (nObj > 0 && objOK / nObj < 0.8) || gndOK / nGnd < 0.8 { known[x] = false; continue }
+            base[x] = best
+            d[x] = PanoMask.groundDistance(el: elev(best), eye: eye, rise: rise)
+            if d[x] < 3 { d[x] = .infinity; base[x] = -1; continue }       // the tripod, the photographer's bag
+            // how high the same thing reaches: up until the colour changes to something else behind it, or to sky
+            var y = r0, off = 0, last = r0
+            while y > 0 && off < 6 {
+                y -= 1
+                if !solid[y * w + x] { off += 2 } else if simd_length_squared(feat(x, y) - obj) > max(sep * 0.8, 900) { off += 1 } else { off = 0; last = y }
+            }
+            top[x] = elev(last)
+        }
+        // smooth out single columns that disagree with their neighbours (median over a degree and a half)
+        var dm = d
+        let win = w / 240
+        for x in 0..<w {
+            var v: [Float] = []
+            for k in -win...win { let j = (x + k + w) % w; if known[j] { v.append(d[j]) } }
+            if !known[x] && v.count < win { continue }
+            v.sort(); if !v.isEmpty { dm[x] = v[v.count / 2]; known[x] = true }
+        }
+        // The measurement is only used where the site's preset says that something near does stand: a change of
+        // colour in the ground itself (a field boundary, a track, the edge of a drop into a gully) can look like a
+        // foot, and a crash in open air is the worst mistake. There the preset says roughly how far; the photo says
+        // exactly. Where the two disagree wildly, or the foot cannot be made out, the preset's distance stands.
+        var hand = [Float](repeating: .infinity, count: w)
+        for o in site.obstacles where o.height > 3 {
+            let half = asin(min(o.radius / o.distance, 1)) / deg + 4
+            let c = Int((o.bearing / 360 + 0.5) * Float(w)), n = Int(half / 360 * Float(w))
+            for k in -n...n { let j = ((c + k) % w + w) % w; hand[j] = min(hand[j], max(o.distance - o.radius * 0.75, 3)) }
+        }
+        // close small gaps between neighbouring obstacles of a row
+        let gap = w * 12 / 360
+        var x0 = 0
+        while x0 < w {
+            guard !hand[x0].isFinite else { x0 += 1; continue }
+            var e = x0; while e < w && !hand[e].isFinite { e += 1 }
+            if x0 > 0 && e < w && e - x0 <= gap { for j in x0..<e { hand[j] = lerp(hand[x0 - 1], hand[e], Float(j - x0 + 1) / Float(e - x0 + 1)) } }
+            x0 = e
+        }
+        for x in 0..<w {
+            guard hand[x].isFinite else { dm[x] = .infinity; base[x] = -1; continue }
+            if !known[x] || !dm[x].isFinite || dm[x] > 160 || dm[x] < hand[x] * 0.4 || dm[x] > hand[x] * 3 { dm[x] = hand[x]; base[x] = -1 }
+        }
+        // how deep each thing is: as deep as it is wide, and a broad front (a wood, a row of houses) has no far side
+        var th = [Float](repeating: 0, count: w)
+        var x = 0
+        while x < w {
+            guard dm[x].isFinite else { x += 1; continue }
+            var e = x, sum = dm[x]
+            while e + 1 < w && dm[e + 1].isFinite && abs(log(dm[e + 1] / dm[e])) < 0.3 { e += 1; sum += dm[e] }
+            let mean = sum / Float(e - x + 1)
+            let width = Float(e - x + 1) / Float(w) * 2 * .pi * mean
+            let t: Float = width > 30 ? .infinity : max(width, 2.5)
+            for j in x...e { th[j] = t }
+            x = e + 1
+        }
+        for x in 0..<w where dm[x].isFinite && base[x] < 0 {
+            var y = 0
+            while y < h / 2 && !solid[y * w + x] { y += 1 }
+            top[x] = elev(y)
+        }
+        depth = dm; thickness = th; topEl = top; baseRow = base; measured = true
+    }
+
+    /// Has the model at `rel` (its position relative to the camera) flown into something in the photo? It has if,
+    /// seen from the camera, it is in front of the thing, has reached the distance at which the thing stands, and
+    /// has not gone past its far side.
+    func hits(_ rel: V3, north: Float, horizon: Float) -> Bool {
+        guard measured else { return false }
+        let p = pixel(rel, north: north, horizon: horizon)
+        let dist = depth[p.x]
+        guard dist.isFinite else { return false }
+        let r = sqrt(rel.x * rel.x + rel.z * rel.z)
+        if r < dist || r > dist + thickness[p.x] { return false }
+        if asin(clampf(rel.y / max(length(rel), 0.01), -1, 1)) > topEl[p.x] + 0.01 { return false }
+        return isSolid(rel, north: north, horizon: horizon)
     }
 }

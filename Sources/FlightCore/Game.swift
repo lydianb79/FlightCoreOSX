@@ -155,9 +155,10 @@ final class Game {
     private func loadMask() {
         panoMask = nil; maskToken += 1
         guard let url = site.panorama else { return }
-        let token = maskToken
+        let token = maskToken, spec = site
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let m = PanoMask(url: url)
+            m?.measure(spec)
             DispatchQueue.main.async { if let s = self, s.maskToken == token { s.panoMask = m } }
         }
     }
@@ -182,6 +183,16 @@ final class Game {
     static let noInterp = CommandLine.arguments.contains("--no-interp")
     /// Menu music on or off (remembered).
     var musicEnabled = !UserDefaults.standard.bool(forKey: "musicOff") { didSet { UserDefaults.standard.set(!musicEnabled, forKey: "musicOff") } }
+    /// The camera used when not flying FPV (pilot or chase), so the FPV button can go back to it.
+    private var outsideCamera = 0
+    var isFPV: Bool { cameraMode == 2 }
+    /// Switch between the onboard (FPV) view and the view from outside. 3D sites only.
+    func toggleFPV() {
+        guard site.panorama == nil else { say("Photo sites use the pilot camera only"); return }
+        if cameraMode == 2 { cameraMode = outsideCamera } else { outsideCamera = cameraMode; cameraMode = 2 }
+        camSnap = true
+        say(cameraMode == 2 ? "FPV: onboard camera" : "Camera: " + Game.cameraNames[cameraMode])
+    }
     var cameFromMenu = false        // browsers and panels return to the main menu when opened from it
     /// The flight is held: a menu or browser is open, or a panel that was opened from the main menu.
     var simHeld: Bool { hud.overlay.pausesSim || (cameFromMenu && (hud.overlay == .environment || hud.overlay == .help)) }
@@ -333,6 +344,7 @@ final class Game {
         Panoramas.save(site)
         if site.slope != 0, north != 0 { terrain = Terrain(site: site); env.obstacles = terrain.windObstacles }
         panoLight = Panoramas.analyze(site)
+        if eye != 0 || horizon != 0 { loadMask() }          // distances depend on the camera height and the horizon
         say(String(format: "Rotation %.0f°  ·  horizon %+.1f°  ·  eye height %.1f m", site.north, site.horizon, site.eyeHeight))
     }
 
@@ -358,6 +370,7 @@ final class Game {
         case 8:
             if site.panorama != nil { cameraMode = 0; say("Photo sites use the pilot camera only") }
             else { cameraMode = (cameraMode + 1) % 3; camSnap = true; say("Camera: " + Game.cameraNames[cameraMode]) }
+        case 100: toggleFPV()                                   // F8
         case 6: zoomMode = (zoomMode + 1) % 3; say("Zoom: " + Game.zoomNames[zoomMode])
         case 4: cameFromMenu = false; hud.overlay = hud.overlay == .help ? .none : .help
         case 9: hud.visible.toggle()
@@ -510,26 +523,27 @@ final class Game {
         }
         if !aircraft.crashed {
             let eyePos = terrain.pilotPos + V3(0, site.eyeHeight, 0)
-            for o in site.obstacles {
+            // Trees, hedges and buildings in the photo. Their direction, outline and height come from the picture, and
+            // their distance from where their foot meets the ground (see PanoMask.measure): the model has hit one
+            // when, seen from the camera, it is in front of it, has reached that distance and is not past its far side.
+            var hit = false, woody = true
+            if let mask = panoMask, mask.measured {
+                hit = mask.hits(p - eyePos, north: site.north, horizon: site.horizon)
+            }
+            for o in site.obstacles where !hit {
+                // small things of known size (goal posts, bins), and everything until the photo has been measured
+                if o.height > 3 && panoMask?.measured == true { continue }
                 let c = Panoramas.position(o, north: site.north)
                 let dx = p.x - c.x, dz = p.z - c.y
-                let above = p.y - terrain.height(c.x, c.y)
-                if o.height > 3, let mask = panoMask {
-                    // The stand-in shape only says how far away the tree is. What is solid is decided by the picture:
-                    // the model hits where it is in front of the tree as the pilot sees it. Gaps between crowns, the
-                    // sky beside a pointed top and the air above a hedge are open, and a top that reaches higher
-                    // than the stand-in is still solid.
-                    let r = o.radius * 0.75
-                    guard above >= 0, above <= o.height * 1.6, dx * dx + dz * dz < r * r else { continue }
-                    if !mask.isSolid(p - eyePos, north: site.north, horizon: site.horizon) { continue }
-                } else {
-                    let rs = Panoramas.solidRadius(o, at: above)
-                    guard rs > 0 && dx * dx + dz * dz < rs * rs else { continue }
-                }
+                let rs = Panoramas.solidRadius(o, at: p.y - terrain.height(c.x, c.y))
+                if rs > 0 && dx * dx + dz * dz < rs * rs { hit = true; woody = o.height > 3 }
+            }
+            if hit {
                 let col = panoMask?.color(p - eyePos, north: site.north, horizon: site.horizon) ?? V3(0.25, 0.35, 0.15)
-                hitFoliage(at: p, color: col, woody: o.height > 3)
+                // green or brown things are trees; grey, white or red ones are walls
+                if woody { woody = col.y >= col.x * 0.92 || (col.x > col.z * 1.25 && col.x < 0.6) }
+                hitFoliage(at: p, color: col, woody: woody)
                 aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.2
-                break
             }
         }
         if terrain.overWater(aircraft.pos) {
