@@ -37,6 +37,7 @@ final class HUDModel: ObservableObject {
     var addPanorama: (() -> Void)?
     var choosePanoramaFolder: (() -> Void)?
     var openControllerSetup: (() -> Void)?
+    var toggleControllerSetup: (() -> Void)?
     private var thumbs: [String: NSImage] = [:]
     private var sitePreviews: [String: NSImage] = [:]
 

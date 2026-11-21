@@ -187,7 +187,7 @@ struct HUDView: View {
                                 }
                             }
                             BarButton(icon: "wind", help: "Wind, weather and time of day") { m.game.cameFromMenu = false; m.overlay = m.overlay == .environment ? .none : .environment }
-                            BarButton(icon: "gamecontroller", help: "Controller setup") { m.openControllerSetup?() }
+                            BarButton(icon: "gamecontroller", help: "Controller setup") { m.toggleControllerSetup?() }
                             BarButton(icon: "questionmark", help: "Keyboard controls (H)") { m.game.cameFromMenu = false; m.overlay = m.overlay == .help ? .none : .help }
                             BarButton(icon: "line.3.horizontal", help: "Main menu (Esc)") { m.overlay = .menu }
                         }

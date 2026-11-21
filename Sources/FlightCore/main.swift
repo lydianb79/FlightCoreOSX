@@ -1251,6 +1251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         game.hud.addPanorama = { [unowned self] in self.addPanorama() }
         game.hud.choosePanoramaFolder = { [unowned self] in self.choosePanoramaFolder() }
         game.hud.openControllerSetup = { [unowned self] in self.showSetup() }
+        game.hud.toggleControllerSetup = { [unowned self] in if self.setupWindow?.isVisible == true { self.setupWindow?.close() } else { self.showSetup() } }
         if let c = Int(arg("--cam") ?? "") { game.cameraMode = c }
         if let z = Int(arg("--zoom") ?? "") { game.zoomMode = z }
         if let t = Int(arg("--tod") ?? "") { game.timeOfDay = t }
