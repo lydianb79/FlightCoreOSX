@@ -296,6 +296,49 @@ private struct TrimGauge: View {
     }
 }
 
+/// One tile of the aircraft or site list. Equatable, so that selecting another tile redraws only the two tiles
+/// that changed and not the whole list.
+private struct ListTile: View, Equatable {
+    var title: String, subtitle: String
+    var image: NSImage?
+    var selected: Bool
+    var height: CGFloat
+    var fit: Bool
+    var photo: Bool? = nil
+    static func == (a: ListTile, b: ListTile) -> Bool {
+        a.title == b.title && a.selected == b.selected && a.image === b.image && a.subtitle == b.subtitle
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                if fit {
+                    LinearGradient(colors: [Color(white: 0.42), Color(white: 0.27)], startPoint: .top, endPoint: .bottom)
+                    if let img = image { Image(nsImage: img).resizable().scaledToFit().padding(4).frame(maxWidth: .infinity) }
+                } else {
+                    LinearGradient(colors: [Color(red: 0.25, green: 0.4, blue: 0.6), Color(red: 0.2, green: 0.32, blue: 0.2)], startPoint: .top, endPoint: .bottom)
+                    if let img = image { Image(nsImage: img).resizable().scaledToFill().frame(minWidth: 0, maxWidth: .infinity, minHeight: height, maxHeight: height).clipped() }
+                }
+                if let p = photo {
+                    Text(p ? "360° PHOTO" : "3D").font(.system(size: 9, weight: .heavy)).tracking(0.5)
+                        .foregroundColor(p ? Theme.ink : Theme.cream)
+                        .padding(.horizontal, 6).padding(.vertical, 2.5)
+                        .background(Capsule().fill(p ? Theme.cream : Theme.red)).padding(7)
+                }
+            }
+            .frame(height: height).clipped()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
+                Text(subtitle).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+        }
+        .background(Theme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected ? Theme.cream : Theme.stroke, lineWidth: selected ? 2 : 1))
+        .contentShape(Rectangle())
+    }
+}
+
 // MARK: - Overlay scaffolding
 
 private struct Sheet<Content: View>: View {
@@ -341,6 +384,7 @@ struct AircraftBrowser: View {
     @State private var selected = 0
 
     private static let order = ["Trainers & Sport", "Scale Civil", "Warbirds", "Aerobatic", "Foam 3D", "Wings", "Jets", "Gliders", "Helicopters", "Multirotors"]
+    private static let counts: [String: Int] = { var d = Dictionary(grouping: AircraftLibrary.all, by: { $0.category }).mapValues { $0.count }; d["All"] = AircraftLibrary.all.count; return d }()
     private var all: [AircraftSpec] { AircraftLibrary.all }
     private var shown: [Int] {
         all.indices.filter { i in
@@ -356,7 +400,7 @@ struct AircraftBrowser: View {
                 // categories
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(["All"] + Self.order, id: \.self) { c in
-                        let n = c == "All" ? all.count : all.filter { $0.category == c }.count
+                        let n = Self.counts[c] ?? 0
                         Button { category = c } label: {
                             HStack {
                                 Text(c).font(.system(size: 13, weight: category == c ? .semibold : .regular))
@@ -388,23 +432,11 @@ struct AircraftBrowser: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 10)], spacing: 10) {
                             ForEach(shown, id: \.self) { i in
                                 let spec = all[i]
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Backdrop {
-                                        if let img = m.thumbnail(spec) { Image(nsImage: img).resizable().scaledToFit().padding(4) }
-                                    }
-                                    .frame(height: 98).clipped()
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(spec.name).font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
-                                        Text(spec.category).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
-                                    }
-                                    .padding(.horizontal, 9).padding(.vertical, 7)
-                                }
-                                .background(Theme.card)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.cream : Theme.stroke, lineWidth: selected == i ? 2 : 1))
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) { fly(i) }
-                                .onTapGesture { selected = i }
+                                ListTile(title: spec.name, subtitle: spec.category, image: m.tile(spec), selected: selected == i, height: 98, fit: true)
+                                    .equatable()
+                                    // a double-click picks the aircraft; a single click selects it at once (with a separate
+                                    // double-tap gesture SwiftUI would hold every click back for the double-click time)
+                                    .onTapGesture { if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { fly(i) } else { selected = i } }
                             }
                         }
                         .padding(.horizontal, 14).padding(.bottom, 14)
@@ -537,25 +569,9 @@ struct SiteBrowser: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 172, maximum: 230), spacing: 10)], spacing: 10) {
                             ForEach(shown, id: \.self) { i in
                                 let site = all[i]
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ZStack(alignment: .topLeading) {
-                                        LinearGradient(colors: [Color(red: 0.25, green: 0.4, blue: 0.6), Color(red: 0.2, green: 0.32, blue: 0.2)], startPoint: .top, endPoint: .bottom)
-                                        if let img = m.sitePreview(site) { Image(nsImage: img).resizable().scaledToFill().frame(minWidth: 0, maxWidth: .infinity, minHeight: 104, maxHeight: 104).clipped() }
-                                        badge(site).padding(7)
-                                    }
-                                    .frame(height: 104).clipped()
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(site.displayName).font(.system(size: 12.5, weight: .semibold)).foregroundColor(Theme.cream).lineLimit(1)
-                                        Text(site.category).font(.system(size: 10.5)).foregroundColor(Theme.dim).lineLimit(1)
-                                    }
-                                    .padding(.horizontal, 9).padding(.vertical, 7)
-                                }
-                                .background(Theme.card)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(selected == i ? Theme.cream : Theme.stroke, lineWidth: selected == i ? 2 : 1))
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) { fly(i) }
-                                .onTapGesture { selected = i }
+                                ListTile(title: site.displayName, subtitle: site.category, image: m.siteTile(site), selected: selected == i, height: 104, fit: false, photo: site.panorama != nil)
+                                    .equatable()
+                                    .onTapGesture { if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { fly(i) } else { selected = i } }
                             }
                         }
                         .padding(.horizontal, 14).padding(.bottom, 14)
@@ -714,7 +730,7 @@ struct MainMenu: View {
     }
 
     var body: some View {
-        let spec = m.game.aircraft.spec, site = m.game.site
+        let spec = m.game.aircraft.spec, site = m.game.shownSite
         ZStack {
             Theme.ink.opacity(0.55).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
@@ -868,7 +884,7 @@ struct HelpView: View {
     @ObservedObject var m: HUDModel
     private let groups: [(String, [(String, String)])] = [
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
-                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Reset aircraft")]),
+                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch a hand-held model, otherwise reset")]),
         ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Helicopter rotor speed: low, normal, high"),
                       ("F", "Quadcopter flight mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("F8", "FPV / outside view (3D sites)"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),

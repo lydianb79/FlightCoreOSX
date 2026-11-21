@@ -259,10 +259,10 @@ enum Panoramas {
 
     /// Estimate sun direction and ambient light from the photo so the model is lit to match
     /// and its ground shadow falls the right way.
-    static func analyze(_ s: SiteSpec) -> Lighting {
+    static func analyze(_ s: SiteSpec, image decoded: CGImage? = nil) -> Lighting {
         var light = Lighting(sunDir: normalize(V3(-0.35, 0.8, 0.5)), sun: V3(1, 0.97, 0.9) * 2.6, ambient: V3(0.4, 0.45, 0.55) * 0.7,
                              zenith: V3(0.3, 0.4, 0.6), horizon: V3(0.6, 0.65, 0.7))
-        guard let url = s.panorama, let img = image(url, maxSize: 512) else { return light }
+        guard let url = s.panorama, let img = decoded ?? image(url, maxSize: 512) else { return light }
         let W = 64, H = 32
         var px = [UInt8](repeating: 0, count: W * H * 4)
         guard let ctx = CGContext(data: &px, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4,

@@ -71,6 +71,8 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 - Weather and Controls opened from the main menu return to it; the flight only starts with **Cleared for take-off**.
 - **In flight:** a top bar with the current aircraft and site, and a telemetry strip with altitude, airspeed, climb, distance, throttle and wind. Press V to hide it.
 
+A new site is loaded in the background, so the menus stay responsive: a 3D site is ready in about a tenth of a second, a photo site in about half a second. While a menu or browser is open the frozen scene behind it is redrawn only a few times a second, and the aircraft pictures are prepared in the meantime and kept on disk, so the browsers never wait for them.
+
 The last aircraft and site are remembered between launches, and both browsers reopen on the category or filter you last used. The interface uses the red, cream and black of the splash artwork.
 
 ## Aircraft
@@ -192,7 +194,8 @@ Press **H** in the app for this list.
 | X | Throttle cut |
 | Q | Wheel brakes |
 | Shift | Full stick deflection |
-| Space or R | Reset aircraft |
+| Space | Launch a model held in the hand (wings, gliders and other models without wheels); otherwise reset the aircraft. Return also launches |
+| R | Reset aircraft |
 | `[` `]`, 1–9 | Previous / next aircraft, or pick one |
 | N | Next flying site |
 | C | Camera: pilot, chase, onboard |
@@ -234,7 +237,7 @@ The pitch trim also has a gauge at the bottom right of the display, with an arro
 - pitch trim: `-` and `=` (or two assigned buttons) move the elevator neutral in clicks, as the trim lever on a transmitter does; the setting is remembered for each aircraft and shown in the display
 - rates: every aircraft has a low rate and expo of its own, chosen so full stick on low rates gives a roll rate that suits the type (about 65°/s for a sailplane, 95°/s for a trainer, 160°/s for an aerobat), and every flight starts on low rates; you can instead set one low rate and expo for all aircraft
 - stick deadband, and a reverse for the pitch stick on multirotors only
-- switches and buttons: any of the keyboard actions (rates, flight mode, rotor speed, throttle hold, flaps, gear, smoke, brakes, reset, camera, zoom, pause and more) can be assigned to a transmitter switch or controller button. Click Assign and move the switch. A two- or three-position switch sets the state directly; a push button steps through it
+- switches and buttons: any of the keyboard actions (launch, rates, flight mode, rotor speed, throttle hold, flaps, gear, smoke, brakes, reset, camera, zoom, pause and more) can be assigned to a transmitter switch or controller button. Click Assign and move the switch. A two- or three-position switch sets the state directly; a push button steps through it
 
 ## How it works
 
@@ -254,6 +257,7 @@ The pitch trim also has a gauge at the bottom right of the display, with an arro
 - **Multirotors** command motor speed, and thrust goes with speed squared, so a powerful quad hovers around a quarter to a third of the stick. The mixer gives attitude priority over throttle and the motors idle in flight, so flips and dives with the throttle closed stay under control. Acro uses a rate curve (gentle at the centre, steep at the ends) with a full-stick rate set per model, from 260°/s for the hexacopter to 900°/s for the five-inch racer. Propellers lose thrust as air speeds up through them and gain it when pushed against the air, the battery sags under load, and sinking through its own downwash brings propwash: lost lift and a wobble, milder with ducts.
 - **Helicopters** have two flight modes, Stabilized (the cyclic stick commands a lean angle and the machine levels itself) and Acro (the cyclic commands a rate). In both, the throttle stick is collective pitch, symmetric about mid stick, so they fly inverted on negative pitch. Rotor speed is a separate three-position setting (80, 90 or 100 % head speed, key I), as on a transmitter's idle-up switch.
 - **Helicopters** also model vortex ring state (descending into their own downwash; fly forward to escape), blade flapping (the nose rises with speed), retreating-blade stall at high speed, and loss of tail-rotor authority in a fast sideways slide. The display shows VORTEX RING when it happens.
+- **Hand launch:** models without wheels start in the pilot's hand, motor and control surfaces live, and stay there until you launch them with Space (or Return, or an assigned switch). The throw is firm, forward and a little upward. For the first seconds a launch assist, like the launch mode of a real wing's flight controller, holds the wings level and the nose just above the horizon until the model has flying speed and has climbed clear; a firm pull or push on the stick takes over at once. `FlightCore --launchtest` throws every hand-launched model and checks that it gets away.
 - **On the ground:** tyres build side force with slip angle and let go when they slide; rolling resistance, grip and bumpiness depend on the surface (asphalt, mown or long grass, dirt, sand, packed or soft snow); main wheels have brakes (Q, or the left trigger).
 - **Floatplanes** (Beaver, Super Cub and Twin Otter) float on four buoyancy points per aircraft, with hull drag that peaks before the floats plane, and water rudders. At sites with water they start afloat, pointing into the wind.
 - **Air:** the wind follows a boundary-layer profile (the set speed is at 10 m; it is about half that at 1 m), and it lulls, gusts and swings in direction over several seconds by an amount you set. Turbulence is random gusts whose scale grows with height. Trees and buildings leave slower, rougher air downwind, and the lee of a slope is turbulent. Thermals lean with the wind, drift, build and fade, and are ringed by sink.
@@ -315,7 +319,7 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--launchtest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
 
 Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
 

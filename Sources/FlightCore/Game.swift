@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 import AppKit
 
-struct HUDState {
+struct HUDState: Equatable {
     var aircraft = "", site = "", blurb = ""
     var alt: Float = 0, speed: Float = 0, dist: Float = 0, climb: Float = 0, throttle: Float = 0
     var wind = "", message = "", camera = "", mode = "", input = "", score = "", time = ""
@@ -11,6 +11,12 @@ struct HUDState {
     var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = "", config = ""
     var fps = 0
     var trim = 0, showTrim = false
+    /// Everything but the frame rate, which wobbles from one update to the next.
+    func equalsIgnoringTime(_ o: HUDState) -> Bool {
+        var a = self, b = o
+        a.fps = 0; b.fps = 0
+        return a == b
+    }
 }
 
 enum Overlay {
@@ -34,11 +40,62 @@ final class HUDModel: ObservableObject {
     private var thumbs: [String: NSImage] = [:]
     private var sitePreviews: [String: NSImage] = [:]
 
+    /// The rendered picture of an aircraft for the browser and the menu. Drawn once and kept on disk, named after
+    /// the model's own shape and paint, so it is ready at once on every later launch and redrawn by itself
+    /// whenever the model changes.
     func thumbnail(_ spec: AircraftSpec) -> NSImage? {
         if let t = thumbs[spec.name] { return t }
+        let file = HUDModel.thumbCache(spec)
+        if let f = file, FileManager.default.fileExists(atPath: f.path), let img = NSImage(contentsOf: f) { thumbs[spec.name] = img; return img }
         guard let img = thumbnailer?(spec) else { return nil }
         thumbs[spec.name] = img
+        if let f = file, let tiff = img.tiffRepresentation {
+            HUDModel.previewQueue.async {
+                if let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) { try? png.write(to: f) }
+            }
+        }
         return img
+    }
+
+    /// Small copies for the list tiles: the full pictures, scaled down on every redraw, made the list slow.
+    private var tiles: [String: NSImage] = [:]
+    func tile(_ spec: AircraftSpec) -> NSImage? {
+        if let t = tiles[spec.name] { return t }
+        guard let full = thumbnail(spec), let small = HUDModel.shrink(full, width: 360) else { return nil }
+        tiles[spec.name] = small
+        return small
+    }
+    func siteTile(_ site: SiteSpec) -> NSImage? {
+        if let t = tiles["site:" + site.name] { return t }
+        guard let full = sitePreview(site), let small = HUDModel.shrink(full, width: 440) else { return nil }
+        tiles["site:" + site.name] = small
+        return small
+    }
+    static func shrink(_ img: NSImage, width w: Int) -> NSImage? {
+        guard let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let h = max(Int(Float(w) * Float(cg.height) / Float(max(cg.width, 1))), 1)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage().map { NSImage(cgImage: $0, size: NSSize(width: w / 2, height: h / 2)) }
+    }
+
+    private static func thumbCache(_ spec: AircraftSpec) -> URL? {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let dir = base.appendingPathComponent("FlightCore/Aircraft", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // FNV-1a over every vertex of every part: position, normal and colour
+        var h: UInt64 = 0xcbf29ce484222325
+        for part in spec.parts {
+            part.mesh.data.withUnsafeBytes { raw in
+                let words = raw.bindMemory(to: UInt32.self)
+                var i = 0
+                while i < words.count { h = (h ^ UInt64(words[i])) &* 0x100000001b3; i += 3 }    // every third word is plenty
+            }
+        }
+        let safe = spec.name.map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        return dir.appendingPathComponent(String(safe) + "-" + String(h, radix: 36) + ".png")
     }
 
     private var previewsPending = Set<String>()
@@ -290,16 +347,17 @@ final class Game {
             // photo sites: each has its own start point and take-off direction
             let k: Float = spec.kind == .airplane ? 1 : 0.6
             let hd = -site.startHeading * deg
-            if spec.handLaunch { aircraft.reset(pos: V3(2, 1.9, -3), heading: hd, speed: clampf(spec.stallSpeed * 1.7, 4, 9)) }
+            if spec.handLaunch { hold(heading: hd) }
             else { aircraft.reset(pos: V3(site.startX * k, terrain.height(site.startX * k, site.startZ * k) + aircraft.restHeight + 0.02, site.startZ * k), heading: hd) }
         } else if spec.handLaunch {
-            aircraft.reset(pos: terrain.pilotPos + V3(2, 1.9, -3), heading: 0, speed: clampf(spec.stallSpeed * 1.7, 4, 9))
+            hold(heading: 0)
         } else {
             let x: Float = spec.kind == .airplane ? -min(site.runwayLen / 2 - 20, 45) : -5
             let z: Float = site.startZ + (spec.kind == .airplane ? 0 : -1)
             aircraft.reset(pos: V3(x, terrain.height(x, z) + aircraft.restHeight + 0.02, z), heading: -.pi / 2)
         }
-        input.resetThrottle(spec.kind, launch: spec.handLaunch)
+        if !spec.handLaunch || spec.hasFloats { held = false }
+        input.resetThrottle(spec.kind, launch: false)
         touchQuiet = 0.6            // settling onto its wheels is not a touchdown
         crashTimer = 0
         autopilot = Autopilot()
@@ -321,21 +379,53 @@ final class Game {
         say(aircraft.spec.name + " — " + aircraft.spec.blurb, 4)
     }
 
+    /// Builds what the renderer needs for a site (meshes, the panorama texture) and the lighting of a photo site,
+    /// on a background thread. Provided by the renderer.
+    var prepareSite: ((SiteSpec, Terrain) -> (visuals: Any?, light: Lighting?))?
+    /// What `prepareSite` made for the site now selected, for the renderer to pick up.
+    var preparedVisuals: Any?
+    /// The site being loaded, shown in the menus until it is ready.
+    private(set) var loadingSite: SiteSpec?
+    var shownSite: SiteSpec { loadingSite ?? site }
+    private var siteToken = 0
+
+    /// Change site. Building a site takes from a tenth of a second (3D) to most of a second (a photo site, whose
+    /// eight-thousand-pixel photograph has to be decoded), so it is done in the background and the switch happens
+    /// when it is ready; the menus stay responsive meanwhile.
     func selectSite(_ i: Int) {
         guard i >= 0 && i < SiteSpec.all.count else { return }
+        siteToken += 1
+        let token = siteToken, spec = SiteSpec.all[i], prep = prepareSite
+        loadingSite = spec
+        hud.objectWillChange.send()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let t = Terrain(site: spec)
+            let made = prep?(spec, t)
+            let light = made?.light ?? (spec.panorama != nil ? Panoramas.analyze(spec) : nil)
+            DispatchQueue.main.async {
+                guard let self, self.siteToken == token else { return }
+                self.applySite(i, spec, t, light, made?.visuals)
+            }
+        }
+    }
+
+    private func applySite(_ i: Int, _ spec: SiteSpec, _ t: Terrain, _ light: Lighting?, _ visuals: Any?) {
         siteIndex = i
-        site = SiteSpec.all[i]
-        terrain = Terrain(site: site)
+        site = spec
+        terrain = t
         env.configure(site)
         env.obstacles = terrain.windObstacles
-        panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
+        panoLight = light
         loadMask()
         if site.panorama != nil { cameraMode = 0 } else { timeOfDay = Game.time(forSite: site.defaultTime) }
+        preparedVisuals = visuals
+        loadingSite = nil
         siteVersion += 1
         if challenge { spawnBalloons() }
         resetAircraft()
         UserDefaults.standard.set(site.name, forKey: "lastSite")
         say(site.name, 3)
+        hud.objectWillChange.send()
     }
 
     /// Align a photo site: rotate it, shift its horizon, or change the camera height. Saved next to the image.
@@ -369,7 +459,9 @@ final class Game {
 
     func keyDown(_ k: UInt16) {
         switch k {
-        case 49, 15: resetAircraft()
+        case 49: if held { launch() } else { resetAircraft() }  // Space: throw a model held in the hand, otherwise reset
+        case 15: resetAircraft()
+        case 36, 76: if held { launch() }                      // Return or Enter also throw a hand-launched model
         case 35: paused.toggle()
         case 8:
             if site.panorama != nil { cameraMode = 0; say("Photo sites use the pilot camera only") }
@@ -432,7 +524,8 @@ final class Game {
             let last = bindLast[a.id]
             bindLast[a.id] = pos
             guard let l = last, l != pos else { continue }
-            if !positional { if pos == 1 { keyDown(a.key) }; continue }
+            // (a switch assigned to Reset only resets: Space, its key, also throws a model held in the hand)
+            if !positional { if pos == 1 { if a.id == "reset" { resetAircraft() } else { keyDown(a.key) } }; continue }
             let spec = aircraft.spec
             switch a.id {
             case "rates": input.lowRates = pos == 0; say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.lowRateInUse * 100) : "High rates")
@@ -445,6 +538,58 @@ final class Game {
             default: break
             }
         }
+    }
+
+    // MARK: Hand launch
+
+    /// A hand-launched model is held by the pilot until it is thrown (Return, or an assigned switch).
+    private(set) var held = false
+    private var heldPos = V3.zero, heldQ = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1), heldHeading: Float = 0, heldTime: Float = 0
+    private var launchAge: Float = 100
+
+    /// Attitude and velocity of a good throw: firmly forward and a little upward, nose slightly up.
+    static func throwState(_ spec: AircraftSpec, heading: Float) -> (q: simd_quatf, vel: V3) {
+        let yaw = simd_quatf(angle: heading, axis: V3(0, 1, 0))
+        let speed = clampf(spec.stallSpeed * 1.6, 6, 16)
+        let up = 12 * deg
+        return (yaw * simd_quatf(angle: 7 * deg, axis: V3(1, 0, 0)), yaw.act(V3(0, sin(up), -cos(up))) * speed)
+    }
+    /// Launch assist, as the flight controller of a real wing has: for the first two seconds after the throw it
+    /// holds the wings level and the nose a little above the horizon, until the model has flying speed. The
+    /// pilot's own stick inputs are added on top. Returns elevator and aileron.
+    static func launchAssist(_ ac: Aircraft, age: Float, climbed: Float) -> (elev: Float, ail: Float) {
+        // it lets go after four and a half seconds, or, if the model is still low by then, once it has climbed
+        // some seven metres (nine seconds at most)
+        let byTime = clampf((launchAssistTime - age) / 1.2, 0, 1)
+        let byHeight = clampf((7 - climbed) / 2, 0, 1) * clampf((9 - age) / 1.2, 0, 1)
+        let fade = max(byTime, byHeight)
+        guard fade > 0 else { return (0, 0) }
+        let pitch = asin(clampf(ac.forward.y, -1, 1)), right = ac.q.act(V3(1, 0, 0))
+        // climb away at first, then a shallow climb while the speed builds; never so steep that it stalls
+        let slow = ac.airspeed < ac.spec.stallSpeed * 1.25
+        let want: Float = (slow ? 6 : (age < 1.5 ? 10 : 6)) * deg
+        let elev = clampf((want - pitch) * 3.2 - ac.omega.x * 0.3, -0.5, 0.9)
+        let ail = clampf(right.y * 2.2 - ac.omega.z * 0.15, -0.6, 0.6)
+        return (elev * fade, ail * fade)
+    }
+    static let launchAssistTime: Float = 4.5
+
+    private func hold(heading: Float) {
+        let yaw = simd_quatf(angle: heading, axis: V3(0, 1, 0))
+        heldPos = terrain.pilotPos + V3(0, 1.75, 0) + yaw.act(V3(0.45, 0, -1.2))
+        aircraft.reset(pos: heldPos, heading: heading)
+        heldQ = yaw * simd_quatf(angle: 7 * deg, axis: V3(1, 0, 0))
+        aircraft.q = heldQ
+        heldHeading = heading; held = true; heldTime = 0; launchAge = 100
+    }
+
+    /// Throw the model.
+    func launch() {
+        guard held, !aircraft.crashed else { return }
+        let t = Game.throwState(aircraft.spec, heading: heldHeading)
+        aircraft.q = t.q; aircraft.vel = t.vel; aircraft.omega = .zero
+        held = false; launchAge = 0
+        say("Launched")
     }
 
     // MARK: Frame
@@ -464,6 +609,15 @@ final class Game {
             controls.rotorSpeed = rotorSpeed
         }
         if !autopilotOn { controls.elevator = clampf(controls.elevator + Float(pitchTrim) * Game.trimStep, -1, 1) }
+        if !paused && !simHeld {
+            if held { heldTime += dt; if autopilotOn && heldTime > 0.8 { launch() } } else if launchAge < 50 { launchAge += dt }
+            if !held && !autopilotOn {
+                // a firm pull or push on the stick takes over from the assist at once
+                if launchAge > 0.6 && abs(controls.elevator - Float(pitchTrim) * Game.trimStep) > 0.3 { launchAge = 100 }
+                let a = Game.launchAssist(aircraft, age: launchAge, climbed: aircraft.pos.y - heldPos.y)
+                controls.elevator = clampf(controls.elevator + a.elev, -1, 1); controls.aileron = clampf(controls.aileron + a.ail, -1, 1)
+            }
+        }
         // on a hillside the model is held until the throttle is opened, so it does not roll away
         if site.slope != 0, site.panorama != nil, aircraft.onGround, controls.throttle < 0.06, length(aircraft.vel) < 2 { controls.brake = 1 }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
@@ -476,6 +630,8 @@ final class Game {
             while acc >= h {
                 env.advance(dt: h, at: aircraft.pos, airspeed: aircraft.airspeed, terrain: terrain)
                 aircraft.step(dt: h, c: controls, terrain: terrain, wind: env.wind(at: aircraft.pos, terrain: terrain), rollMu: site.rollMu)
+                // in the hand: the motor and the control surfaces respond, the model stays put
+                if held { aircraft.pos = heldPos; aircraft.vel = .zero; aircraft.omega = .zero; aircraft.q = heldQ; aircraft.onGround = false }
                 acc -= h
             }
             touchQuiet -= dt
@@ -793,6 +949,7 @@ final class Game {
         s.input = autopilotOn ? "Demo pilot" : input.source
         s.time = (site.panorama != nil ? (photoLight == 0 ? "Photo site" : Game.photoLightNames[photoLight]) : Game.timeNames[timeOfDay]) + (timeScale < 1 ? String(format: " · %.0f%% speed", timeScale * 100) : "")
         if challenge { s.score = String(format: "Balloons %d/%d   %.1f s", score, balloons.count, challengeTime) }
+        if held && s.message.isEmpty { s.message = "Open the throttle, then press Space to launch" }
         if aircraft.crashed { s.message = "CRASHED" }
         else if paused { s.message = "PAUSED" }
         else if messageTimer > 0 { s.message = message }
@@ -810,13 +967,17 @@ final class Game {
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
         if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: spec.burnsFuel ? "Fuel %.0f%%" : "Battery %.0f%%", aircraft.battery * 100)) }
-        if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround { cfg.append("STALL") }
+        if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround && !held { cfg.append("STALL") }
         if spec.kind == .helicopter && aircraft.vortexRing > 0.3 { cfg.append("VORTEX RING") }
         if controls.brake > 0.5 && aircraft.onGround { cfg.append("Brakes") }
         if spec.kind == .helicopter { cfg.append(String(format: "Rotor %.0f%%%@", aircraft.levels[0] * 100, hold ? " HOLD" : "")) }
         if smokeOn { cfg.append("Smoke") }
         s.config = cfg.joined(separator: " · ")
         s.fps = fps
+        // Nothing moves while a menu or browser is open, and every change of the display state makes SwiftUI
+        // rebuild whatever is on screen, the whole aircraft or site list included. So the state is only handed over
+        // when it has changed.
+        if hud.overlay.pausesSim && s.equalsIgnoringTime(hud.s) { return }
         hud.s = s
     }
 }

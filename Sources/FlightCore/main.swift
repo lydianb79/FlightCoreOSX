@@ -62,6 +62,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--soundtest"), i + 1 < CommandL
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--trimthrottle"), i + 1 < CommandLine.arguments.count, let t = Float(CommandLine.arguments[i + 1]) { Game.trimThrottle = t }
+setvbuf(stdout, nil, _IOLBF, 0)      // line by line, so a test run that is stopped still leaves its output
 // Test and check runs make no sound: they build many games in a row, each of which would otherwise start playing its
 // idle engine and ambience through the speakers. Screenshots are silent too. (--perf keeps sound: it measures it.)
 do {
@@ -1024,6 +1025,70 @@ if CommandLine.arguments.contains("--powerlist") {
     for a in AircraftLibrary.all { print("\(a.category.padding(toLength: 17, withPad: " ", startingAt: 0)) \(a.name.padding(toLength: 32, withPad: " ", startingAt: 0)) \(a.powerPlant)") }
     exit(0)
 }
+if CommandLine.arguments.contains("--launchtest") {
+    // every hand-launched model, thrown and left alone for twelve seconds, at three throttle settings: it must not
+    // come down. The only help is the up elevator the launch itself holds for the first moments.
+    let terrain = Terrain(site: SiteSpec.all[0])
+    var bad = 0, n = 0
+    for spec in AircraftLibrary.all where spec.handLaunch {
+        var line = "", ok = true
+        for thr in [Float(0), 0.7, 1] {
+            let ac = Aircraft(spec); ac.unlimitedBattery = true
+            let ground = terrain.height(0, -1.2)
+            ac.reset(pos: V3(0.45, ground + 1.75, -1.2), heading: 0)
+            let t = Game.throwState(spec, heading: 0)
+            var c = Controls(); c.throttle = thr
+            // in the hand for a second, motor running
+            let hp = ac.pos
+            for _ in 0..<1000 { ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0.05); ac.pos = hp; ac.vel = .zero; ac.omega = .zero; ac.q = t.q; ac.onGround = false }
+            ac.q = t.q; ac.vel = t.vel
+            var low: Float = 99, age: Float = 0
+            for _ in 0..<12000 {
+                let a = Game.launchAssist(ac, age: age, climbed: ac.pos.y - hp.y); age += 0.001
+                c.elevator = a.elev; c.aileron = a.ail
+                ac.step(dt: 0.001, c: c, terrain: terrain, wind: .zero, rollMu: 0.05)
+                // without power a model glides down again; it only has to get safely away from the hand
+                // without power a model glides down again, and on part throttle a heavy one may not climb: it has to get
+                // safely away from the hand. At full throttle it must stay up throughout.
+                if thr == 1 || age < (thr > 0 ? 5 : 1.5) { low = min(low, ac.pos.y - terrain.height(ac.pos.x, ac.pos.z)) }
+            }
+            let fine = !(ac.crashed && thr == 1) && low > 0.9
+            if !fine { ok = false }
+            line += String(format: "  thr %3.0f%%: lowest %4.1f m, after 12 s %5.1f m up at %4.1f m/s%@", thr * 100, low, ac.pos.y - terrain.height(ac.pos.x, ac.pos.z), length(ac.vel), fine ? "" : " FAIL")
+        }
+        n += 1; if !ok { bad += 1 }
+        print("LAUNCH \(spec.name.padding(toLength: 24, withPad: " ", startingAt: 0)) thrown at \(String(format: "%4.1f", length(Game.throwState(spec, heading: 0).vel))) m/s (stall \(String(format: "%4.1f", spec.stallSpeed)))\(line)")
+    }
+    print(bad == 0 ? "LAUNCH all \(n) hand-launched models ok" : "LAUNCH \(bad) of \(n) failed")
+    exit(0)
+}
+if CommandLine.arguments.contains("--switchtest") {
+    // how long each step of changing site or aircraft takes, on the main thread
+    func ms(_ f: () -> Void) -> Double { let t = Date(); f(); return Date().timeIntervalSince(t) * 1000 }
+    let g = Game(site: 0, aircraft: 0)
+    var worst: [(Double, String)] = []
+    for (i, site) in SiteSpec.all.enumerated() where i % 3 == 0 || site.district > 0 {
+        var t: Terrain!
+        let a = ms { t = Terrain(site: site) }
+        var b = 0.0, c = 0.0, d = 0.0, e = 0.0, f = 0.0, h = 0.0
+        if site.panorama == nil {
+            b = ms { _ = t.buildMesh() }; c = ms { _ = t.buildScenery(); _ = t.buildDistrict() }
+            d = ms { _ = t.buildVegetation() }; e = ms { _ = t.buildGrass() }; f = ms { _ = t.buildTreeShadows(); _ = t.buildWater() }
+        } else {
+            b = ms { _ = Panoramas.analyze(site) }; h = ms { _ = Panoramas.image(site.panorama!, maxSize: 8192) }
+        }
+        let total = a + b + c + d + e + f + h
+        worst.append((total, site.name))
+        print(String(format: "SWITCH site %@ terrain %5.0f  mesh/analyze %5.0f  scenery %4.0f  trees %5.0f  grass %5.0f  other %4.0f  photo %5.0f  = %5.0f ms",
+                     site.name.padding(toLength: 28, withPad: " ", startingAt: 0), a, b, c, d, e, f, h, total))
+    }
+    for i in stride(from: 0, to: AircraftLibrary.all.count, by: 25) {
+        let x = ms { g.selectAircraft(i) }
+        let parts = ms { _ = g.aircraft.spec.parts.map { $0.mesh.data.count } }
+        print(String(format: "SWITCH aircraft %@ select %4.1f ms  parts %4.1f ms", AircraftLibrary.all[i].name.padding(toLength: 26, withPad: " ", startingAt: 0), x, parts))
+    }
+    exit(0)
+}
 if CommandLine.arguments.contains("--powertest") {
     // every airplane held level at full throttle and at half throttle: how much elevator that takes. Positive is
     // up elevator (pull), negative is down (push). "stick" is the share of full stick travel on the aircraft's low rates.
@@ -1226,6 +1291,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for _ in 0..<18 { game.frame(dt: 1 / 60) }
             }
         }
+        if args.contains("--browsetest") {      // test hook: switch site and aircraft every two seconds, timing each step
+            var k = 0
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [unowned self] _ in
+                k += 1
+                let t = Date()
+                if k % 2 == 0 {
+                    let target = (self.game.siteIndex + 7) % SiteSpec.all.count, name = SiteSpec.all[target].name
+                    self.game.selectSite(target)
+                    print(String(format: "BROWSE site %@ asked for (main thread busy %.0f ms)", name, Date().timeIntervalSince(t) * 1000))
+                    func check() { if self.game.site.name == name { print(String(format: "BROWSE site %@ ready after %.2f s", name, Date().timeIntervalSince(t))) } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { check() } } }
+                    check()
+                }
+                else { self.game.selectAircraft((self.game.aircraftIndex + 13) % AircraftLibrary.all.count); print(String(format: "BROWSE aircraft %@ select %.0f ms", self.game.aircraft.spec.name, Date().timeIntervalSince(t) * 1000)) }
+            }
+        }
         if args.contains("--crash") {       // test hook: dive into the ground
             game.aircraft.pos.y = game.terrain.height(game.aircraft.pos.x, game.aircraft.pos.z) + 2.5
             game.aircraft.vel = V3(9, -14, 0)
@@ -1273,11 +1353,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenus()
         if CommandLine.arguments.contains("--setup") { showSetup() }
         if CommandLine.arguments.contains("--perf") {
+            // every stretch of main-thread work longer than 20 ms, with the mouse click that started it if any
+            var busyFrom: CFAbsoluteTime = 0, lastClick: CFAbsoluteTime = 0
+            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { e in
+                lastClick = CFAbsoluteTimeGetCurrent()
+                print(String(format: "CLICK %@ at %.3f", e.type == .leftMouseDown ? "down" : "up", lastClick.truncatingRemainder(dividingBy: 1000)))
+                return e
+            }
+            let obs = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeWaiting.rawValue, true, 0) { _, act in
+                let now = CFAbsoluteTimeGetCurrent()
+                if act == .afterWaiting { busyFrom = now }
+                else if busyFrom > 0 && now - busyFrom > 0.02 {
+                    print(String(format: "STALL main thread busy %.0f ms (ended %.3f, %.0f ms after the last click)", (now - busyFrom) * 1000, now.truncatingRemainder(dividingBy: 1000), (now - lastClick) * 1000))
+                }
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), obs, .commonModes)
             Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
                 let iv = self.renderer.statIntervals.sorted(), cpu = self.renderer.statCpu.sorted()
                 let pr = self.renderer.statPresented.sorted(); self.renderer.statPresented = []
                 self.renderer.statIntervals = []; self.renderer.statCpu = []
                 print(self.game.sound.stats())
+                if !self.renderer.syncLog.isEmpty { print("SYNC " + self.renderer.syncLog.joined(separator: ", ")); self.renderer.clearSyncLog() }
+                if self.renderer.warmTime > 0 { print(String(format: "BROWSERS ready %.1f s after launch", self.renderer.warmTime)) }
                 guard iv.count > 4, cpu.count > 4 else { return }
                 let med = iv[iv.count / 2]; _ = med
                 let late = iv.filter { $0 > med * 1.5 }.count
@@ -1491,7 +1588,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetup() {
         if setupWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 740), styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Controller Setup"
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: SetupView(model: SetupModel(input: game.input)))
@@ -1603,6 +1700,7 @@ struct SetupView: View {
 
             Divider()
             Text("Switches and buttons").font(.headline)
+            Text("\(InputManager.actions.count) actions, Launch first; scroll for the rest.").font(.caption).foregroundColor(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(InputManager.actions, id: \.id) { a in
@@ -1618,7 +1716,7 @@ struct SetupView: View {
                         }.font(.system(size: 12))
                     }
                 }
-            }.frame(height: 118)
+            }.frame(height: 196)
             Text("Click Assign, then move the switch or press the button on your transmitter. A two- or three-position switch sets the state directly; a push button steps through it. The four stick axes cannot be assigned.")
                 .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
         }

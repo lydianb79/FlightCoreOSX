@@ -12,7 +12,7 @@ struct DrawUniforms { var model = M4.identity; var tint = V4(1, 1, 1, 1); var pa
 
 struct DrawItem { var mesh: GPUMesh; var model: M4; var tint = V4(1, 1, 1, 1); var material: Float = 0; var spec: Float = 0; var wind = SIMD2<Float>(0, 0) }
 
-private struct GPUChunk { var mesh: GPUMesh; var center: V3; var radius: Float }
+struct GPUChunk { var mesh: GPUMesh; var center: V3; var radius: Float }
 
 /// Forward renderer with an HDR post-processing chain (see Shaders.swift for the frame layout).
 final class Renderer: NSObject, MTKViewDelegate {
@@ -60,7 +60,6 @@ final class Renderer: NSObject, MTKViewDelegate {
     // scene
     private var panoTex: MTLTexture?
     private var panoDetail: Float = 1           // 0 soft photograph ... 1 pin sharp
-    private var lastDetail: Float = 0.7
     private var catcherMesh: GPUMesh?
     private var terrainMesh: GPUMesh?
     private var sceneryMesh: GPUMesh?
@@ -102,6 +101,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             b.cylinder(from: V3(0, -0.7, 0), to: V3(0, -0.82, 0), r0: 0.03, r1: 0.07, seg: 6, color: rgb(1, 1, 1)); return GPUMesh(dev, b) }()
         windsockMesh = GPUMesh(dev, buildWindsock())
         game.hud.thumbnailer = { [unowned self] spec in self.thumbnail(for: spec) }
+        game.prepareSite = { [weak self] site, terrain in
+            guard let self else { return (nil, nil) }
+            let v = self.makeSiteVisuals(site, terrain)
+            return (v, v.light)
+        }
     }
 
     private func build(_ view: MTKView) throws {
@@ -214,27 +218,52 @@ final class Renderer: NSObject, MTKViewDelegate {
         bloom = (1...5).compactMap { tex(bloomFormat, w >> $0, h >> $0) }
     }
 
+    /// Everything the GPU needs for a site. Made on a background thread when the site is chosen.
+    struct SiteVisuals {
+        var terrain: GPUMesh?, scenery: GPUMesh?, district: GPUMesh?, vegetation: [GPUChunk] = [], grass: [GPUChunk] = []
+        var treeShadow: GPUMesh?, water: GPUMesh?, pano: MTLTexture?, detail: Float = 1, light: Lighting?
+    }
+    /// Safe to call from any thread: it only creates buffers and textures.
+    func makeSiteVisuals(_ site: SiteSpec, _ t: Terrain) -> SiteVisuals {
+        var v = SiteVisuals()
+        if let url = site.panorama {
+            if let img = Panoramas.image(url, maxSize: 8192), let made = makeTexture(img) {
+                v.pano = made.tex; v.detail = clampf((made.detail - 0.4) / 0.35, 0, 1)
+                v.light = Panoramas.analyze(site, image: img)
+            }
+            return v
+        }
+        func upload(_ b: MeshBuilder, _ cell: Float) -> [GPUChunk] {
+            chunked(b, cell: cell).compactMap { c in GPUMesh(device, c.mesh).map { GPUChunk(mesh: $0, center: c.center, radius: c.radius) } }
+        }
+        v.terrain = GPUMesh(device, t.buildMesh())
+        v.scenery = GPUMesh(device, t.buildScenery())
+        v.district = t.blocks.isEmpty ? nil : GPUMesh(device, t.buildDistrict())
+        v.vegetation = upload(t.buildVegetation(), 150)
+        v.grass = upload(t.buildGrass(), 30)
+        v.treeShadow = GPUMesh(device, t.buildTreeShadows())
+        v.water = GPUMesh(device, t.buildWater())
+        return v
+    }
+
+    private(set) var syncLog: [String] = []
+    func clearSyncLog() { syncLog = [] }
     private func syncMeshes() {
+        let t0 = CACurrentMediaTime(), sv = siteVersion, av = aircraftVersion
+        defer {
+            let dt = (CACurrentMediaTime() - t0) * 1000
+            if dt > 2 { syncLog.append(String(format: "%@ meshes %.0f ms", sv != siteVersion ? "site" : (av != aircraftVersion ? "aircraft" : "other"), dt)) }
+        }
         if siteVersion != game.siteVersion {
             siteVersion = game.siteVersion
             shadow1Key = -1
             panoTex = nil
-            if let url = game.site.panorama {
-                terrainMesh = nil; sceneryMesh = nil; districtMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil; waterMesh = nil
-                if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img); panoDetail = clampf((lastDetail - 0.4) / 0.35, 0, 1) }
-                if panoTex == nil { game.say("Could not load panorama image", 6) }
-            } else {
-                terrainMesh = GPUMesh(device, game.terrain.buildMesh())
-                sceneryMesh = GPUMesh(device, game.terrain.buildScenery())
-                districtMesh = game.terrain.blocks.isEmpty ? nil : GPUMesh(device, game.terrain.buildDistrict())
-                func upload(_ b: MeshBuilder, _ cell: Float) -> [GPUChunk] {
-                    chunked(b, cell: cell).compactMap { c in GPUMesh(device, c.mesh).map { GPUChunk(mesh: $0, center: c.center, radius: c.radius) } }
-                }
-                vegetation = upload(game.terrain.buildVegetation(), 150)
-                grass = upload(game.terrain.buildGrass(), 30)
-                treeShadowMesh = GPUMesh(device, game.terrain.buildTreeShadows())
-                waterMesh = GPUMesh(device, game.terrain.buildWater())
-            }
+            let v = (game.preparedVisuals as? SiteVisuals) ?? makeSiteVisuals(game.site, game.terrain)
+            game.preparedVisuals = nil
+            terrainMesh = v.terrain; sceneryMesh = v.scenery; districtMesh = v.district
+            vegetation = v.vegetation; grass = v.grass; treeShadowMesh = v.treeShadow; waterMesh = v.water
+            panoTex = v.pano; panoDetail = v.detail
+            if game.site.panorama != nil && panoTex == nil { game.say("Could not load panorama image", 6) }
         }
         if aircraftVersion != game.aircraftVersion {
             aircraftVersion = game.aircraftVersion
@@ -290,6 +319,14 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         game.frame(dt: Float(step))
         lastTime = now
+        // While a menu or browser is open the simulation stands still, so the scene behind it does not change.
+        // Drawing it at full rate then only competes with the menus for the GPU (their blur and shadows are
+        // redrawn over it every frame), which made the lists stutter. A few frames a second keep it current.
+        let held = game.simHeld
+        let wantFPS = held ? 12 : 120
+        if view.preferredFramesPerSecond != wantFPS { view.preferredFramesPerSecond = wantFPS }
+        // ...and use the quiet time to prepare the aircraft pictures and site previews, so the browsers never wait
+        if held { warmBrowsers() }
         syncMeshes()
         guard let drawable = view.currentDrawable, let cb = queue.makeCommandBuffer() else { return }
         let quality = game.quality
@@ -578,6 +615,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     /// Studio-style preview of an aircraft on a transparent background, for the selection screens.
+    private var warmAircraft = 0, warmSites = 0, warmDone = false
+    private(set) var warmTime: Double = 0
+    private func warmBrowsers() {
+        // a few milliseconds a frame, so scrolling stays smooth while it goes on
+        let t0 = CACurrentMediaTime()
+        while CACurrentMediaTime() - t0 < 0.008 {
+            if warmAircraft < AircraftLibrary.all.count { _ = game.hud.tile(AircraftLibrary.all[warmAircraft]); warmAircraft += 1 }
+            else if warmSites < SiteSpec.all.count { _ = game.hud.siteTile(SiteSpec.all[warmSites]); warmSites += 1 }
+            else { if !warmDone { warmDone = true; warmTime = CACurrentMediaTime() - startTime }; return }
+        }
+    }
+
     func thumbnail(for spec: AircraftSpec, width w: Int = 840, height h: Int = 520) -> NSImage? {
         let cd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm_srgb, width: w, height: h, mipmapped: false)
         cd.textureType = .type2DMultisample; cd.sampleCount = 4; cd.usage = .renderTarget; cd.storageMode = .private
@@ -674,21 +723,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     /// Upload an image as an sRGB texture with a full mip chain.
-    private func makeTexture(_ img: CGImage) -> MTLTexture? {
+    private func makeTexture(_ img: CGImage) -> (tex: MTLTexture, detail: Float)? {
+        var detail: Float = 0.7
         let w = img.width, h = img.height
         var px = [UInt8](repeating: 0, count: w * h * 4)
         guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
-        if w >= 2048 { lastDetail = Panoramas.detail(px, width: w, height: h) }
+        if w >= 2048 { detail = Panoramas.detail(px, width: w, height: h) }
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: w, height: h, mipmapped: true)
         d.usage = [.shaderRead, .renderTarget]
         guard let tex = device.makeTexture(descriptor: d) else { return nil }
         tex.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: px, bytesPerRow: w * 4)
         if let cb = queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
-            blit.generateMipmaps(for: tex); blit.endEncoding(); cb.commit()
+            blit.generateMipmaps(for: tex); blit.endEncoding(); cb.commit(); cb.waitUntilCompleted()
         }
-        return tex
+        return (tex, detail)
     }
 
     private func savePNG(_ tex: MTLTexture, _ path: String) {
