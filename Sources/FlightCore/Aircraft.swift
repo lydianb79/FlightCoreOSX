@@ -397,6 +397,16 @@ final class Aircraft {
                     if w > washV { washZ = p.pos.z; washR = p.diameter / 2 }
                     washV = max(washV, w)
                     if abs(p.pos.x) < 0.01 { swirlV = 0.018 * w * p.spinDir }          // spiral slipstream
+                    // Air crossing the disc sideways is turned to follow the shaft: the propeller feels a force
+                    // against the crossing (its normal force). Hanging on the propeller (a hover, a torque roll, a
+                    // harrier) the air it draws through is all its own, and the disc sits well above the centre of
+                    // gravity, so a sideways slide tips the nose back toward the vertical, against the tail's pull
+                    // the other way. The full momentum figure only holds there: in flight the blades turn much less
+                    // of the crossing air, and on a tractor wing at a hand launch it would swamp the small fin, so
+                    // it fades out by a few metres a second of flow along the shaft.
+                    let vp = va + cross(omega, p.pos)
+                    let fn = -(vp - p.axis * dot(vp, p.axis)) * (rho * A * w / 2 / (1 + v0 * v0 / 9))
+                    fb += fn; tb += cross(p.pos, fn)
                 }
                 spin[i] += (n > 0.01 ? 12 + 45 * sqrt(min(n, 1)) : 0) * dt
             }
