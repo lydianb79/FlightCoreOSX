@@ -50,6 +50,8 @@ struct SiteSpec {
     var facility = 0                    // 0 club field, 1 airport with hangars and tower
     var extras = -1                     // surroundings: -1 by style, 0 farm, 1 desert camp, 2 alpine, 3 none
     var defaultTime = 1                 // 0 morning, 1 midday, 2 evening
+    var district = 0                    // buildings: 0 none, 1...8 industrial layouts, 11...18 city layouts
+    var districtClear = SIMD2<Float>(100, 190)   // building-free margin beyond the runway ends, and depth in front of the pilot
     var flatBlend: Float? = nil         // distance over which the levelled field merges into the landscape
 
     static var all: [SiteSpec] = builtIn + Panoramas.discover()
@@ -160,6 +162,90 @@ struct SiteSpec {
              info: "A grass strip on a clifftop seventy metres above the sea. The onshore wind is forced up the cliff face just in front of you: superb slope soaring, and a long way down if you sink below the edge.") {
             $0.terrain = 19; $0.palette = 3; $0.waterLevel = -72; $0.waterColor = V3(0.03, 0.15, 0.22); $0.flatBlend = 62; $0.treeThreshold = 0.6; $0.treeKind = 1
         },
+
+        // ---- industrial sites
+        make("Freight Yard", key: "yard", style: 0, seed: 311, runway: (180, 14, 0), flat: (0, 70), trees: 60, wind: (250, 3, 0.4), mu: 0.03, cloud: 0.5, fog: 0.00014,
+             category: "Industrial", difficulty: 3,
+             info: "A disused loading strip between warehouses and stacks of containers. Level and paved, but the buildings throw rough air across the strip whenever the wind is up.") {
+            $0.terrain = 20; $0.palette = 16; $0.extras = 3; $0.district = 1
+        },
+        make("Container Port", key: "port", style: 0, seed: 331, runway: (200, 16, 0), flat: (0, 70), trees: 0, wind: (0, 5, 0.3), mu: 0.03, cloud: 0.45, fog: 0.00013,
+             category: "Industrial", difficulty: 3,
+             info: "A quayside apron under the gantry cranes, with the harbour basin in front and ships alongside. A steady sea breeze, cranes fifty metres tall, and deep water waiting past the quay.") {
+            $0.terrain = 21; $0.palette = 19; $0.extras = 3; $0.district = 2; $0.waterLevel = -2.2; $0.waterColor = V3(0.06, 0.2, 0.26); $0.flatBlend = 60; $0.districtClear = SIMD2(90, 110)
+        },
+        make("Power Station", key: "power", style: 0, seed: 347, runway: (170, 12, 1), flat: (10, 50), trees: 260, wind: (230, 3, 0.3), mu: 0.06, cloud: 0.55, fog: 0.00016,
+             category: "Industrial", difficulty: 2,
+             info: "Rough grass on the fringe of a power station: three cooling towers and two tall chimneys on the skyline, and pylon lines marching away on either side. Plenty of room in front; mind the wires.") {
+            $0.terrain = 20; $0.palette = 17; $0.extras = 3; $0.district = 3; $0.districtClear = SIMD2(120, 260)
+        },
+        make("Steelworks", key: "steel", style: 0, seed: 359, runway: (170, 14, 2), flat: (5, 55), trees: 40, wind: (200, 3, 0.45), mu: 0.06, cloud: 0.6, fog: 0.00022,
+             category: "Industrial", difficulty: 4,
+             info: "A cinder strip beside a steelworks at the end of the day: long dark mill halls, banded chimneys and gas holders against a hazy evening sky. Thermals rise off the plant and the air is seldom smooth.") {
+            $0.terrain = 20; $0.palette = 17; $0.extras = 3; $0.district = 4; $0.defaultTime = 4; $0.districtClear = SIMD2(100, 200)
+        },
+        make("Refinery", key: "refinery", style: 1, seed: 373, runway: (220, 18, 2), flat: (0, 70), trees: 30, wind: (320, 4, 0.3), mu: 0.06, cloud: 0.1, fog: 0.00012,
+             category: "Industrial", difficulty: 3,
+             info: "A dirt strip in dry country beside a refinery: rows of white storage tanks, a thicket of silver columns and two flare stacks. Wide open in front, hot and thermic by midday.") {
+            $0.terrain = 20; $0.palette = 1; $0.extras = 3; $0.district = 5; $0.treeKind = 1; $0.districtClear = SIMD2(110, 220)
+        },
+        make("Quarry", key: "quarry", style: 0, seed: 389, runway: (150, 12, 2), flat: (0, 60), trees: 200, wind: (270, 2, 0.5), mu: 0.07, cloud: 0.35, fog: 0.00011,
+             category: "Industrial", difficulty: 4,
+             info: "The level floor of a stone quarry, ringed by benches cut into the rock. Sheltered from the wind down here, with lift along the faces above; the walls are closer than they look.") {
+            $0.terrain = 23; $0.palette = 20; $0.extras = 3; $0.district = 6; $0.flatBlend = 60; $0.treeKind = 1; $0.treeThreshold = 0.45; $0.districtClear = SIMD2(40, 170)
+        },
+        make("Logistics Park", key: "logistics", style: 0, seed: 401, runway: (240, 26, 0), flat: (0, 80), trees: 80, wind: (270, 3, 0.25), mu: 0.03, cloud: 0.35, fog: 0.00012,
+             category: "Industrial", difficulty: 2,
+             info: "The empty lorry park of a distribution centre on a Sunday: a huge sheet of smooth asphalt between big flat-roofed sheds. The easiest of the industrial sites, with room for jets.") {
+            $0.terrain = 20; $0.palette = 19; $0.extras = 3; $0.district = 7; $0.districtClear = SIMD2(120, 220)
+        },
+        make("Old Brickworks", key: "brickworks", style: 0, seed: 419, runway: (130, 10, 1), flat: (10, 42), trees: 900, wind: (150, 2, 0.3), mu: 0.06, cloud: 0.4, fog: 0.00013,
+             category: "Industrial", difficulty: 3,
+             info: "An overgrown works yard among derelict brick halls and four old chimneys, with trees taking the place back. A short grass strip, sheltered and quiet.") {
+            $0.terrain = 20; $0.palette = 17; $0.extras = 3; $0.district = 8; $0.treeKind = 7; $0.treeThreshold = 0.46; $0.districtClear = SIMD2(70, 190)
+        },
+
+        // ---- city sites
+        make("City Park", key: "citypark", style: 0, seed: 431, runway: (150, 12, 1), flat: (10, 46), trees: 700, wind: (240, 2, 0.35), mu: 0.06, cloud: 0.4, fog: 0.00014,
+             category: "City", difficulty: 3,
+             info: "The great lawn of a city park, with trees round its edge and the city on every side: flats and offices beyond the trees and towers on the skyline.") {
+            $0.terrain = 20; $0.palette = 18; $0.extras = 3; $0.district = 11; $0.treeThreshold = 0.42; $0.treeClear = SIMD2(60, 40); $0.districtClear = SIMD2(160, 250)
+        },
+        make("Riverside", key: "riverside", style: 0, seed: 443, runway: (170, 12, 1), flat: (5, 55), trees: 320, wind: (270, 3, 0.3), mu: 0.06, cloud: 0.45, fog: 0.00014,
+             category: "City", difficulty: 3,
+             info: "Meadows on the river bank, facing the city across the water. The river runs left to right in front of you with a road bridge downstream; everything past the near bank is water or buildings.") {
+            $0.terrain = 22; $0.palette = 18; $0.extras = 3; $0.district = 12; $0.waterLevel = -3; $0.waterColor = V3(0.07, 0.13, 0.12); $0.districtClear = SIMD2(120, 320)
+        },
+        make("Stadium Car Park", key: "stadium", style: 0, seed: 457, runway: (220, 22, 0), flat: (0, 75), trees: 90, wind: (210, 3, 0.3), mu: 0.03, cloud: 0.35, fog: 0.00013,
+             category: "City", difficulty: 2,
+             info: "The match-day car park of a football stadium, empty in the week: acres of marked asphalt under lamp standards, with the stadium bowl to the front left.") {
+            $0.terrain = 20; $0.palette = 19; $0.extras = 3; $0.district = 13; $0.districtClear = SIMD2(120, 200)
+        },
+        make("Suburb Green", key: "suburb", style: 0, seed: 467, runway: (120, 10, 1), flat: (8, 40), trees: 500, wind: (250, 2, 0.35), mu: 0.06, cloud: 0.4, fog: 0.00012,
+             category: "City", difficulty: 4,
+             info: "A playing field in the suburbs with rows of houses on all four sides and a church beyond. Small, hemmed in by rooftops and gardens: for park flyers and steady nerves.") {
+            $0.terrain = 20; $0.palette = 18; $0.extras = 3; $0.district = 14; $0.treeThreshold = 0.4; $0.treeClear = SIMD2(40, 30); $0.districtClear = SIMD2(40, 125)
+        },
+        make("Harbour Promenade", key: "promenade", style: 0, seed: 479, runway: (160, 14, 0), flat: (0, 70), trees: 120, wind: (0, 4, 0.25), mu: 0.03, cloud: 0.3, fog: 0.00012,
+             category: "City", difficulty: 3,
+             info: "A waterfront promenade with the open harbour in front and the city rising behind you. Smooth air off the water; turn back toward the towers and it gets lively.") {
+            $0.terrain = 21; $0.palette = 16; $0.extras = 3; $0.district = 15; $0.waterLevel = -2.2; $0.waterColor = V3(0.04, 0.14, 0.2); $0.flatBlend = 60; $0.districtClear = SIMD2(100, 125)
+        },
+        make("Cathedral Meadow", key: "cathedral", style: 0, seed: 491, runway: (150, 12, 1), flat: (10, 44), trees: 420, wind: (200, 2, 0.25), mu: 0.06, cloud: 0.3, fog: 0.00013,
+             category: "City", difficulty: 2,
+             info: "A hay meadow below an old town: a huddle of red roofs across the field and a church spire above them, in warm afternoon light. Open behind you and to the sides.") {
+            $0.terrain = 20; $0.palette = 9; $0.extras = 3; $0.district = 16; $0.defaultTime = 3; $0.treeKind = 5; $0.districtClear = SIMD2(110, 200)
+        },
+        make("Skyline", key: "skyline", style: 0, seed: 503, runway: (170, 12, 1), flat: (10, 50), trees: 360, wind: (270, 3, 0.3), mu: 0.06, cloud: 0.3, fog: 0.00018,
+             category: "City", difficulty: 2,
+             info: "Open ground on the edge of town with the downtown towers straight ahead, lit by the evening sun. The skyline is half a kilometre off: a backdrop, not an obstacle.") {
+            $0.terrain = 20; $0.palette = 18; $0.extras = 3; $0.district = 17; $0.defaultTime = 4; $0.districtClear = SIMD2(130, 320)
+        },
+        make("Business District", key: "business", style: 0, seed: 521, runway: (140, 14, 0), flat: (0, 60), trees: 40, wind: (230, 4, 0.8), mu: 0.03, cloud: 0.45, fog: 0.00014,
+             category: "City", difficulty: 5,
+             info: "A vacant lot in the middle of the business district, walled in by office blocks and towers. Gusts funnel between the buildings from every direction: the hardest site there is.") {
+            $0.terrain = 20; $0.palette = 19; $0.extras = 3; $0.district = 18; $0.districtClear = SIMD2(165, 305)
+        },
     ]
 }
 
@@ -228,6 +314,21 @@ struct Palette {
         // 15 dune sand
         Palette(a: rgb(0.86, 0.62, 0.36), b: rgb(0.80, 0.55, 0.30), rock: rgb(0.74, 0.5, 0.28), high: rgb(0.84, 0.6, 0.34), highFrom: 200, highTo: 400,
                 grassBase: rgb(0.5, 0.42, 0.24), grassTip: rgb(0.7, 0.6, 0.36), grassCount: 0, bush: rgb(0.42, 0.42, 0.25), bushCount: 12, flowers: false, dust: rgb(0.86, 0.66, 0.42)),
+        // 16 gravel yard
+        Palette(a: rgb(0.47, 0.46, 0.44), b: rgb(0.40, 0.39, 0.37), rock: rgb(0.4, 0.4, 0.4), high: rgb(0.3, 0.36, 0.2), highFrom: 40, highTo: 150,
+                grassBase: rgb(0.26, 0.3, 0.14), grassTip: rgb(0.5, 0.52, 0.28), grassCount: 3500, bush: rgb(0.28, 0.36, 0.18), bushCount: 40, flowers: false, dust: rgb(0.6, 0.59, 0.56)),
+        // 17 brownfield
+        Palette(a: rgb(0.42, 0.38, 0.27), b: rgb(0.36, 0.40, 0.20), rock: rgb(0.4, 0.38, 0.35), high: rgb(0.28, 0.36, 0.18), highFrom: 40, highTo: 150,
+                grassBase: rgb(0.24, 0.28, 0.1), grassTip: rgb(0.56, 0.52, 0.26), grassCount: 24000, bush: rgb(0.3, 0.36, 0.16), bushCount: 180, flowers: false),
+        // 18 city park
+        Palette(a: rgb(0.21, 0.40, 0.13), b: rgb(0.31, 0.48, 0.17), rock: rgb(0.42, 0.4, 0.37), high: rgb(0.2, 0.34, 0.14), highFrom: 60, highTo: 200,
+                grassBase: rgb(0.14, 0.27, 0.09), grassTip: rgb(0.35, 0.5, 0.18), grassCount: 30000, bush: rgb(0.18, 0.34, 0.12), bushCount: 200),
+        // 19 asphalt lot
+        Palette(a: rgb(0.17, 0.17, 0.18), b: rgb(0.21, 0.21, 0.22), rock: rgb(0.3, 0.3, 0.3), high: rgb(0.28, 0.34, 0.2), highFrom: 40, highTo: 150,
+                grassBase: rgb(0.26, 0.3, 0.14), grassTip: rgb(0.5, 0.52, 0.28), grassCount: 0, bush: rgb(0.28, 0.36, 0.18), bushCount: 0, flowers: false, dust: rgb(0.4, 0.4, 0.4)),
+        // 20 quarry stone
+        Palette(a: rgb(0.62, 0.58, 0.50), b: rgb(0.54, 0.50, 0.44), rock: rgb(0.52, 0.48, 0.42), high: rgb(0.34, 0.4, 0.22), highFrom: 90, highTo: 200,
+                grassBase: rgb(0.4, 0.38, 0.22), grassTip: rgb(0.62, 0.58, 0.36), grassCount: 1500, bush: rgb(0.34, 0.38, 0.2), bushCount: 30, flowers: false, dust: rgb(0.7, 0.66, 0.58)),
     ]
 }
 
@@ -257,6 +358,7 @@ final class Terrain {
     var h: [Float]
     let site: SiteSpec
     var trees: [Tree] = []
+    var blocks: [Block] = []            // buildings of industrial and city sites
 
     init(site: SiteSpec) {
         self.site = site
@@ -265,6 +367,7 @@ final class Terrain {
         for j in 0..<n { for i in 0..<n {
             h[j * n + i] = raw(Float(i) * cell - half, Float(j) * cell - half)
         } }
+        blocks = layoutDistrict()
         placeTrees()
     }
 
@@ -349,6 +452,18 @@ final class Terrain {
             let edge = -z - 78 + 26 * (fbm(x / 210, 0.4, s + 5) - 0.5)          // positive beyond the cliff edge
             y = 9 * (fbm(x / 260, z / 260, s) - 0.5) + 55 * smoothstep(200, 1200, z) * fbm(x / 600, z / 600, s + 3)
             y -= 74 * smoothstep(-4, 22, edge) + 30 * smoothstep(22, 400, edge)
+        case 20:    // town and industry: all but level, low hills far away
+            y = 1.6 * (fbm(x / 300, z / 300, s) - 0.5) + smoothstep(1500, 2900, r) * 110 * fbm(x / 1400, z / 1400, s + 3)
+        case 21:    // harbour: a quay along z = -150 with deep water beyond it
+            y = 1.2 * (fbm(x / 300, z / 300, s) - 0.5) + smoothstep(1500, 2900, r) * 90 * fbm(x / 1400, z / 1400, s + 3) * smoothstep(-200, 300, z)
+            y = lerp(y, -16, smoothstep(-146, -154, z))
+        case 22:    // a river crossing in front of the field
+            y = 1.6 * (fbm(x / 300, z / 300, s) - 0.5) + smoothstep(1500, 2900, r) * 110 * fbm(x / 1400, z / 1400, s + 3)
+            y = lerp(y, -11, smoothstep(62, 44, abs(z + 250 + 30 * sin(x / 320))))
+        case 23:    // quarry: a level floor ringed by benches cut into the rock
+            let t = max(r - 255, 0) / 42
+            y = min(13 * (floor(t) + smoothstep(0.72, 1.0, t - floor(t))), 78) + 2.5 * (fbm(x / 90, z / 90, s) - 0.5) * min(t, 1)
+            y += smoothstep(700, 2400, r) * 200 * fbm(x / 1200, z / 1200, s + 3)
         default:    // forest floor
             y = 24 * (fbm(x / 600, z / 600, s) - 0.45) + 4 * (fbm(x / 120, z / 120, s + 7) - 0.5)
             y += smoothstep(1300, 2900, r) * 300 * fbm(x / 1400, z / 1400, s + 3)
@@ -407,7 +522,8 @@ final class Terrain {
         let pal = site.palette >= 0 ? site.palette : site.style
         if pal == 4 { return 2 }
         if pal == 15 { return 3 }
-        if pal == 1 || pal == 5 || pal == 11 || pal == 12 { return 4 }
+        if pal == 19 { return 0 }                                           // asphalt lot
+        if pal == 1 || pal == 5 || pal == 11 || pal == 12 || pal == 16 || pal == 20 { return 4 }
         return 1
     }
 
@@ -436,6 +552,7 @@ final class Terrain {
         guard site.panorama == nil else { return [] }
         let hw = site.runwayWid / 2
         o.append(WindObstacle(p: V3(-48, height(-48, hw + 34), hw + 34), h: 4.5, r: 6))
+        for b in blocks where b.h > 4 && abs(b.x) < 520 && abs(b.z) < 520 { o.append(WindObstacle(p: V3(b.x, b.y, b.z), h: b.solidH, r: max(b.w, b.d) / 2)) }
         if site.facility == 1 {
             for x in [Float(62), 118, 174] { o.append(WindObstacle(p: V3(x, 0, hw + 106), h: 11.5, r: 20)) }
             o.append(WindObstacle(p: V3(18, 0, hw + 96), h: 22, r: 5))
@@ -459,6 +576,7 @@ final class Terrain {
             let y = height(x, z)
             if normal(x, z).y < 0.85 || (site.style == 2 && y > 180) { continue }
             if let wl = site.waterLevel, y < wl + 0.8 { continue }
+            if blocks.contains(where: { abs($0.x - x) < $0.w / 2 + 5 && abs($0.z - z) < $0.d / 2 + 5 }) { continue }
             let h: Float
             switch kind {
             case 1: h = rng.range(1.2, 3)

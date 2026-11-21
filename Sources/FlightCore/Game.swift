@@ -501,6 +501,14 @@ final class Game {
             }
         }
         if !aircraft.crashed {
+            // buildings of industrial and city sites
+            for blk in terrain.blocks where blk.contains(p, margin: 0.15) {
+                sound.branches(clampf(length(aircraft.vel) / 14, 0.3, 1), woody: false, pan: sound.state.pan)
+                aircraft.crashed = true; aircraft.crashImpact = length(aircraft.vel); aircraft.vel *= 0.15
+                break
+            }
+        }
+        if !aircraft.crashed {
             let eyePos = terrain.pilotPos + V3(0, site.eyeHeight, 0)
             for o in site.obstacles {
                 let c = Panoramas.position(o, north: site.north)

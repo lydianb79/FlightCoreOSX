@@ -200,6 +200,47 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         albedo *= 1.0 + leaf * 0.45 * leafy * saturate(1.5 - fwl * 40.0);
         N = normalize(N + float3(clump - 0.5, 0.0, vnoise(q.zx * 1.7 + q.y) - 0.5) * 1.1 * leafy);
     }
+    float3 glow = float3(0.0);
+    if (material == 8) {
+        // buildings: the alpha of the wall colour says what kind of front it is
+        float code = in.col.a;
+        float fwp = max(length(dfdx(in.wp)), length(dfdy(in.wp)));
+        if (abs(N.y) < 0.5) {
+            float3 tdir = normalize(float3(-N.z, 0.0, N.x));
+            float u = dot(in.wp, tdir), v = in.wp.y;
+            if (code > 0.1) {
+                // rows of windows: industrial glazing, flats, offices, or a glass tower
+                float2 cs = code < 0.37 ? float2(6.0, 5.0) : (code < 0.62 ? float2(3.4, 2.9) : (code < 0.87 ? float2(2.2, 3.4) : float2(1.6, 3.6)));
+                float2 wf = code < 0.37 ? float2(0.62, 0.3) : (code < 0.62 ? float2(0.45, 0.5) : (code < 0.87 ? float2(0.8, 0.55) : float2(0.9, 0.88)));
+                float2 g = float2(u, v) / cs;
+                float2 id = floor(g), fr = fract(g) - 0.5;
+                float2 aa = float2(fwp) / cs;
+                float inWin = smoothstep(wf.x * 0.5 + aa.x, wf.x * 0.5 - aa.x, abs(fr.x)) * smoothstep(wf.y * 0.5 + aa.y, wf.y * 0.5 - aa.y, abs(fr.y - (code < 0.37 ? 0.2 : 0.0)));
+                // a window smaller than a pixel is drawn as its share of the wall, so distant fronts do not shimmer
+                float lod = saturate(max(aa.x, aa.y) * 2.5);
+                float win = mix(inWin, wf.x * wf.y, lod);
+                float rnd = hash21(id + floor(N.xz * 3.0 + 0.5) * 17.0);
+                float3 glassCol = float3(0.035, 0.05, 0.065) * (0.6 + 0.8 * rnd);
+                // lights come on as the sun goes down
+                // (fewer in a glass tower, and a far-off front shows the glow of all its windows together)
+                float share = code > 0.87 ? 0.14 : 0.4;
+                float lit = mix(step(1.0 - share, fract(rnd * 7.31)), share, lod) * smoothstep(0.34, 0.1, L.y);
+                glow = float3(1.0, 0.78, 0.45) * 1.5 * lit * win;
+                albedo = mix(albedo, glassCol, win);
+                gloss = win * 0.9;
+                shininess = 300.0;
+            } else {
+                // plain cladding: ribs and panel joints
+                albedo *= 0.94 + 0.06 * sin(u * 9.0) * saturate(1.0 - fwp * 6.0);
+                albedo *= 1.0 - 0.12 * step(0.97, fract(u / 6.0)) * saturate(1.0 - fwp * 1.5);
+            }
+            // weathering: streaks down the wall
+            albedo *= 0.9 + 0.2 * vnoise(float2(u * 0.35, v * 0.06));
+        } else {
+            // roofs: felt, gravel or tiles
+            albedo *= 0.85 + 0.3 * vnoise(in.wp.xz * 0.7);
+        }
+    }
     if (material == 1) {
         float2 p = in.wp.xz;
         float fade = exp(-dist * 0.006);
@@ -402,6 +443,7 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         col = mix(col, env, fres * gloss * 0.7);
         col += f.sunColor.rgb * (pow(ndh, shininess) * (shininess > 100.0 ? 3.0 : 0.5) + pow(ndh, 50.0) * 0.22) * gloss * shadow * step(0.0, dot(N, L));
     }
+    col += glow;
     col = mix(col, haze, fog);
     return shade(col, 1.0, f);
 }

@@ -107,6 +107,8 @@ struct Ambience {
             case "Water": a.lapping = 0.6; a.birds = 0.6
             case "Winter": a.crows = 0.4; a.howl = 0.3
             case "Airfields": a.town = 0.5; a.birds = 0.4
+            case "Industrial": a.town = 0.9; a.crows = 0.25; a.howl = 0.3; a.birds = 0.15; if site.waterLevel != nil { a.gulls = 0.6; a.lapping = 0.5 }
+            case "City": a.town = 1.0; a.birds = 0.35; a.crows = 0.15; if site.waterLevel != nil { a.gulls = 0.4; a.lapping = 0.4 }
             default: a.birds = 0.8; a.crickets = 0.3; a.leaves = 0.3
             }
         }

@@ -413,7 +413,7 @@ struct SiteBrowser: View {
     @State private var selected = 0
     @AppStorage("siteFilter") private var filter = "All"       // stays as it was left, also after a restart
     @State private var search = ""
-    private static let categories = ["Fields", "Airfields", "Mountains", "Water", "Desert", "Winter"]
+    private static let categories = ["Fields", "Airfields", "Mountains", "Water", "Desert", "Winter", "Industrial", "City"]
     private var all: [SiteSpec] { SiteSpec.all }
     private func matches(_ s: SiteSpec, _ f: String) -> Bool {
         switch f {
@@ -471,6 +471,8 @@ struct SiteBrowser: View {
                     filterRow("Water", icon: "water.waves")
                     filterRow("Desert", icon: "sun.max")
                     filterRow("Winter", icon: "snowflake")
+                    filterRow("Industrial", icon: "shippingbox")
+                    filterRow("City", icon: "building.2")
                     Spacer()
                     Button { m.addPanorama?() } label: { Label("Add Photo…", systemImage: "plus").frame(maxWidth: .infinity) }.buttonStyle(QuietButton())
                     Button { m.choosePanoramaFolder?() } label: { Label("Photo Folder…", systemImage: "folder").frame(maxWidth: .infinity) }.buttonStyle(QuietButton())

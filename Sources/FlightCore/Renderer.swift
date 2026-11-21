@@ -64,6 +64,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var catcherMesh: GPUMesh?
     private var terrainMesh: GPUMesh?
     private var sceneryMesh: GPUMesh?
+    private var districtMesh: GPUMesh?
     private var vegetation: [GPUChunk] = []
     private var grass: [GPUChunk] = []
     private var treeShadowMesh: GPUMesh?
@@ -219,12 +220,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             shadow1Key = -1
             panoTex = nil
             if let url = game.site.panorama {
-                terrainMesh = nil; sceneryMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil; waterMesh = nil
+                terrainMesh = nil; sceneryMesh = nil; districtMesh = nil; vegetation = []; grass = []; treeShadowMesh = nil; waterMesh = nil
                 if let img = Panoramas.image(url, maxSize: 8192) { panoTex = makeTexture(img); panoDetail = clampf((lastDetail - 0.4) / 0.35, 0, 1) }
                 if panoTex == nil { game.say("Could not load panorama image", 6) }
             } else {
                 terrainMesh = GPUMesh(device, game.terrain.buildMesh())
                 sceneryMesh = GPUMesh(device, game.terrain.buildScenery())
+                districtMesh = game.terrain.blocks.isEmpty ? nil : GPUMesh(device, game.terrain.buildDistrict())
                 func upload(_ b: MeshBuilder, _ cell: Float) -> [GPUChunk] {
                     chunked(b, cell: cell).compactMap { c in GPUMesh(device, c.mesh).map { GPUChunk(mesh: $0, center: c.center, radius: c.radius) } }
                 }
@@ -379,6 +381,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let wind2 = SIMD2<Float>(wv.x, wv.z) + SIMD2<Float>(0.6, 0.3)
         var world: [DrawItem] = []
         if let mesh = sceneryMesh { world.append(DrawItem(mesh: mesh, model: .identity, spec: 1)) }
+        if let mesh = districtMesh { world.append(DrawItem(mesh: mesh, model: .identity, material: 8)) }
         if let mesh = windsockMesh, !pano {
             let sp = game.env.windSpeed
             let yaw = sp > 0.05 ? atan2(wv.x, wv.z) : 0
@@ -412,6 +415,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             shadow1Key = key
             var casters: [DrawItem] = []
             if let mesh = sceneryMesh { casters.append(DrawItem(mesh: mesh, model: .identity)) }
+            if let mesh = districtMesh { casters.append(DrawItem(mesh: mesh, model: .identity)) }
             for c in vegetation where abs(c.center.x) < 300 + c.radius && abs(c.center.z - game.site.flatCenterZ) < 300 + c.radius {
                 casters.append(DrawItem(mesh: c.mesh, model: .identity))
             }

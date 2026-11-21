@@ -6,7 +6,7 @@ A RC Flight Simulator for macOS, written in Swift and rendered with Metal. Creat
 
 ![FlightCore OSX splash screen](Resources/Splash.jpg)
 
-You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 175 aircraft, 20 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
+You stand at the edge of the field and fly the model from the pilot's point of view, the way you would at a real flying site. It has 175 aircraft, 36 3D flying sites, support for 360° photo sites, and works with USB RC transmitters, gamepads and the keyboard. Some features of commercial simulators are missing; see [Not yet implemented](#not-yet-implemented).
 
 ## Screenshots
 
@@ -94,7 +94,7 @@ Every aircraft has its own flight model: the physics and the 3D shape are both g
 
 ## Flying sites
 
-The site browser filters by type (3D or photo) and by landscape (Fields, Airfields, Mountains, Water, Desert, Winter), with search, previews, a difficulty rating and a description for each site.
+The site browser filters by type (3D or photo) and by landscape (Fields, Airfields, Mountains, Water, Desert, Winter, Industrial, City), with search, previews, a difficulty rating and a description for each site.
 
 ### 3D sites
 
@@ -120,6 +120,24 @@ The site browser filters by type (3D or photo) and by landscape (Fields, Airfiel
 | Sea Cliffs | Water | Clifftop strip seventy metres above the sea; strong slope lift |
 | Salt Flats | Desert | 400 m strip on a dead-flat white salt pan |
 | Sand Sea | Desert | Packed-sand strip between great dunes |
+| Freight Yard | Industrial | Paved loading strip between warehouses and container stacks |
+| Container Port | Industrial | Quayside apron under gantry cranes, harbour basin in front |
+| Power Station | Industrial | Rough grass below cooling towers, chimneys and pylon lines |
+| Steelworks | Industrial | Cinder strip beside mill halls and banded chimneys, in evening light |
+| Refinery | Industrial | Dirt strip in dry country beside tank farms and silver columns |
+| Quarry | Industrial | Level floor of a stone quarry ringed by rock benches |
+| Logistics Park | Industrial | Huge asphalt lorry park between flat-roofed sheds; room for jets |
+| Old Brickworks | Industrial | Overgrown yard among derelict brick halls and old chimneys |
+| City Park | City | The great lawn of a park, with the city on every side |
+| Riverside | City | River-bank meadows facing the city across the water |
+| Stadium Car Park | City | Empty match-day car park beside a football stadium |
+| Suburb Green | City | Playing field hemmed in by rows of houses |
+| Harbour Promenade | City | Waterfront with open harbour in front and the city behind |
+| Cathedral Meadow | City | Hay meadow below an old town of red roofs and a spire |
+| Skyline | City | Open ground facing the downtown towers at sunset |
+| Business District | City | Vacant lot walled in by office blocks and towers; gusty |
+
+The industrial and city sites are built up: warehouses, factories, tanks, chimneys, cooling towers, cranes, ships, houses, flats, offices and glass towers stand round the field. Buildings are solid, they shelter the wind and leave rough air behind them, and their windows light up as the sun goes down. The flying field, the area in front of the pilot and the demo pilot's circuit are kept clear.
 
 Wind, gusts, turbulence, thermals, cloud cover, haze and time of day are set from the Weather panel. An aircraft that comes down in water is lost.
 
@@ -268,6 +286,7 @@ Press **H** in the app for this list.
 | `Models.swift` | Procedural 3D models and trim schemes |
 | `Scenery.swift` | Buildings, vehicles, people, trees, bushes, grass |
 | `World.swift` | Sites, terrain, scenery, wind, and the demo autopilot |
+| `District.swift` | Buildings of the industrial and city sites |
 | `Panorama.swift` | Photo sites |
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and shader source |
 | `Game.swift` | Game loop, cameras, interface state |
@@ -285,7 +304,7 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--glidetest`, `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
 
 Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
 

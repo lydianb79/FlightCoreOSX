@@ -738,6 +738,28 @@ if let ci = CommandLine.arguments.firstIndex(of: "--musictest"), ci + 1 < Comman
                  Float(quietMax) / 44100, bad ? "NON-FINITE SAMPLES" : "ok", took, took / 80 * 100))
     exit(0)
 }
+if CommandLine.arguments.contains("--districttest") {
+    // industrial and city sites: what was built, that the field is clear, and that the demo pilot can fly a
+    // minute there without hitting anything
+    var bad = 0
+    for (i, site) in SiteSpec.all.enumerated() where site.district > 0 {
+        let g = Game(site: i, aircraft: 0)
+        let blocks = g.terrain.blocks
+        let hl = site.runwayLen / 2, hw = site.runwayWid / 2
+        let onField = blocks.filter { abs($0.x) - $0.w / 2 < hl + 20 && $0.z + $0.d / 2 > -60 && $0.z - $0.d / 2 < hw + 30 }.count
+        let nearest = blocks.filter { $0.h > 4 }.map { max(hypot($0.x, $0.z) - max($0.w, $0.d) / 2, 0) }.min() ?? 0
+        g.autopilotOn = true
+        var t: Float = 0
+        while t < 60 && !g.aircraft.crashed { g.frame(dt: 1 / 60); t += 1 / 60 }
+        let ok = !g.aircraft.crashed && onField == 0 && !blocks.isEmpty
+        if !ok { bad += 1 }
+        print(String(format: "DISTRICT %@ %@ %3d structures, tallest %3.0f m, nearest %3.0f m from the pilot, %d on the field; demo pilot %@ %@",
+                     site.category.padding(toLength: 10, withPad: " ", startingAt: 0), site.name.padding(toLength: 18, withPad: " ", startingAt: 0), blocks.count,
+                     blocks.map { $0.h }.max() ?? 0, nearest, onField, g.aircraft.crashed ? String(format: "CRASHED after %.0f s", t) : "flew 60 s", ok ? "ok" : "FAIL"))
+    }
+    print(bad == 0 ? "DISTRICT all ok" : "DISTRICT \(bad) sites failed")
+    exit(0)
+}
 if CommandLine.arguments.contains("--obstaclelist") {
     // every photo site: how close the nearest solid thing is to the pilot and to the start, and how tall the tallest is
     for site in SiteSpec.all where site.panorama != nil {
