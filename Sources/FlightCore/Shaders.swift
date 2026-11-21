@@ -141,7 +141,7 @@ static float sunShadow(depth2d<float> sh0, depth2d<float> sh1, sampler cmp, samp
         float s = 0.0, r = 1.7 / f.screen.z;
         for (int i = 0; i < taps; i++) s += sh1.sample_compare(cmp, uv + rot * poisson[i] * r, c.z - 0.0005);
         // fade out toward the edge of the map instead of ending in a hard line
-        float edge = smoothstep(0.5, 0.44, max(abs(uv.x - 0.5), abs(uv.y - 0.5)));
+        float edge = smoothstep(0.5, 0.3, length(uv - 0.5));
         s1 = mix(1.0, s / float(taps), edge);
     }
     return min(s0, s1);
@@ -159,6 +159,7 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     int shadowTaps = material == 6 ? 1 : (material == 0 ? 6 : 4);        // grass is dense and noisy: one tap is enough
     float gloss = material == 0 ? in.col.a * d.params.y : 0.0;
     float shininess = 400.0;
+    float groundSparkle = 0.0;
     float3 haze = skyBase(normalize(float3(-V.x, 0.03, -V.z)), f);
     float fog = 1.0 - exp(-dist * f.sunColor.w);
 
@@ -183,27 +184,129 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         albedo *= (0.8 + 0.4 * hsh) * (0.4 + 0.6 * t);        // darker at the roots: cheap self-shadowing
         N = float3(0.0, 1.0, 0.0);
         material = 5;
+    } else if (material == 5) {
+        // trees and bushes: clumps of leaves, lit unevenly, darker underneath and inside the crown, and less
+        // garish than a plain coat of green paint
+        float3 q = in.wp * 2.1;
+        float clump = vnoise(q.xz + q.y * 0.7) * 0.6 + vnoise(q.xz * 3.3 + q.y * 2.3 + 5.0) * 0.4;
+        float lumF = dot(albedo, float3(0.3, 0.6, 0.1));
+        float leafy = saturate((albedo.g - albedo.r) * 6.0 + (albedo.r - albedo.b) * 2.0);      // foliage, not trunks or snow
+        albedo = mix(albedo, float3(lumF), 0.22 * leafy) * mix(1.0, 0.86, leafy);
+        albedo *= 1.0 + (clump - 0.5) * 0.95 * leafy;
+        albedo *= mix(1.0, 0.55 + 0.45 * smoothstep(-0.7, 0.5, N.y), leafy);
+        // single leaves close by
+        float fwl = max(length(dfdx(in.wp)), length(dfdy(in.wp)));
+        float leaf = hash21(floor(q.xz * 9.0 + q.y * 5.0) + 0.5) - 0.5;
+        albedo *= 1.0 + leaf * 0.45 * leafy * saturate(1.5 - fwl * 40.0);
+        N = normalize(N + float3(clump - 0.5, 0.0, vnoise(q.zx * 1.7 + q.y) - 0.5) * 1.1 * leafy);
     }
     if (material == 1) {
         float2 p = in.wp.xz;
         float fade = exp(-dist * 0.006);
+        float nearFade = exp(-dist * 0.07);
+        // how much ground one pixel covers: detail finer than that is left out, so nothing shimmers in the distance
+        // (the geometric mean of its two extents: at a shallow angle a pixel is long and thin on the ground)
+        float fw = sqrt(length(dfdx(p)) * length(dfdy(p)));
+        #define OCT(k) saturate(1.6 - (k) * fw * 1.9)
         float macro = fbm2(p * 0.021);
-        float detail = fbm(p * 1.3);
+        float patches = vnoise(p * 0.31 + 5.0);
         float fine = vnoise(p * 9.0);
         // bright ground (snow, sand) keeps its brightness and shows less mottling than turf
-        float bright = smoothstep(0.35, 0.75, dot(albedo, float3(0.3, 0.6, 0.1)));
-        albedo = mix(albedo, float3(dot(albedo, float3(0.3, 0.6, 0.1))), 0.34 * (1.0 - bright)) * mix(0.55, 0.9, bright);
+        float lum0 = dot(albedo, float3(0.3, 0.6, 0.1));
+        float bright = smoothstep(0.35, 0.75, lum0);
         float mott = 1.0 - 0.75 * bright;
-        albedo *= (1.0 + (0.56 * macro - 0.28) * mott) * mix(1.0, 1.0 + (0.5 * detail + 0.26 * fine - 0.38) * mott, fade);
-        float nearFade = exp(-dist * 0.07);
-        float blades = vnoise(p * float2(41.0, 13.0) + 3.0) * 0.6 + vnoise(p.yx * float2(37.0, 11.0)) * 0.4;
-        albedo *= mix(1.0, 1.0 + (0.56 * blades - 0.28) * mott, nearFade);
-        // small-scale relief so the ground catches the light unevenly
-        float bumpFade = exp(-dist * 0.025);
-        float e = 0.07, bf = 6.0;
-        float h0 = vnoise(p * bf), hx = vnoise((p + float2(e, 0.0)) * bf), hz = vnoise((p + float2(0.0, e)) * bf);
-        float3 bump = float3(h0 - hx, 0.0, h0 - hz);
-        float bumpAmt = 0.6 * mott;
+        float turf = saturate((albedo.g - max(albedo.r, albedo.b)) * 9.0);         // green ground: grass
+        float sandy = saturate((albedo.r - albedo.b) * 5.0) * smoothstep(0.12, 0.35, lum0) * (1.0 - turf);
+        float snowy = smoothstep(0.6, 0.85, lum0) * saturate(1.0 - (albedo.r - albedo.b) * 12.0);
+
+        // ---- steep ground is rock: bare, layered, darker in the gullies (worked out only where it is steep)
+        float3 Ng = N;
+        float slope = 1.0 - Ng.y;
+        float rock = smoothstep(0.16, 0.38, slope + (macro - 0.5) * 0.14) * (1.0 - snowy * 0.5);
+
+        albedo = mix(albedo, float3(lum0), 0.34 * (1.0 - bright)) * mix(0.55, 0.9, bright);
+        // broad differences in colour: lusher and drier patches, not just lighter and darker
+        float3 tint = mix(float3(1.10, 0.98, 0.78), float3(0.86, 1.04, 0.92), patches);
+        albedo *= mix(float3(1.0), tint, (0.5 * turf + 0.25 * sandy) * mott);
+        albedo *= 1.0 + (0.5 * macro - 0.25) * mott;
+        // detail at every scale from metres down to millimetres. Each scale is only worked out where it is larger
+        // than a pixel, so nothing shimmers in the distance and nothing is computed that cannot be seen.
+        float o1 = OCT(1.3), o4 = OCT(4.1), o12 = OCT(12.7), o36 = OCT(37.0), o110 = OCT(113.0);
+        float d1 = 0.5, d4 = 0.5, d12 = 0.5, d36 = 0.5, d110 = 0.5;
+        if (o1 > 0.0) d1 = vnoise(p * 1.3 + 7.0);
+        if (o4 > 0.0) d4 = vnoise(p * 4.1 + 3.0);
+        if (o12 > 0.0) d12 = vnoise(p * 12.7);
+        if (o36 > 0.0) d36 = vnoise(p * 37.0 + 11.0);
+        if (o110 > 0.0) d110 = vnoise(p * 113.0 + 2.0);
+        float detail = (d1 - 0.5) * 0.22 * o1 + (d4 - 0.5) * 0.20 * o4 + (d12 - 0.5) * 0.20 * o12 + (d36 - 0.5) * 0.20 * o36 + (d110 - 0.5) * 0.18 * o110;
+        albedo *= 1.0 + detail * (0.55 + 0.45 * mott) * (1.0 - rock * 0.4);
+        // grain: crisp speckle, the difference between a surface in focus and a blurred one. Grass tufts, grit,
+        // grains of sand and snow crust; in cells with wavy, irregular edges, so no grid shows.
+        float og = OCT(47.0);
+        if (og > 0.0) {
+            float2 pw = p + (float2(d12, d36) - 0.5) * 0.11;
+            float2 pw2 = p + (float2(d36, d110) - 0.5) * 0.03;
+            float g1 = hash21(floor(pw * float2(47.0, 31.0)) + 0.5), g2 = hash21(floor(pw2.yx * float2(130.0, 95.0)) + 7.5);
+            float grain = (g1 - 0.5) * og + (g2 - 0.5) * 0.9 * OCT(130.0);
+            albedo *= 1.0 + grain * (0.34 * turf + 0.16 * sandy + 0.07 * snowy + 0.14 * (1.0 - turf) * (1.0 - bright));
+            // grass: fine upright streaks close by, seen as blades
+            if (turf > 0.01) {
+                float blades = vnoise(p * float2(61.0, 17.0) + 3.0) * 0.6 + vnoise(p.yx * float2(53.0, 15.0)) * 0.4;
+                albedo *= 1.0 + (blades - 0.5) * 0.5 * turf * OCT(60.0);
+            }
+        }
+        if (rock > 0.01) {
+            float strata = fbm2(float2(in.wp.y * 0.11 + macro * 3.0, dot(p, float2(0.011, 0.016))));
+            float crags = fbm2(p * 0.09 + float2(in.wp.y * 0.05, 0.0));
+            float3 rockCol = albedo * (0.62 + 0.55 * strata) * (0.8 + 0.4 * crags);
+            rockCol = mix(rockCol, float3(dot(rockCol, float3(0.3, 0.6, 0.1))), 0.35 * (1.0 - bright));
+            albedo = mix(albedo, rockCol, rock * (1.0 - 0.6 * snowy));
+        }
+
+        // small-scale relief so the ground catches the light unevenly; gentler when the sun is low, where it
+        // would otherwise turn the ground into dark blotches. The slope of the relief comes from how the detail
+        // changes from one pixel to the next.
+        float lowSun = 0.35 + 0.65 * smoothstep(0.15, 0.6, L.y);
+        float3 bump = float3(0.0);
+        float ob = OCT(8.0);
+        if (ob > 0.0) {
+            float hgt = d4 * 0.6 + d12 * 0.4;
+            float2 px = dfdx(p), py = dfdy(p);
+            float hx = dfdx(hgt), hy = dfdy(hgt);
+            float det = px.x * py.y - px.y * py.x;
+            if (abs(det) > 1e-12) {
+                float2 grad = float2(hx * py.y - hy * px.y, hy * px.x - hx * py.x) / det;
+                bump = float3(-grad.x, 0.0, -grad.y) * (0.05 * ob);
+                bump = clamp(bump, float3(-0.6), float3(0.6));
+            }
+        }
+        float bumpAmt = 0.75 * mott * lowSun;
+        float bumpFade = 1.0;
+        // wind ripples on sand
+        if (sandy > 0.02 && OCT(3.0) > 0.0) {
+            float rip = sin(dot(p, float2(8.2, 3.1)) + d1 * 9.0);
+            bump += float3(0.35, 0.0, 0.13) * rip * 0.06 * sandy * OCT(3.0);
+        }
+        // the lie of the land far away: folds, gullies and ridges that the coarse terrain mesh cannot show
+        float farAmt = smoothstep(60.0, 400.0, dist) * 2.4 * smoothstep(0.03, 0.4, slope);
+        if (farAmt > 0.02) {
+            // ridged: sharp crests and soft valleys. Its slope is read from neighbouring pixels.
+            // (built from the broad mottling that is already worked out, plus one larger fold)
+            float r0 = abs(macro - 0.5);
+            float relief = r0 * 5.0 + abs(vnoise(p * 0.0075 + 31.0) - 0.5) * 11.0;
+            float2 px = dfdx(p), py = dfdy(p);
+            float hx = dfdx(relief), hy = dfdy(relief);
+            float det = px.x * py.y - px.y * py.x;
+            float3 fold = float3(0.0);
+            if (abs(det) > 1e-9) {
+                float2 grad = float2(hx * py.y - hy * px.y, hy * px.x - hx * py.x) / det;
+                fold = clamp(float3(-grad.x, 0.0, -grad.y) * 5.5, float3(-1.2), float3(1.2));
+            }
+            N = normalize(N + fold * farAmt);
+            albedo *= 1.0 - 0.35 * min(farAmt, 1.0) * smoothstep(0.1, 0.0, r0) * (1.0 - snowy * 0.6);       // shaded gullies
+        }
+        // snow glitters where single crystals catch the sun
+        if (snowy > 0.05) groundSparkle = step(0.9965, hash21(floor(p * 85.0) + floor(V.xz * 40.0))) * snowy * nearFade * smoothstep(0.1, 0.4, L.y);
 
         float hl = f.runway.x, hw = f.runway.y;
         int type = int(f.sunDir.w);
@@ -264,9 +367,16 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
         float3 R = reflect(-V, Nw);
         R.y = abs(R.y);
         float3 body = albedo * (f.ambient.rgb * 0.9 + f.sunColor.rgb * 0.35 * max(dot(Nw, L), 0.0));
+        // darker and lighter streaks where the wind ruffles the surface more or less
+        body *= 0.82 + 0.36 * fbm2(p * 0.012 + float2(t * 0.012, 0.0));
         float ndh = max(dot(Nw, normalize(L + V)), 0.0);
         float3 c = mix(body, skyBase(R, f), fres) + f.sunColor.rgb * (pow(ndh, 700.0) * 6.0 + pow(ndh, 60.0) * 0.25) * shadow;
-        return shade(mix(c, haze, fog), mix(in.col.a, 1.0, fres), f);
+        // foam where the water runs out onto the shore: lines that drift in and fade
+        float shallow = 1.0 - smoothstep(0.27, 0.46, in.col.a);
+        float wash = vnoise(p * 0.9 + float2(t * 0.25, t * 0.1)) + 0.25 * sin(t * 0.7 + p.x * 0.11 + p.y * 0.07);
+        float foam = shallow * smoothstep(0.52, 0.8, wash) * (0.55 + 0.45 * vnoise(p * 7.0 + t * 0.3));
+        c = mix(c, (f.ambient.rgb * 1.3 + f.sunColor.rgb * 0.5 * shadow) * 0.85, foam);
+        return shade(mix(c, haze, fog), max(mix(in.col.a, 1.0, fres), foam), f);
     }
     if (material == 1) {
         // cloud shadows drifting over the landscape
@@ -277,6 +387,7 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     float3 gndAmb = skyAmb * float3(0.45, 0.42, 0.36);
     float3 amb = mix(gndAmb, skyAmb, N.y * 0.5 + 0.5);
     float3 col = albedo * (amb + f.sunColor.rgb * ndl * shadow);
+    if (material == 1) col += f.sunColor.rgb * groundSparkle * shadow * 1.5;
     if (material == 5) {
         // light shining through leaves when looking toward the sun
         col += albedo * f.sunColor.rgb * float3(0.9, 1.0, 0.55) * 0.35 * pow(saturate(dot(-V, L)), 3.0) * shadow;

@@ -31,7 +31,9 @@ extension MeshBuilder {
             for j in 0..<seg {
                 let th = Float(j) / Float(seg) * 2 * .pi
                 let d = V3(cos(th) * cos(phi), sin(phi), sin(th) * cos(phi))
-                let n = 1 + lump * cos(phi) * 2 * (vnoise(d.x * 2.1 + 7.3, d.z * 2.1 + d.y * 1.7 + 3.1, seed) - 0.5)
+                // two sizes of lump: the broad shape of the crown, and the bunches of leaves on it
+                let n = 1 + lump * cos(phi) * (2 * (vnoise(d.x * 2.1 + 7.3, d.z * 2.1 + d.y * 1.7 + 3.1, seed) - 0.5)
+                                               + 1.1 * (vnoise(d.x * 6.3 + 1.7, d.z * 6.3 + d.y * 5.1 + 9.4, seed &+ 5) - 0.5))
                 rp.append(center + d * radii * n)
                 rn.append(normalize(d / radii))
                 let t = (d.y + 1) / 2
@@ -91,7 +93,7 @@ extension Terrain {
     private func deciduous(_ b: inout MeshBuilder, _ t: Tree, _ rng: inout LCG, detail: Bool, autumn: Bool = false) {
         let h = t.h, g = rng.next()
         let bark = leaf(0.27 + 0.06 * g, 0.2 + 0.04 * g, 0.14)
-        b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.45, 0), r0: h * 0.035, r1: h * 0.018, seg: detail ? 7 : 5, color: bark)
+        b.cylinder(from: t.p - V3(0, 0.2, 0), to: t.p + V3(0, h * 0.45, 0), r0: h * 0.045, r1: h * 0.022, seg: detail ? 8 : 5, color: bark)
         let hue = rng.next()
         // autumn woods run from yellow through orange to deep red, with the odd tree still green
         let green = !autumn ? leaf(0.13 + 0.14 * hue, 0.30 + 0.14 * g, 0.07 + 0.05 * hue)
@@ -102,15 +104,19 @@ extension Terrain {
                 let a = Float(k) * 2.1 + g * 6
                 b.cylinder(from: t.p + V3(0, h * (0.3 + 0.05 * Float(k)), 0), to: t.p + V3(cos(a) * h * 0.2, h * 0.55, sin(a) * h * 0.2), r0: h * 0.014, r1: h * 0.006, seg: 5, color: bark)
             }
-            b.blob(center: t.p + V3(0, h * 0.68, 0), radii: V3(h * 0.26, h * 0.3, h * 0.26), color: green, seg: 9, rings: 6, seed: seed, lump: 0.22, sway: 2)
-            for k in 0..<5 {
-                let a = Float(k) * 1.257 + g * 6, r = h * rng.range(0.16, 0.24)
-                let c = t.p + V3(cos(a) * h * 0.2, h * rng.range(0.5, 0.74), sin(a) * h * 0.2)
-                b.blob(center: c, radii: V3(r, r * 0.85, r), color: shade(green, rng.range(0.85, 1.12)), seg: 8, rings: 5, seed: seed &+ Int32(k), lump: 0.25, sway: 2)
+            // a crown is a core with boughs of leaves all round it and a few on top, each its own shade
+            b.blob(center: t.p + V3(0, h * 0.66, 0), radii: V3(h * 0.25, h * 0.29, h * 0.25), color: shade(green, 0.86), seg: 11, rings: 7, seed: seed, lump: 0.3, sway: 2)
+            for k in 0..<9 {
+                let top = k >= 6
+                let a = Float(k) * 1.05 + g * 6, r = h * rng.range(0.13, 0.21) * (top ? 0.9 : 1)
+                let out = h * (top ? rng.range(0.04, 0.12) : rng.range(0.17, 0.25))
+                let c = t.p + V3(cos(a) * out, h * (top ? rng.range(0.8, 0.9) : rng.range(0.48, 0.74)), sin(a) * out)
+                b.blob(center: c, radii: V3(r, r * rng.range(0.7, 0.9), r), color: shade(green, rng.range(0.78, 1.2)), seg: 9, rings: 6, seed: seed &+ Int32(k), lump: 0.34, sway: 2)
             }
         } else {
-            b.blob(center: t.p + V3(0, h * 0.66, 0), radii: V3(h * 0.3, h * 0.34, h * 0.3), color: green, seg: 7, rings: 4, seed: seed, lump: 0.25, sway: 2)
-            b.blob(center: t.p + V3(h * 0.14, h * 0.52, h * 0.08), radii: V3(h * 0.2, h * 0.2, h * 0.2), color: shade(green, 0.9), seg: 6, rings: 3, seed: seed &+ 1, lump: 0.25, sway: 2)
+            b.blob(center: t.p + V3(0, h * 0.66, 0), radii: V3(h * 0.29, h * 0.33, h * 0.29), color: green, seg: 8, rings: 5, seed: seed, lump: 0.36, sway: 2)
+            b.blob(center: t.p + V3(h * 0.15, h * 0.52, h * 0.08), radii: V3(h * 0.2, h * 0.19, h * 0.2), color: shade(green, 0.86), seg: 6, rings: 4, seed: seed &+ 1, lump: 0.36, sway: 2)
+            b.blob(center: t.p + V3(-h * 0.12, h * 0.6, -h * 0.13), radii: V3(h * 0.19, h * 0.18, h * 0.19), color: shade(green, 1.12), seg: 6, rings: 4, seed: seed &+ 2, lump: 0.36, sway: 2)
         }
     }
 

@@ -1059,6 +1059,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let z = Int(arg("--zoom") ?? "") { game.zoomMode = z }
         if let t = Int(arg("--tod") ?? "") { game.timeOfDay = t }
         if CommandLine.arguments.contains("--auto") { game.autopilotOn = true }
+        if CommandLine.arguments.contains("--mute") { game.sound.muted = true }
         if CommandLine.arguments.contains("--balloons") { game.toggleChallenge() }
         let args = CommandLine.arguments
         if args.contains("--smoke") { game.smokeOn = true }
