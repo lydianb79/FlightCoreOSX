@@ -719,16 +719,67 @@ func measuredMargin(_ spec: AircraftSpec, throttle: Float) -> Float {
     return abs(dL) > 1e-4 ? -(b.moment - a.moment) / dL / spec.mac : 0
 }
 
+/// Elevator (-1...1, positive up) that holds the aircraft level at a throttle setting, and the speed it settles at
+/// as a multiple of the stall speed. Found by flying it with a simple height-holding pilot.
+func levelElevator(_ spec: AircraftSpec, throttle: Float, seconds: Float = 16, dt: Float = 0.001) -> (elev: Float, speed: Float) {
+    let ac = Aircraft(spec); ac.unlimitedBattery = true
+    ac.reset(pos: V3(0, 400, 0), heading: 0, speed: spec.stallSpeed * 2)
+    var c = Controls(); c.throttle = throttle
+    let ground = calibrationGround
+    var integ: Float = 0, sumE: Float = 0, sumV: Float = 0, n: Float = 0
+    let steps = Int(seconds / dt)
+    for i in 0..<steps {
+        let fwd = ac.forward, right = ac.q.act(V3(1, 0, 0))
+        let pitch = asin(clampf(fwd.y, -1, 1))
+        let want = clampf(-0.06 * ac.vel.y - 0.01 * (ac.pos.y - 400), -0.3, 0.3)
+        integ = clampf(integ + (want - pitch) * 1.5 * dt, -1, 1)
+        c.elevator = clampf((want - pitch) * 2.5 - ac.omega.x * 0.25 + integ, -1, 1)
+        c.aileron = clampf(right.y * 2.5 - ac.omega.z * 0.15, -1, 1)
+        ac.step(dt: dt, c: c, terrain: ground, wind: .zero, rollMu: 0)
+        if i >= steps * 3 / 4 { sumE += c.elevator; sumV += length(ac.vel); n += 1 }
+    }
+    return (sumE / n, sumV / n / spec.stallSpeed)
+}
+
+/// Angle the thrust line up or down so that opening the throttle does not pitch the nose up. A model trimmed to fly
+/// level at cruise climbs when it goes faster; modellers cure that with a few degrees of down thrust, found by test
+/// flying, and so does this: the aircraft is flown level at full throttle and the motor angled until that takes
+/// almost no elevator. Flat foam planes keep their straight thrust line.
+func tuneThrustLine(_ spec0: AircraftSpec) -> AircraftSpec {
+    guard spec0.kind == .airplane, !spec0.props.isEmpty, spec0.category != "Foam 3D", spec0.construction != "Flat foam" else { return spec0 }
+    func angled(_ d: Float) -> AircraftSpec {
+        var s = spec0
+        for i in s.props.indices { var a = s.props[i].axis; a.y -= sin(d); s.props[i].axis = normalize(a) }
+        return s
+    }
+    let target: Float = -0.015                  // a trace of climb with power is natural
+    let e0 = levelElevator(spec0, throttle: 1, seconds: 8, dt: 0.002).elev
+    if abs(e0 - target) < 0.012 { return spec0 }
+    let probe = 3 * deg
+    let e1 = levelElevator(angled(probe), throttle: 1, seconds: 8, dt: 0.002).elev
+    let slope = (e1 - e0) / probe
+    guard abs(slope) > 0.02 else { return spec0 }
+    return angled(clampf((target - e0) / slope, -9 * deg, 9 * deg))
+}
+
 /// Set the tailplane's incidence (or a tailless wing's reflex) so the aircraft flies level, hands off, at its
 /// cruising speed. Without this a model balanced for slow flight pitches up as soon as it gathers speed.
-func trimForCruise(_ spec0: AircraftSpec) -> AircraftSpec {
+func trimForCruise(_ spec0: AircraftSpec, powered: Bool = false) -> AircraftSpec {
     var spec = spec0
     guard spec.kind == .airplane else { return spec }
     let glider = spec.category == "Gliders"
     // near-neutral aerobats and 3D models barely change speed with trim, and fast jets need a margin above the stall
     let quick = spec.category == "Aerobatic" || spec.category == "Foam 3D"
     let k: Float = glider ? 1.3 : (quick || spec.category == "Jets" ? 1.8 : 1.5)
-    let v = spec.stallSpeed * k, thr: Float = glider ? 0 : (k > 1.6 ? 0.45 : 0.35)
+    var v = spec.stallSpeed * k, thr: Float = glider ? 0 : (k > 1.6 ? 0.45 : 0.35)
+    if powered {
+        // Second pass, for everything but gliders, aerobats and 3D models: trim for level flight at the throttle
+        // setting most flying is done at, at the speed the aircraft really reaches there. Trimmed for slow flight
+        // only, a model needs a hard push on the stick as soon as the throttle is opened.
+        if glider || quick || spec.props.isEmpty { return spec }
+        thr = Game.trimThrottle
+        v = spec.stallSpeed * max(levelElevator(spec, throttle: thr, seconds: 8, dt: 0.002).speed, 1.3)
+    }
     let tailless = !spec.surfaces.contains { $0.flapCh == 1 }
     func apply(_ d: Float, to s: inout AircraftSpec) {
         for i in s.surfaces.indices {
@@ -1516,7 +1567,7 @@ enum AircraftLibrary {
         let everything: [AircraftSpec] = [makeAirplane(trainer), makeAirplane(acro), makeAirplane(glider), makeAirplane(jet), heli, quad,
                 makeAirplane(park), makeAirplane(bush), makeAirplane(warbird), makeAirplane(twin), makeAirplane(bipe), makeAirplane(racer),
                 makeAirplane(sail), trainerHeli, bigHeli, racerQuad] + scale.pmap(makeAirplane) + foamies.pmap(makeAirplane) + more.pmap(makeAirplane) + seaplanes.pmap(makeAirplane) + flyingWings.pmap(makeAirplane) + more2.pmap(makeAirplane) + rotorcraft + moreWings.pmap(makeAirplane)
-        return everything.pmap { defaultRates(calibrateRates(trimForCruise($0))) }
+        return everything.pmap { defaultRates(calibrateRates(trimForCruise(tuneThrustLine(trimForCruise($0)), powered: true))) }
     }()
 }
 

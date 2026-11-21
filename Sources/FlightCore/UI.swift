@@ -200,6 +200,9 @@ struct HUDView: View {
                             .padding(.horizontal, 14).padding(.vertical, 6).glass(9).padding(.top, 8).allowsHitTesting(false)
                     }
                     Spacer()
+                    if s.showTrim {
+                        HStack { Spacer(); TrimGauge(m: m, trim: s.trim) }.padding(.horizontal, 14).padding(.bottom, 6)
+                    }
                     // bottom: sticks and telemetry
                     HStack(alignment: .bottom) {
                         StickView(x: s.lx, y: s.ly, label: s.leftLabel)
@@ -255,6 +258,41 @@ struct HUDView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Theme.red)
+    }
+}
+
+/// Pitch trim: a gauge with the trim position and an arrow on either side to move it a click at a time.
+private struct TrimGauge: View {
+    @ObservedObject var m: HUDModel
+    var trim: Int
+    private func arrow(_ icon: String, _ clicks: Int, _ help: String) -> some View {
+        Button { m.game.trim(clicks); m.objectWillChange.send() } label: {
+            Image(systemName: icon).font(.system(size: 10, weight: .heavy)).foregroundColor(Theme.cream)
+                .frame(width: 22, height: 22).background(RoundedRectangle(cornerRadius: 6).fill(Theme.cream.opacity(0.12)))
+        }
+        .buttonStyle(.plain).help(help)
+    }
+    var body: some View {
+        let w: CGFloat = 92, f = CGFloat(trim) / CGFloat(Game.trimMax)
+        VStack(spacing: 3) {
+            HStack(spacing: 6) {
+                arrow("arrowtriangle.left.fill", -1, "Trim nose down (−)")
+                ZStack {
+                    Capsule().fill(Theme.cream.opacity(0.16)).frame(width: w, height: 5)
+                    // from the centre out to the trim position
+                    Capsule().fill(Theme.red).frame(width: max(abs(f) * w / 2, 0.01), height: 5).offset(x: f * w / 4)
+                    Rectangle().fill(Theme.cream.opacity(0.7)).frame(width: 1.5, height: 11)
+                    RoundedRectangle(cornerRadius: 2).fill(Theme.cream).frame(width: 5, height: 15).offset(x: f * w / 2)
+                }
+                .frame(width: w + 8, height: 22).contentShape(Rectangle())
+                .onTapGesture(count: 2) { m.game.trim(0); m.objectWillChange.send() }
+                .help("Pitch trim. Double-click to centre (0)")
+                arrow("arrowtriangle.right.fill", 1, "Trim nose up (=)")
+            }
+            Text(trim == 0 ? "PITCH TRIM" : String(format: "PITCH TRIM %+d", trim)).font(.system(size: 8.5, weight: .heavy)).tracking(1.2).monospacedDigit()
+                .foregroundColor(Theme.cream.opacity(0.6))
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6).glass(10)
     }
 }
 

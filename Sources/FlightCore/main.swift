@@ -61,6 +61,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--soundtest"), i + 1 < CommandL
     exit(0)
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--trimthrottle"), i + 1 < CommandLine.arguments.count, let t = Float(CommandLine.arguments[i + 1]) { Game.trimThrottle = t }
 // Test and check runs make no sound: they build many games in a row, each of which would otherwise start playing its
 // idle engine and ambience through the speakers. Screenshots are silent too. (--perf keeps sound: it measures it.)
 do {
@@ -1021,6 +1022,27 @@ if let ci = CommandLine.arguments.firstIndex(of: "--flightsound"), ci + 3 < Comm
 if CommandLine.arguments.contains("--powerlist") {
     // what drives every aircraft, as shown in the aircraft browser
     for a in AircraftLibrary.all { print("\(a.category.padding(toLength: 17, withPad: " ", startingAt: 0)) \(a.name.padding(toLength: 32, withPad: " ", startingAt: 0)) \(a.powerPlant)") }
+    exit(0)
+}
+if CommandLine.arguments.contains("--powertest") {
+    // every airplane held level at full throttle and at half throttle: how much elevator that takes. Positive is
+    // up elevator (pull), negative is down (push). "stick" is the share of full stick travel on the aircraft's low rates.
+    let terrain = Terrain(site: SiteSpec.all[0])
+    _ = terrain
+    func hold(_ spec: AircraftSpec, _ thr: Float) -> (elev: Float, speed: Float) { levelElevator(spec, throttle: thr) }
+    var rows: [(String, String, Float, Float, Float, Float)] = []
+    for spec in AircraftLibrary.all where spec.kind == .airplane {
+        let full = hold(spec, 1), half = hold(spec, 0.5)
+        rows.append((spec.category, spec.name, full.elev, full.speed, half.elev, spec.lowRate))
+        print(String(format: "%@ %@ full throttle: %4.2f x stall, elevator %+4.0f%% (stick %+4.0f%%);  half throttle: elevator %+4.0f%%", spec.category.padding(toLength: 17, withPad: " ", startingAt: 0),
+                     spec.name.padding(toLength: 30, withPad: " ", startingAt: 0), full.speed, full.elev * 100, clampf(full.elev / max(spec.lowRate, 0.2), -1, 1) * 100, half.elev * 100))
+    }
+    for cat in Set(rows.map { $0.0 }).sorted() {
+        let r = rows.filter { $0.0 == cat }
+        print(String(format: "POWER %@ full throttle: stick %+4.0f%% on average, worst %+4.0f%%; half throttle elevator %+4.0f%%", cat.padding(toLength: 17, withPad: " ", startingAt: 0),
+                     r.map { clampf($0.2 / max($0.5, 0.2), -1, 1) }.reduce(0, +) / Float(r.count) * 100, (r.map { clampf($0.2 / max($0.5, 0.2), -1, 1) }.min() ?? 0) * 100,
+                     r.map { $0.4 }.reduce(0, +) / Float(r.count) * 100))
+    }
     exit(0)
 }
 if CommandLine.arguments.contains("--glidetest") {

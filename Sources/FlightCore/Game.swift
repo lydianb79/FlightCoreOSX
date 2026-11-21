@@ -10,6 +10,7 @@ struct HUDState {
     var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0
     var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = "", config = ""
     var fps = 0
+    var trim = 0, showTrim = false
 }
 
 enum Overlay {
@@ -260,6 +261,8 @@ final class Game {
     /// Pitch trim in clicks, as on a transmitter: each click moves the elevator neutral a little. Kept per aircraft.
     private(set) var pitchTrim = 0
     static let trimStep: Float = 0.012, trimMax = 30
+    /// The throttle setting airplanes are trimmed to fly level at, hands off.
+    static var trimThrottle: Float = 0.55
     func trim(_ clicks: Int) {
         let t = clicks == 0 ? 0 : min(max(pitchTrim + clicks, -Game.trimMax), Game.trimMax)
         if t == pitchTrim && clicks != 0 { say(String(format: "Pitch trim at its limit (%+d)", t)); return }
@@ -267,6 +270,7 @@ final class Game {
         var all = UserDefaults.standard.dictionary(forKey: "pitchTrim") as? [String: Int] ?? [:]
         all[aircraft.spec.name] = t == 0 ? nil : t
         UserDefaults.standard.set(all, forKey: "pitchTrim")
+        hudTimer = 0                                            // show it on the gauge at once
         say(t == 0 ? "Pitch trim centred" : String(format: "Pitch trim %+d (%@)", t, t > 0 ? "nose up" : "nose down"))
     }
 
@@ -799,6 +803,7 @@ final class Game {
         case 4: s.lx = controls.aileron; s.ly = tY; s.rx = controls.rudder; s.ry = eY; s.leftLabel = "THR / AIL"; s.rightLabel = "ELE / RUD"
         default: s.lx = controls.rudder; s.ly = tY; s.rx = controls.aileron; s.ry = eY
         }
+        s.trim = pitchTrim; s.showTrim = spec.kind == .airplane && !autopilotOn
         s.rates = input.lowRates ? String(format: "Low %.0f%%", input.lowRateInUse * 100) : "High"
         if pitchTrim != 0 { s.rates += String(format: " rates · Trim %+d", pitchTrim) } else { s.rates += " rates" }
         var cfg: [String] = []
