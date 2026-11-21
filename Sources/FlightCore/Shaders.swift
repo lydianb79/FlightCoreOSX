@@ -147,6 +147,64 @@ static float sunShadow(depth2d<float> sh0, depth2d<float> sh1, sampler cmp, samp
     return min(s0, s1);
 }
 
+/// What a built surface is made of, drawn onto its plain colour: brick, boards, roof tiles, concrete, with the
+/// weathering that makes it look used. `kind`: 0 by colour and slope, 1 boarded wall, 2 tiled roof. Every pattern
+/// fades to its average when it gets smaller than a pixel.
+static float3 builtSurface(float3 albedo, float3 N, float3 wp, float fwp, int kind) {
+    float lum = dot(albedo, float3(0.3, 0.6, 0.1));
+    float ny = abs(N.y);
+    if (ny < 0.5) {
+        float3 t = normalize(float3(-N.z, 0.0, N.x));
+        float u = dot(wp, t), v = wp.y;
+        bool brick = kind == 0 && albedo.r > albedo.g * 1.45 && albedo.r > albedo.b * 1.6 && lum < 0.3 && lum > 0.015;
+        if (brick) {
+            float2 bs = float2(0.24, 0.08);
+            float row = floor(v / bs.y);
+            float2 g = float2(u / bs.x + 0.5 * fmod(abs(row), 2.0), v / bs.y);
+            float2 id = floor(g), fr = fract(g);
+            float lod = saturate(1.7 - fwp / bs.y * 1.3);
+            float mortar = max(1.0 - smoothstep(0.02, 0.07, fr.x), 1.0 - smoothstep(0.06, 0.2, fr.y));
+            float3 b = albedo * (0.72 + 0.56 * hash21(id));
+            albedo = mix(albedo * 0.97, mix(b, float3(0.3, 0.28, 0.25), mortar), lod);
+        } else if (kind == 1) {
+            // weatherboards: each overlaps the one below and casts a line of shadow on it
+            float bh = 0.17;
+            float fr = fract(v / bh), id = floor(v / bh);
+            float lod = saturate(1.7 - fwp / bh * 1.3);
+            float shadeB = (0.8 + 0.22 * fr) * (1.0 - 0.45 * (1.0 - smoothstep(0.0, 0.12, fr)));
+            shadeB *= 0.94 + 0.12 * hash21(float2(id, floor(u / 2.7 + id * 0.37)));
+            albedo *= mix(0.95, shadeB, lod);
+        } else if (lum > 0.2 && kind == 0) {
+            // render and concrete: fine blotches and the odd hairline crack
+            albedo *= 0.95 + 0.1 * vnoise(float2(u, v) * 2.3);
+        }
+        // rain streaks down the wall, and grime where it meets the ground
+        albedo *= 0.88 + 0.22 * vnoise(float2(u * 0.4, v * 0.07));
+        albedo *= 0.96 + 0.08 * vnoise(float2(u, v) * 5.0) * saturate(1.5 - fwp * 6.0);
+    } else if (ny < 0.97 && (kind == 2 || kind == 0)) {
+        // pitched roof: courses of tiles, each a little different, darker under the overlap
+        float3 t = normalize(float3(-N.z, 0.0, N.x));
+        float u = dot(wp, t), sl = wp.y / max(sqrt(1.0 - ny * ny), 0.2);
+        float2 ts = float2(0.3, 0.36);
+        float row = floor(sl / ts.y);
+        float2 g = float2(u / ts.x + 0.5 * fmod(abs(row), 2.0), sl / ts.y);
+        float2 id = floor(g), fr = fract(g);
+        float lod = saturate(1.7 - fwp / ts.x * 1.3);
+        float shadeT = (0.7 + 0.32 * fr.y) * (0.84 + 0.32 * hash21(id)) * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.08, fr.x)));
+        albedo *= mix(0.94, shadeT * 1.06, lod);
+        albedo *= 0.84 + 0.3 * vnoise(wp.xz * 0.55);                       // moss and weather
+    } else if (ny >= 0.97) {
+        // flat tops: felt, gravel or concrete, with its speckle; slabs have joints
+        albedo *= 0.86 + 0.28 * vnoise(wp.xz * 0.9);
+        albedo *= 1.0 + (hash21(floor(wp.xz * 38.0)) - 0.5) * 0.14 * saturate(1.5 - fwp * 55.0);
+        if (lum > 0.2 && abs(albedo.r - albedo.b) < 0.08) {
+            float2 j = abs(fract(wp.xz / 3.0) - 0.5);
+            albedo *= 1.0 - 0.35 * (1.0 - smoothstep(0.492, 0.498, max(j.x, j.y))) * saturate(1.5 - fwp * 12.0);
+        }
+    }
+    return albedo;
+}
+
 fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], constant Draw& d [[buffer(2)]],
                         depth2d<float> sh0 [[texture(0)]], depth2d<float> sh1 [[texture(1)]], sampler cmp [[sampler(0)]], sampler pt [[sampler(1)]]) {
     float3 toCam = f.camPos.xyz - in.wp;
@@ -156,10 +214,20 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
     float3 L = f.sunDir.xyz;
     float3 albedo = pow(in.col.rgb, float3(2.2));
     int material = int(d.params.x);
-    int shadowTaps = material == 6 ? 1 : (material == 0 ? 6 : 4);        // grass is dense and noisy: one tap is enough
+    int shadowTaps = material == 6 ? 1 : (material == 0 ? 6 : 4);
+    bool sceneryMat = material == 9;
+    if (sceneryMat) material = 0;        // grass is dense and noisy: one tap is enough
     float gloss = material == 0 ? in.col.a * d.params.y : 0.0;
     float shininess = 400.0;
     float groundSparkle = 0.0;
+    if (sceneryMat) {
+        // clubhouse, barns, sheds, tables and aprons: boards, tiles, concrete
+        float a = in.col.a;
+        int kind = abs(a - 0.021) < 0.004 ? 1 : (abs(a - 0.151) < 0.004 ? 2 : -1);
+        float fwp = max(length(dfdx(in.wp)), length(dfdy(in.wp)));
+        if (kind > 0 || (a < 0.06 && abs(N.y) > 0.97)) albedo = builtSurface(albedo, N, in.wp, fwp, max(kind, 0));
+        if (kind > 0) gloss = 0.02 * d.params.y;
+    }
     float3 haze = skyBase(normalize(float3(-V.x, 0.03, -V.z)), f);
     float fog = 1.0 - exp(-dist * f.sunColor.w);
 
@@ -234,12 +302,10 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
                 albedo *= 0.94 + 0.06 * sin(u * 9.0) * saturate(1.0 - fwp * 6.0);
                 albedo *= 1.0 - 0.12 * step(0.97, fract(u / 6.0)) * saturate(1.0 - fwp * 1.5);
             }
-            // weathering: streaks down the wall
-            albedo *= 0.9 + 0.2 * vnoise(float2(u * 0.35, v * 0.06));
-        } else {
-            // roofs: felt, gravel or tiles
-            albedo *= 0.85 + 0.3 * vnoise(in.wp.xz * 0.7);
         }
+        // what the wall or roof is made of (the glass keeps its own look)
+        float3 made = builtSurface(albedo, N, in.wp, fwp, 0);
+        albedo = mix(made, albedo, saturate(gloss * 1.2));
     }
     if (material == 1) {
         float2 p = in.wp.xz;
@@ -366,6 +432,14 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
                 ln = max(ln, band(az, 0.1, aa) * step(0.5, fract(ax / 9.0)) * step(ax, hl - 14.0));
                 ln = max(ln, step(hl - 9.0, ax) * step(ax, hl - 3.0) * step(0.45, fract(az / 1.3)) * step(az, hw - 1.3));
                 ln *= 0.75 + 0.25 * fbm(p * 3.0);                         // worn paint
+                // stone chippings showing through the tar, and cracks sealed with darker bitumen
+                float chip = hash21(floor(p * 140.0 + d36 * 3.0));
+                asp *= 1.0 + (chip - 0.5) * 0.32 * OCT(140.0);
+                asp += float3(0.03) * step(0.95, chip) * OCT(140.0);
+                float crack = abs(vnoise(p * 0.55 + 21.0) - 0.5);
+                float crack2 = abs(vnoise(p * 1.7 + 4.0) - 0.5);
+                asp *= 1.0 - 0.4 * (1.0 - smoothstep(0.0, 0.003 + fw * 0.3, crack)) * saturate(1.3 - fw * 6.0);
+                asp *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.003 + fw * 0.3, crack2)) * saturate(1.3 - fw * 12.0);
                 asp = mix(asp, float3(0.62), ln * lineFade);
                 albedo = mix(albedo, asp, inside);
                 gloss = mix(gloss, 0.1, inside);
@@ -380,6 +454,11 @@ fragment float4 sceneFS(VOut in [[stage_in]], constant Frame& f [[buffer(1)]], c
                 bumpAmt = mix(bumpAmt, 0.7, inside);
             } else {
                 float3 dirt = albedo * 0.82 + float3(0.01);
+                // two worn wheel tracks along the strip, and stones lying on it
+                float ruts = max(band(az - 1.1, 0.35, 0.5), band(az - 0.0, 0.25, 0.4) * 0.5) * (0.6 + 0.4 * d1);
+                dirt *= 1.0 - 0.16 * ruts;
+                float stone = hash21(floor(p * 14.0 + d12));
+                dirt *= 1.0 + (step(0.985, stone) * 0.5 - step(stone, 0.02) * 0.35) * OCT(14.0) * (type == 3 ? 0.3 : 1.0);
                 float mk = max(band(az - (hw - 0.4), 0.15, aa), band(az, 0.12, aa) * step(0.5, fract(ax / 12.0)));
                 dirt = mix(dirt, type == 3 ? float3(0.7, 0.16, 0.04) : float3(0.85, 0.82, 0.75), mk * lineFade * 0.8);
                 albedo = mix(albedo, dirt, inside);

@@ -402,6 +402,8 @@ extension Terrain {
 
     private func building(_ b: inout MeshBuilder, at c: V3, size: V3, wall: V4, roof: V4, facing: Float, porch: Bool) {
         var m = MeshBuilder()
+        // the gloss value marks what the surface is made of, for the shader: boarded wall, tiled roof
+        let wall = V4(wall.x, wall.y, wall.z, 0.021), roof = V4(roof.x, roof.y, roof.z, 0.151)
         let w = size.x / 2, d = size.z / 2, h = size.y, ridge = h + size.z * 0.28
         let trim = cg(0.92, 0.92, 0.9), glass = cg(0.2, 0.3, 0.4, 1)
         m.box(center: V3(0, 0.15, 0), size: V3(size.x + 0.2, 0.3, size.z + 0.2), color: cg(0.5, 0.5, 0.5))

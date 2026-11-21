@@ -380,7 +380,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let wv = game.env.windVec
         let wind2 = SIMD2<Float>(wv.x, wv.z) + SIMD2<Float>(0.6, 0.3)
         var world: [DrawItem] = []
-        if let mesh = sceneryMesh { world.append(DrawItem(mesh: mesh, model: .identity, spec: 1)) }
+        if let mesh = sceneryMesh { world.append(DrawItem(mesh: mesh, model: .identity, material: 9, spec: 1)) }
         if let mesh = districtMesh { world.append(DrawItem(mesh: mesh, model: .identity, material: 8)) }
         if let mesh = windsockMesh, !pano {
             let sp = game.env.windSpeed
