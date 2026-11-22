@@ -77,7 +77,7 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 
 - **Splash screen** at launch: the artwork flies in and settles, a band of light sweeps across it, and it gives way to the main menu. Any key or click continues, or it moves on by itself after a few seconds.
 - **Menu music** starts with the splash screen and plays in the main menu and the browsers. It fades out when you are cleared for take-off and fades back in when you return to the menu. The Music button in the main menu (or Simulation ▸ Menu Music On / Off) turns it off.
-- **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, and sets the graphics quality.
+- **Main menu** (Esc): shows the current aircraft and flying site with previews, starts the flight, opens the [Flight Academy](#flight-academy), and sets the graphics quality.
 - **Aircraft browser** (Tab, or click the aircraft name): category list, search, a rendered preview of every model, and a detail panel with description, difficulty and key figures, including what powers the model: a brushless electric motor, an electric ducted fan, a piston engine or a turboprop. **Select** takes the aircraft and returns to the main menu.
 - **Site browser** (click the site name): filters by type and landscape, search, and a preview, description, difficulty and conditions for each 3D and photo site, plus a button to add your own panorama. **Select** takes the site and returns to the main menu.
 - **Weather panel** (wind button in the top bar, or Weather in the main menu): presets from Calm to Stormy; wind speed and direction, gusts and lulls, turbulence and thermal strength; cloud cover, haze and six times of day from dawn to dusk on 3D sites; and on photo sites a light grade toward golden evening or dusk. Everything applies live.
@@ -87,6 +87,28 @@ To work on the code, open `Package.swift` in Xcode, or run it directly from the 
 A new site is loaded in the background, so the menus stay responsive: a 3D site is ready in about a tenth of a second, a photo site in about half a second. While a menu or browser is open the frozen scene behind it is redrawn only a few times a second, and the aircraft pictures are prepared in the meantime and kept on disk, so the browsers never wait for them.
 
 The last aircraft and site are remembered between launches, and both browsers reopen on the category or filter you last used. The interface uses the red, cream and black of the splash artwork.
+
+## Flight Academy
+
+*In the source after 2.0.0; not yet in the 2.0.0 download.*
+
+**Flight Academy** in the main menu teaches planes, helicopters and multirotors in nine chapters of five steps each.
+
+| | Beginner | Advanced | Professional |
+|---|---|---|---|
+| **Planes** | Take-off, Straight and level, Turns, The circuit, Landing | Stall and recovery, Loop, Aileron roll, Inverted flight, Dead-stick landing | Slow roll, Knife edge, Prop hang, Torque roll, Precision landing |
+| **Helicopters** | Lift-off and tail-in hover, Side-on hover, Nose-in hover, Hover square, Landing on a pad | Pirouette, Forward-flight circuit, Autorotation, Hover without levelling, Figure eight | Flip, Roll, Inverted hover, Inverted pirouette, Precision autorotation |
+| **Multirotors** | Take-off and hover, All orientations, Square, Climb and descend, Landing on a pad | Hover in acro, FPV gates, Figure eight in acro, Flip, Roll | Split-S, Power loop, Orbit, Race lap, Precision landing in wind |
+
+- **Order:** the steps of a chapter can be flown in any order. A chapter is complete with 4 of its 5 steps passed (80%), and completing a level opens the next one for that type of aircraft.
+- **Each step** explains what to do and how, then sets the aircraft, 3D scenery, view, weather, gyro and rates by itself. These are put back as they were when you leave the Academy.
+- **Start:** the count of three runs once the throttle stick is in the green band.
+- **Target box:** yellow, and green while you are in it as asked, with posts or an outline on the ground to judge the distance by. The next one shows in white, and the panel says which way the target is.
+- **Score:** 80% precision and 20% time. Time earns full marks up to a par and nothing at the limit, where the step ends. A step passes at 80%; a crash, running out of time or an unfinished task never passes.
+- **Gyro:** each step suggests a setting and you can change it. More help than suggested limits the score to 80%, which still passes.
+- **Again:** any step can be flown again, also when passed. The best score is kept, so a worse attempt never loses a pass. **Space** restarts a step, **Esc** pauses it, and the result offers the replay.
+
+Aircraft, scenery, view, weather and speed are locked during a step. Zoom, trim (for that step only), rates and pause work as usual.
 
 ## Aircraft
 
@@ -339,6 +361,8 @@ Every flight is recorded, up to its last two minutes. Press **R** to watch it ag
 | `District.swift` | Buildings of the industrial and city sites |
 | `Panorama.swift` | Photo sites |
 | `Renderer.swift`, `Shaders.swift` | Metal renderer and shader source |
+| `Academy.swift`, `AcademyCourse.swift`, `AcademySession.swift`, `AcademyUI.swift` | Flight Academy: scoring and progress, the 45 steps, session and screens |
+| `AcademyPilot.swift` | The test pilot of `--academytest` |
 | `Gyro.swift` | Airplane gyro: AS3X and stabilized mode |
 | `Game.swift` | Game loop, cameras, interface state |
 | `Replay.swift` | Flight recording and playback |
@@ -356,6 +380,8 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
+`--academytest` checks the Flight Academy: an instructor pilot has to pass all 45 steps through the game's own loop, on the step's rates, at two frame rates and two reaction times; pilots without the skill (hands off, flailing, only steering for the boxes) must not pass; and the rules, unlocking, locks and restoring of free flight are checked. Run it after any change to the flight model or a step. `--nosave` opens the app without reading or saving Academy progress.
+
 Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--launchtest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing, audio load and the time from reading the sticks to that frame reaching the screen; `--hidtest` for controllers.
 
 Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
@@ -364,7 +390,7 @@ Test, check and screenshot runs make no sound; only `--perf`, which measures the
 
 - Multiplayer and VR
 - Aircraft and airport editors
-- Flight-instructor lessons
+- A demonstration flight for each Academy step
 - Uneven ground on photo sites: the ground is one level or tilted plane, so a summit, a gully or a valley below the camera cannot be followed
 - Occlusion by photographed objects: the model is always drawn in front of the photo, even when it has flown behind a tree
 

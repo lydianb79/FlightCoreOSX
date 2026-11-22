@@ -13,6 +13,7 @@ struct HUDState: Equatable {
     var gyro = 0, gyroName = "OFF"
     var trim = 0, showTrim = false
     var replay = "", replayPos: Float = 0
+    var academy: AcademyHUD? = nil
     /// Everything but the frame rate, which wobbles from one update to the next.
     func equalsIgnoringTime(_ o: HUDState) -> Bool {
         var a = self, b = o
@@ -22,15 +23,24 @@ struct HUDState: Equatable {
 }
 
 enum Overlay {
-    case none, menu, aircraft, sites, environment, help, splash
+    case none, menu, aircraft, sites, environment, help, splash, academy, academyPause, academyResult
     /// The simulation is frozen while these are open.
-    var pausesSim: Bool { self == .menu || self == .aircraft || self == .sites || self == .splash }
+    var pausesSim: Bool {
+        switch self {
+        case .menu, .aircraft, .sites, .splash, .academy, .academyPause, .academyResult: return true
+        case .none, .environment, .help: return false
+        }
+    }
 }
 
 final class HUDModel: ObservableObject {
     @Published var s = HUDState()
     @Published var visible = true
     @Published var overlay = Overlay.none
+    /// What is picked in the Flight Academy.
+    @Published var academyTrack = Track.planes
+    @Published var academyLevel = Level.beginner
+    @Published var academyStep = ""
     @Published var fullscreen = false
     /// Set once the window is in place (full screen reached), so the splash animation starts on a still picture.
     @Published var splashGo = false
@@ -249,6 +259,7 @@ final class Game {
     var isFPV: Bool { cameraMode == 2 }
     /// Switch between the onboard (FPV) view and the view from outside. 3D sites only.
     func toggleFPV() {
+        if academyLocked { refuse("the view"); return }
         guard site.panorama == nil else { say("Photo sites use the pilot camera only"); return }
         if cameraMode == 2 { cameraMode = outsideCamera } else { outsideCamera = cameraMode; cameraMode = 2 }
         camSnap = true
@@ -256,7 +267,7 @@ final class Game {
     }
     var cameFromMenu = false        // browsers and panels return to the main menu when opened from it
     /// The flight is held: a menu or browser is open, or a panel that was opened from the main menu.
-    var simHeld: Bool { hud.overlay.pausesSim || (cameFromMenu && (hud.overlay == .environment || hud.overlay == .help)) }
+    var simHeld: Bool { hud.overlay.pausesSim || (cameFromMenu && (hud.overlay == .environment || hud.overlay == .help)) || (attempt != nil && hud.overlay == .help) }
     var fixedView: (eye: V3, target: V3)? = nil     // debug: absolute camera, heights above the pilot's ground
     var closeup: V3? = nil          // debug: fixed camera offset from the aircraft, in wingspans
     var flapSetting: Float = 0
@@ -266,6 +277,21 @@ final class Game {
     private var flight = FlightRecording(), lastFlight = FlightRecording(), recordT: Float = 0
     private(set) var replay: ReplayState?
     private var soundCheck = 0
+
+    // Flight Academy
+    var academyProgress = AcademyProgress(store: .standard)
+    private(set) var attempt: AcademyAttempt?
+    /// The step whose site is being loaded.
+    private(set) var pendingStep: AcademyStep?
+    private(set) var freeFlight: FreeFlight?
+    private var startAt = (pos: V3.zero, q: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1), vel: V3.zero)
+    private var resultTimer: Float = 0
+    /// For tests: stands in for the pilot's sticks.
+    var testSticks: ((Game) -> Controls)?
+    /// For tests: sites are built at once, on this thread.
+    var loadsAtOnce = false
+    private var academyLocked: Bool { attempt != nil || pendingStep != nil }
+    private func refuse(_ what: String) { say("Flight Academy: \(what) is set by the step") }
     private var rng = LCG(7)
     var challenge = false
     private var score = 0, challengeTime: Float = 0
@@ -330,6 +356,7 @@ final class Game {
         let t = clicks == 0 ? 0 : min(max(pitchTrim + clicks, -Game.trimMax), Game.trimMax)
         if t == pitchTrim && clicks != 0 { say(String(format: "Pitch trim at its limit (%+d)", t)); return }
         pitchTrim = t
+        if freeFlight != nil { hudTimer = 0; say(String(format: "Pitch trim %+d, for this step only", t)); return }
         var all = UserDefaults.standard.dictionary(forKey: "pitchTrim") as? [String: Int] ?? [:]
         all[aircraft.spec.name] = t == 0 ? nil : t
         UserDefaults.standard.set(all, forKey: "pitchTrim")
@@ -346,6 +373,11 @@ final class Game {
     }
 
     func resetAircraft() {
+        if let a = attempt { startStep(a.step); return }
+        placeAtStart()
+    }
+
+    private func placeAtStart() {
         stopReplay()
         if flight.duration > 1 { lastFlight = flight }
         flight = FlightRecording()
@@ -378,16 +410,24 @@ final class Game {
     }
 
     func selectAircraft(_ i: Int) {
-        guard i >= 0 && i < AircraftLibrary.all.count else { return }
+        if academyLocked { refuse("the aircraft"); return }
+        if freeFlight != nil { leaveAcademy() }
+        guard changeAircraft(i) else { return }
+        UserDefaults.standard.set(aircraft.spec.name, forKey: "lastAircraft")
+        say(aircraft.spec.name + " — " + aircraft.spec.blurb, 4)
+    }
+
+    @discardableResult
+    private func changeAircraft(_ i: Int) -> Bool {
+        guard i >= 0 && i < AircraftLibrary.all.count else { return false }
         stopReplay()
         aircraftIndex = i
         flight = FlightRecording(); lastFlight = FlightRecording()      // a recording only plays on the aircraft it was made with
         aircraft = Aircraft(AircraftLibrary.all[i])
         newSession()
         aircraftVersion += 1
-        resetAircraft()
-        UserDefaults.standard.set(aircraft.spec.name, forKey: "lastAircraft")
-        say(aircraft.spec.name + " — " + aircraft.spec.blurb, 4)
+        placeAtStart()
+        return true
     }
 
     /// Builds what the renderer needs for a site (meshes, the panorama texture) and the lighting of a photo site,
@@ -400,10 +440,26 @@ final class Game {
     var shownSite: SiteSpec { loadingSite ?? site }
     private var siteToken = 0
 
+    /// For tests: free flight set up without saving it as the last aircraft and site.
+    func selectTestFreeFlight(aircraft a: Int, site s: Int) {
+        changeAircraft(a)
+        loadSite(s) {}
+    }
+
     /// Change site. Building a site takes from a tenth of a second (3D) to most of a second (a photo site, whose
     /// eight-thousand-pixel photograph has to be decoded), so it is done in the background and the switch happens
     /// when it is ready; the menus stay responsive meanwhile.
     func selectSite(_ i: Int) {
+        if academyLocked { refuse("the scenery"); return }
+        if freeFlight != nil { leaveAcademy() }
+        loadSite(i) { [weak self] in
+            guard let self else { return }
+            UserDefaults.standard.set(self.site.name, forKey: "lastSite")
+            self.say(self.site.name, 3)
+        }
+    }
+
+    private func loadSite(_ i: Int, then: @escaping () -> Void) {
         guard i >= 0 && i < SiteSpec.all.count else { return }
         stopReplay()
         flight = FlightRecording(); lastFlight = FlightRecording()
@@ -411,6 +467,12 @@ final class Game {
         let token = siteToken, spec = SiteSpec.all[i], prep = prepareSite
         loadingSite = spec
         hud.objectWillChange.send()
+        if loadsAtOnce {
+            let t = Terrain(site: spec)
+            applySite(i, spec, t, nil, nil)
+            then()
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let t = Terrain(site: spec)
             let made = prep?(spec, t)
@@ -418,6 +480,8 @@ final class Game {
             DispatchQueue.main.async {
                 guard let self, self.siteToken == token else { return }
                 self.applySite(i, spec, t, light, made?.visuals)
+                then()
+                self.hud.objectWillChange.send()
             }
         }
     }
@@ -438,9 +502,7 @@ final class Game {
         stopReplay()
         // what was recorded while the site loaded belongs to the site before
         flight = FlightRecording(); lastFlight = FlightRecording()
-        resetAircraft()
-        UserDefaults.standard.set(site.name, forKey: "lastSite")
-        say(site.name, 3)
+        placeAtStart()
         hud.objectWillChange.send()
     }
 
@@ -459,6 +521,7 @@ final class Game {
     }
 
     func toggleChallenge() {
+        if academyLocked || freeFlight != nil { refuse("the challenge"); return }
         challenge.toggle()
         if challenge { spawnBalloons(); say("Balloon Burst — pop all 10 balloons!", 4) } else { balloons = []; say("Challenge off") }
     }
@@ -476,6 +539,15 @@ final class Game {
     func keyDown(_ k: UInt16) {
         // in a replay: P pause, T slow motion, C camera, Z zoom, V display and M sound work as in flight
         if replay != nil && ![35, 17, 8, 6, 9, 46].contains(k) { replayKey(k); return }
+        if academyLocked && replay == nil {
+            switch k {
+            case 8, 100: refuse("the view"); return
+            case 17: refuse("the speed"); return
+            case 40: refuse("the pilot: you"); return
+            case 43, 47: refuse("the weather"); return
+            default: break
+            }
+        }
         switch k {
         case 49: if held { launch() } else { resetAircraft() }  // Space: throw a model held in the hand, otherwise reset
         case 15: startReplay()
@@ -637,8 +709,14 @@ final class Game {
         if fpsTime >= 0.5 { fps = Int(Float(frames) / fpsTime + 0.5); frames = 0; fpsTime = 0 }
 
         applyBindings()
+        syncAcademy()
         if replay != nil { replayFrame(dt); return }
-        if autopilotOn && !aircraft.crashed {
+        holdStepSetup()
+        if let pilot = testSticks {
+            controls = pilot(self)
+            controls.mode = flightMode
+            controls.rotorSpeed = rotorSpeed
+        } else if autopilotOn && !aircraft.crashed {
             controls = autopilot.update(aircraft, terrain: terrain, dt: dt)
             _ = input.poll(dt: dt, kind: aircraft.spec.kind)
         } else {
@@ -671,7 +749,14 @@ final class Game {
         // on a hillside the model is held until the throttle is opened, so it does not roll away
         if site.slope != 0, site.panorama != nil, aircraft.onGround, controls.throttle < 0.06, length(aircraft.vel) < 2 { controls.brake = 1 }
         controls.flaps = flapSetting; controls.gearUp = gearUp; controls.hold = hold
-        aircraft.unlimitedBattery = unlimitedBattery || autopilotOn
+        let throttleStick = controls.throttle
+        if let a = attempt, a.phase != .waiting {
+            // the failure the step is about
+            if a.step.failure == .engineCut { controls.throttle = 0 }
+            if a.step.failure == .throttleHold { controls.hold = true }
+        }
+        let pinned = attempt?.phase == .waiting
+        aircraft.unlimitedBattery = unlimitedBattery || autopilotOn || attempt != nil
         if aircraft.spec.kind == .airplane && aircraft.battery < 0.15 && !warnedBattery { warnedBattery = true; say(aircraft.spec.burnsFuel ? "Fuel low — land soon" : "Battery low — land soon", 4) }
 
         if !paused && !simHeld {
@@ -682,6 +767,7 @@ final class Game {
                 aircraft.step(dt: h, c: controls, terrain: terrain, wind: env.wind(at: aircraft.pos, terrain: terrain), rollMu: site.rollMu)
                 // in the hand: the motor and the control surfaces respond, the model stays put
                 if held { aircraft.pos = heldPos; aircraft.vel = .zero; aircraft.omega = .zero; aircraft.q = heldQ; aircraft.onGround = false }
+                if pinned { aircraft.pos = startAt.pos; aircraft.vel = startAt.vel; aircraft.omega = .zero; aircraft.q = startAt.q; aircraft.crashed = false }
                 acc -= h
             }
             touchQuiet -= dt
@@ -694,11 +780,12 @@ final class Game {
             aircraft.touchImpact = 0
             let sdt = dt * timeScale
             if sdt > 0 { climb += ((aircraft.pos.y - lastY) / sdt - climb) * min(1, dt * 4); lastY = aircraft.pos.y }
-            if sdt > 0 && !held { recordT += sdt; flight.add(aircraft.recordFrame(t: recordT, sticks: controls)) }
+            if sdt > 0 && !held && !pinned { recordT += sdt; flight.add(aircraft.recordFrame(t: recordT, sticks: controls)) }
             postStep(sdt)
+            stepAcademy(sdt, throttle: throttleStick)
         }
         let before = aircraft.renderPos
-        aircraft.updateRenderPose(ahead: paused || simHeld || aircraft.crashed || Game.noInterp ? 0 : acc)
+        aircraft.updateRenderPose(ahead: paused || simHeld || pinned || aircraft.crashed || Game.noInterp ? 0 : acc)
         // --perf: how much simulated time this frame's picture advanced by
         let sp = length(aircraft.vel)
         if sp > 3 && Renderer.collectStats { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
@@ -709,12 +796,195 @@ final class Game {
         if hudTimer <= 0 { hudTimer = 0.08; updateHUD() }
     }
 
+    // MARK: Flight Academy
+
+    func openAcademy() {
+        attempt = nil; pendingStep = nil
+        stopReplay()
+        paused = false
+        hud.overlay = .academy
+    }
+
+    /// Escape, inside the Academy. False: not the Academy's to handle.
+    func academyEscape() -> Bool {
+        switch hud.overlay {
+        case .academy: closeAcademy()
+        case .academyPause: hud.overlay = .none
+        case .academyResult: openAcademy()
+        case .help where attempt != nil: hud.overlay = .none
+        default: return false
+        }
+        return true
+    }
+
+    func closeAcademy() {
+        leaveAcademy()
+        hud.overlay = .menu
+    }
+
+    /// Fly a step: its scenery, aircraft, view, weather and gyro, held until the throttle is right and the count is down.
+    func startStep(_ step: AcademyStep) {
+        guard academyProgress.open(step.track, step.level), let ac = step.aircraftIndex, let si = step.siteIndex else { return }
+        stopReplay()
+        if freeFlight == nil {
+            freeFlight = FreeFlight(aircraft: aircraftIndex, site: shownSite.name, gyro: flightMode, lowRates: input.lowRates, rotorSpeed: rotorSpeed, trim: pitchTrim,
+                                    camera: cameraMode, zoom: zoomMode, timeOfDay: timeOfDay, hudVisible: hud.visible, challenge: challenge, smoke: smokeOn,
+                                    windSpeed: env.windSpeed, windFrom: env.windFrom, turbulence: env.turbulence, gustiness: env.gustiness,
+                                    thermalsOn: env.thermalsOn, thermalStrength: env.thermalStrength, cloud: env.cloud, haze: env.haze)
+        }
+        attempt = nil; pendingStep = step
+        autopilotOn = false; challenge = false; balloons = []; smokeOn = false
+        if aircraftIndex != ac { changeAircraft(ac) }
+        if siteIndex != si || site.panorama != nil || loadingSite != nil {
+            loadSite(si) { [weak self] in
+                guard let self, self.pendingStep?.id == step.id else { return }
+                self.beginAttempt(step)
+            }
+        } else {
+            beginAttempt(step)
+        }
+        hud.objectWillChange.send()
+    }
+
+    private func beginAttempt(_ step: AcademyStep) {
+        pendingStep = nil
+        env.configure(site)         // the same air for every attempt
+        newSession()
+        placeAtStart()
+        pitchTrim = 0
+        input.lowRates = !step.highRates
+        flightMode = step.gyro
+        timeOfDay = Game.time(forSite: site.defaultTime)
+        zoomMode = 1
+        launchAge = 100
+        particles = []
+        startAt = step.startPose(aircraft, terrain)
+        aircraft.pos = startAt.pos; aircraft.q = startAt.q; aircraft.vel = startAt.vel
+        for i in aircraft.levels.indices where aircraft.spec.kind != .helicopter { aircraft.levels[i] = step.start.airborne ? 0.5 : 0 }
+        lastY = aircraft.pos.y
+        input.kbThrottle = step.throttleHint(aircraft.spec)
+        input.keys.removeAll()
+        attempt = AcademyAttempt(step)
+        resultTimer = 0; acc = 0
+        paused = false; timeScale = 1
+        hud.visible = true
+        cameFromMenu = false
+        hud.overlay = .none
+        messageTimer = 0; hudTimer = 0
+        holdStepSetup()
+    }
+
+    /// What a step fixes, put back every frame, whichever key, switch or menu item changed it.
+    private func holdStepSetup() {
+        guard let a = attempt else { return }
+        let w = a.step.weather
+        env.windSpeed = w.wind; env.windFrom = w.from; env.turbulence = w.turbulence; env.gustiness = w.gusts
+        env.thermalsOn = false
+        timeOfDay = Game.time(forSite: site.defaultTime)
+        timeScale = 1
+        autopilotOn = false
+        if cameraMode != a.step.view.cameraMode { cameraMode = a.step.view.cameraMode; camSnap = true }
+    }
+
+    /// Menus and shortcuts can open any screen: while in the Academy they come out at its own.
+    private func syncAcademy() {
+        if attempt != nil {
+            switch hud.overlay {
+            case .none, .help, .academyPause, .academyResult: break
+            case .academy: attempt = nil; stopReplay()
+            case .menu, .aircraft, .sites, .environment, .splash: hud.overlay = attempt?.phase == .finished ? .academyResult : .academyPause
+            }
+        } else if freeFlight != nil && pendingStep == nil && hud.overlay != .academy {
+            leaveAcademy()
+        } else if pendingStep != nil && hud.overlay != .academy && hud.overlay != .academyResult && hud.overlay != .academyPause {
+            // closed while the scenery was loading
+            leaveAcademy()
+        }
+    }
+
+    private func stepAcademy(_ dt: Float, throttle: Float) {
+        guard let a = attempt, dt > 0 else { return }
+        switch a.phase {
+        case .waiting:
+            a.wait(dt: dt, throttle: throttle)
+        case .flying:
+            a.update(aircraft, terrain: terrain, dt: dt, gyro: flightMode)
+            if a.phase == .finished, let r = a.result {
+                academyProgress.record(r, for: a.step)
+                hudTimer = 0
+            }
+        case .finished:
+            resultTimer += dt
+            if resultTimer > (a.result?.reason.isEmpty == true ? 0.9 : 1.5) && !hud.overlay.pausesSim { hud.overlay = .academyResult }
+        }
+    }
+
+    /// Watch the attempt again; leaving the replay comes back to the result.
+    func replayAttempt() {
+        guard attempt?.phase == .finished else { return }
+        hud.overlay = .none
+        startReplay()
+        if replay == nil { hud.overlay = .academyResult }
+    }
+
+    /// Back to free flight, just as it was set up.
+    private func leaveAcademy() {
+        attempt = nil; pendingStep = nil
+        stopReplay()
+        guard let f = freeFlight else { return }
+        freeFlight = nil
+        changeAircraft(f.aircraft)
+        flightMode = min(f.gyro, aircraft.spec.modes.count - 1)
+        input.lowRates = f.lowRates; rotorSpeed = f.rotorSpeed; pitchTrim = f.trim
+        timeScale = 1; paused = false
+        let finish = { [weak self] in
+            guard let self else { return }
+            let e = self.env
+            e.windSpeed = f.windSpeed; e.windFrom = f.windFrom; e.turbulence = f.turbulence; e.gustiness = f.gustiness
+            e.thermalsOn = f.thermalsOn; e.thermalStrength = f.thermalStrength; e.cloud = f.cloud; e.haze = f.haze
+            self.cameraMode = self.site.panorama != nil ? 0 : f.camera
+            self.zoomMode = f.zoom; self.timeOfDay = f.timeOfDay
+            self.smokeOn = f.smoke; self.hud.visible = f.hudVisible
+            self.challenge = f.challenge
+            if f.challenge { self.spawnBalloons() }
+            self.camSnap = true
+        }
+        let home = SiteSpec.all.firstIndex { $0.name == f.site } ?? siteIndex
+        if home != siteIndex || site.name != f.site || loadingSite != nil { loadSite(home, then: finish) } else { finish() }
+        hud.objectWillChange.send()
+    }
+
+    private func academyPanel(throttle: Float) -> AcademyHUD? {
+        guard let a = attempt, replay == nil else { return nil }
+        var h = AcademyHUD()
+        h.title = "\(a.step.track.title) · \(a.step.level.title) · \(a.step.title)"
+        let left = Int(a.timeLeft.rounded(.up))
+        h.clock = String(format: "%d:%02d", left / 60, left % 60)
+        h.hurry = a.phase == .flying && a.timeLeft < 10
+        h.waiting = a.phase == .waiting
+        h.ready = a.throttleReady
+        h.countdown = min(Int(max(a.countdown, 0).rounded(.up)), Int(AcademyRules.countdown))
+        h.throttle = throttle; h.bandLow = a.step.start.throttle.lowerBound; h.bandHigh = a.step.start.throttle.upperBound
+        h.gyroHelp = max(a.mostHelp, flightMode) > a.step.gyro
+        if let t = a.task {
+            h.task = t.text
+            h.count = "\(a.index + 1) of \(a.step.tasks.count)"
+            h.whereTo = directions(to: t.box.world(terrain), from: aircraft.pos, eye: eye, target: target, onboard: a.step.view == .fpv)
+            h.progress = a.progress
+            h.note = a.note
+        } else {
+            h.task = "Step finished"
+        }
+        return h
+    }
+
     // MARK: Replay
 
     /// R: watch the flight again, from ten seconds before its end. Right after a reset that is the flight before.
     func startReplay() {
         if replay != nil { stopReplay(); return }
-        let rec = flight.duration >= 3 || lastFlight.duration < 1 ? flight : lastFlight
+        if let a = attempt, a.phase != .finished { say("Flight Academy: the replay is there when the step is over"); return }
+        let rec = attempt != nil || flight.duration >= 3 || lastFlight.duration < 1 ? flight : lastFlight
         guard rec.duration >= 1 else { say("Nothing recorded yet: fly, then press R to watch it again"); return }
         let viewer = Aircraft(aircraft.spec)
         replay = ReplayState(recording: rec, t: max(0, rec.duration - 10), live: aircraft, viewer: viewer)
@@ -727,6 +997,7 @@ final class Game {
         guard let r = replay else { return }
         aircraft = r.live; replay = nil
         paused = false; camSnap = true; input.keys.removeAll()
+        if attempt?.phase == .finished { timeScale = 1; hud.overlay = .academyResult }
     }
 
     private func replayKey(_ k: UInt16) {
@@ -759,6 +1030,7 @@ final class Game {
     private func postStep(_ dt: Float) {
         let p = aircraft.pos
         if !p.x.isFinite || !p.y.isFinite || !p.z.isFinite || !terrain.contains(p) || p.y > 3000 {
+            if let a = attempt { a.fail("It flew out of range."); placeAtStart(); return }
             say("Out of range — aircraft reset"); resetAircraft(); return
         }
         if !aircraft.crashed {
@@ -816,7 +1088,7 @@ final class Game {
         updateEffects(dt)
         if aircraft.crashed {
             crashTimer += dt
-            if crashTimer > 3.5 { resetAircraft() }
+            if crashTimer > 3.5 && attempt == nil { resetAircraft() }       // in a step the result follows
         }
         if challenge {
             if score < balloons.count { challengeTime += dt }
@@ -948,6 +1220,15 @@ final class Game {
                 want = clampf(max(auto, 2 * (el + 3 * deg) * 1.08), 4 * deg, 105 * deg)
             default: want = 50 * deg
             }
+            // in a step the view opens up to keep the target box in it as well
+            if zoomMode < 2, replay == nil, let a = attempt, a.phase != .finished, let t = a.task, distance(p, eye) > 2 {
+                let b = t.box.world(terrain)
+                let off = acos(clampf(dot(normalize(p - eye), normalize(b - eye)), -1, 1))
+                // but never so far that the model is too small to fly: it keeps at least a 36th of the picture's height.
+                // Where that leaves the box outside, the panel says which way it is.
+                let readable = spec.span / max(distance(p, eye), 1) * 36
+                want = max(want, min(2.3 * off + 3 * deg, 68 * deg, readable))
+            }
             fov = camSnap ? want : fov + (want - fov) * min(1, dt * 3.5)
             target = camTarget; upVec = V3(0, 1, 0)
         case 1:
@@ -1056,6 +1337,7 @@ final class Game {
             s.replay = String(format: "%.1f / %.1f s", r.t, r.recording.duration) + (paused ? "  ·  paused" : "") + (timeScale < 1 ? String(format: "  ·  %.0f%% speed", timeScale * 100) : "")
             s.replayPos = r.t / max(r.recording.duration, 0.01)
         }
+        s.academy = academyPanel(throttle: controls.throttle)
         if aircraft.crashed { s.message = "CRASHED" }
         else if paused { s.message = "PAUSED" }
         else if messageTimer > 0 { s.message = message }

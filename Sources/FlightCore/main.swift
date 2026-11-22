@@ -1186,6 +1186,309 @@ if CommandLine.arguments.contains("--physicstest") {
     exit(0)
 }
 
+/// Steps that a pilot without the skill must not pass: hands off, flailing, or only steering for the boxes.
+func testAcademyUnskilled(_ g: Game) -> Int {
+    func needsSkill(_ s: AcademyStep) -> Bool {
+        s.tasks.contains { t in
+            switch t.kind {
+            case .rotate, .stall, .land: return true
+            case .pass(let via):
+                if via != nil { return true }
+                switch t.pose { case .inverted: return true; default: return false }
+            case .hold:
+                switch t.pose {
+                case .inverted, .knifeEdge, .noseUp: return true
+                case .heading(let d, _): return dot(normalize(d), normalize(s.start.dir)) < 0.9
+                default: return false
+                }
+            }
+        }
+    }
+    var bad = 0, tried = 0
+    var rng = LCG(99)
+    for step in AcademyCourse.all {
+        var hold = Controls(), kick = 0
+        var pilots: [(String, (Game) -> Controls)] = [
+            ("hands off", { g in
+                var c = Controls(); c.throttle = step.throttleHint(g.aircraft.spec); return c
+            }),
+            ("flailing", { g in
+                kick += 1
+                if kick % 20 == 1 { hold.aileron = rng.range(-0.5, 0.5); hold.elevator = rng.range(-0.5, 0.5); hold.rudder = rng.range(-0.5, 0.5); hold.throttle = rng.range(0, 1) }
+                if g.attempt?.phase == .waiting { var c = Controls(); c.throttle = step.throttleHint(g.aircraft.spec); return c }
+                return hold
+            }),
+        ]
+        let band = step.start.throttle
+        for t in [band.lowerBound, band.upperBound] {
+            pilots.append(("hands off, throttle \(t)", { _ in var c = Controls(); c.throttle = t; return c }))
+        }
+        pilots.append(("hands off, all the gyro help", { g in
+            if g.attempt?.phase == .waiting && g.flightMode < g.aircraft.spec.modes.count - 1 { g.cycleGyro() }
+            var c = Controls(); c.throttle = step.throttleHint(g.aircraft.spec); return c
+        }))
+        if needsSkill(step) {
+            let p = InstructorPilot(fps: 60); p.lazy = true
+            pilots.append(("boxes only", { p.sticks($0) }))
+        }
+        for (name, pilot) in pilots {
+            tried += 1
+            if let r = flyStep(g, step, fps: 60, pilot), r.passed {
+                bad += 1
+                let p = g.aircraft.pos
+                print("ACADEMY UNSKILLED \(step.id): \(name) passed with \(r.score)%, ending at \(Int(p.x)), \(Int(p.z))  FAIL")
+            }
+        }
+    }
+    print("ACADEMY UNSKILLED \(tried - bad)/\(tried) attempts without the skill did not pass")
+    return bad
+}
+
+/// The rules: pass mark, weights, gyro limit, unlocking, saving, and that nothing gets round a step's set-up.
+func testAcademyRules() -> Int {
+    var failed = 0, checks = 0
+    func check(_ ok: Bool, _ what: @autoclosure () -> String) {
+        checks += 1
+        if !ok { failed += 1; print("ACADEMY RULE \(what())  FAIL") }
+    }
+    func result(_ score: Int, time: Float = 10) -> StepResult {
+        StepResult(passed: score >= 80, score: score, precision: score, timeScore: score, time: time, capped: false, helped: false, reason: "")
+    }
+    func step(_ id: String) -> AcademyStep { AcademyCourse.all.first { $0.id == id }! }
+
+    check(AcademyCourse.all.count == 45 && Set(AcademyCourse.all.map { $0.id }).count == 45, "45 steps with their own ids")
+    check(AcademyRules.stepsToComplete == 4, "four of five complete a chapter")
+    for t in Track.allCases { for l in Level.allCases { check(AcademyCourse.steps(t, l).count == 5, "five steps in \(t) \(l)") } }
+    for s in AcademyCourse.all {
+        check(s.aircraftIndex.map { AircraftLibrary.all[$0].kind } == [AircraftKind.airplane, .helicopter, .multirotor][s.track.rawValue], "\(s.id) has the right kind of aircraft")
+        check(s.siteIndex.map { SiteSpec.all[$0].panorama == nil } == true, "\(s.id) is on a 3D site")
+        if let i = s.siteIndex, s.track != .planes {
+            // a machine near the ground must neither stand on a runway cone nor hide behind one from the pilot
+            let t = Terrain(site: SiteSpec.all[i]), eye = t.pilotPos + V3(0, 1.7, 0)
+            var spots = s.start.pos.y < 5 ? [s.start.pos] : []
+            for task in s.tasks {
+                switch task.kind {
+                case .hold where task.box.center.y < 5: spots.append(task.box.center)
+                case .land: spots.append(V3(task.box.center.x, 0, task.box.center.z))
+                default: break
+                }
+            }
+            for spot in spots {
+                let p = V3(spot.x, t.height(spot.x, spot.z) + spot.y + 0.2, spot.z)
+                for c in t.runwayCones {
+                    let top = V3(c.x, t.height(c.x, c.y) + 0.3, c.y)
+                    let d = p - eye, k = clampf(dot(top - eye, d) / dot(d, d), 0, 1)
+                    let aside = (top - (eye + d * k))
+                    check((spot.y > 1 || hypot(c.x - spot.x, c.y - spot.z) > 1.5) && (k >= 1 || hypot(aside.x, aside.z) > 0.6 || abs(aside.y) > 0.7), "\(s.id): a runway cone is in the way at \(c)")
+                }
+            }
+        }
+        check(s.par < s.limit && !s.goal.isEmpty && !s.how.isEmpty && !s.tasks.isEmpty, "\(s.id) is fully described")
+    }
+
+    // unlocking
+    for t in Track.allCases {
+        var p = AcademyProgress(store: nil)
+        let first = AcademyCourse.steps(t, .beginner), second = AcademyCourse.steps(t, .advanced)
+        check(p.open(t, .beginner) && !p.open(t, .advanced) && !p.open(t, .professional), "\(t) starts with Beginner")
+        for i in [4, 1, 2] { p.record(result(80), for: first[i]) }
+        p.record(result(79), for: first[0])
+        check(!p.open(t, .advanced), "\(t): three passes and a 79 do not open Advanced")
+        p.record(result(80), for: first[0])
+        check(p.open(t, .advanced) && !p.open(t, .professional), "\(t): four in any order open Advanced only")
+        for i in [3, 0, 4, 2] { p.record(result(90), for: second[i]) }
+        check(p.open(t, .professional), "\(t): four of Advanced open Professional")
+        for other in Track.allCases where other != t { check(!p.open(other, .advanced), "\(t) does not open \(other)") }
+        p.record(result(12), for: first[0]); p.record(result(95, time: 7), for: first[1]); p.record(result(85, time: 9), for: first[1])
+        check(p.records[first[0].id]?.best == 80 && p.records[first[0].id]?.attempts == 3 && p.open(t, .advanced), "\(t): doing a step again never loses a pass")
+        check(p.records[first[1].id]?.best == 95 && p.records[first[1].id]?.bestTime == 7, "\(t): best score and time are kept")
+    }
+
+    // saving
+    let suite = "FlightCoreAcademyTest"
+    let store = UserDefaults(suiteName: suite)!
+    store.removePersistentDomain(forName: suite)
+    var saved = AcademyProgress(store: store)
+    saved.record(result(88), for: AcademyCourse.all[7])
+    check(AcademyProgress(store: store).records == saved.records, "progress is saved and read back")
+    store.removePersistentDomain(forName: suite)
+
+    // locked chapters, scores
+    let g = academyTestGame(open: false)
+    g.startStep(step("plane.pro.hover"))
+    check(g.attempt == nil && g.pendingStep == nil, "a locked step cannot be started")
+
+    let open = academyTestGame(open: true)
+    let circuit = step("plane.beginner.circuit")
+    let helper = InstructorPilot(fps: 60)
+    var pressed = false
+    let helped = flyStep(open, circuit, fps: 60) { g in
+        if !pressed, g.attempt?.phase == .flying { pressed = true; g.cycleGyro() }
+        return helper.sticks(g)
+    }
+    check(helped?.score == 80 && helped?.capped == true && helped?.passed == true, "more gyro help stops at 80%, a pass: \(String(describing: helped))")
+    let level = step("plane.beginner.level"), plain = InstructorPilot(fps: 60)
+    var lowered = false
+    let less = flyStep(open, level, fps: 60) { g in
+        if !lowered, g.attempt?.phase == .waiting { lowered = true; g.cycleGyro() }       // Stabilized to Off
+        return plain.sticks(g)
+    }
+    check(less?.capped == false && less?.helped == false, "less help than suggested is not limited")
+    let pilot = InstructorPilot(fps: 60)
+    if let r = flyStep(open, step("heli.beginner.square"), fps: 60, { pilot.sticks($0) }) {
+        check(abs(r.score - Int(Float(r.precision) * 0.8 + Float(r.timeScore) * 0.2)) <= 1, "80% precision and 20% time: \(r)")
+    } else { check(false, "the square gave a result") }
+    var slow = step("heli.beginner.hover")
+    slow.par = 1; slow.limit = 60
+    let slower = InstructorPilot(fps: 60)
+    if let r = flyStep(open, slow, fps: 60, { slower.sticks($0) }) {
+        check(r.timeScore < 100 && r.score < r.precision + 1, "time over par costs marks: \(r)")
+    } else { check(false, "the slow hover gave a result") }
+    var short = step("heli.beginner.hover")
+    short.limit = 3; short.par = 2
+    let late = InstructorPilot(fps: 60)
+    let out = flyStep(open, short, fps: 60) { late.sticks($0) }
+    check(out?.passed == false && out?.reason == "Time is up.", "the time limit ends the step")
+
+    // the set-up cannot be got round, and free flight comes back
+    let f = academyTestGame(open: false)
+    f.loadsAtOnce = true
+    f.selectTestFreeFlight(aircraft: 20, site: 5)
+    f.flightMode = Gyro.on; f.cameraMode = 1; f.zoomMode = 2; f.timeOfDay = 4; f.env.windSpeed = 7; f.env.windFrom = 123; f.challenge = true
+    let was = (f.aircraft.spec.name, f.site.name)
+    f.openAcademy(); f.frame(dt: 1 / 60)
+    check(f.hud.overlay == .academy && f.freeFlight == nil && f.aircraft.spec.name == was.0, "looking round the Academy changes nothing")
+    let s = step("plane.beginner.takeoff")
+    f.testSticks = { _ in Controls() }
+    f.startStep(s); f.frame(dt: 1 / 60)
+    check(f.aircraft.spec.name == s.aircraft && f.site.name == s.site && f.cameraMode == 0 && f.flightMode == s.gyro && !f.challenge, "a step sets aircraft, scenery, view and gyro")
+    f.selectAircraft(60); f.selectSite(9)
+    for k: UInt16 in [45, 30, 33, 18, 8, 100, 17, 40, 11, 43, 47] { f.keyDown(k) }
+    f.toggleFPV(); f.toggleChallenge()
+    f.cameraMode = 2; f.timeScale = 0.25; f.timeOfDay = 5; f.env.windSpeed = 12; f.env.turbulence = 1; f.env.thermalsOn = true; f.autopilotOn = true
+    f.frame(dt: 1 / 60)
+    check(f.aircraft.spec.name == s.aircraft, "the aircraft is locked")
+    check(f.site.name == s.site, "the scenery is locked")
+    check(f.cameraMode == 0, "the view is locked")
+    check(f.timeScale == 1 && !f.autopilotOn && !f.challenge, "speed, pilot and challenge are locked")
+    check(f.env.windSpeed == s.weather.wind && f.env.turbulence == s.weather.turbulence && !f.env.thermalsOn, "the weather is locked")
+    for o in [Overlay.menu, .aircraft, .sites, .environment] {
+        f.hud.overlay = o; f.frame(dt: 1 / 60)
+        check(f.hud.overlay == .academyPause, "\(o) comes out at the pause screen")
+        f.hud.overlay = .none
+    }
+    f.testSticks = { _ in var c = Controls(); c.throttle = 0.9; return c }
+    for _ in 0..<300 { f.frame(dt: 1 / 60) }
+    check(f.attempt?.phase == .waiting, "the count waits for the throttle")
+    f.testSticks = { _ in Controls() }
+    for _ in 0..<240 { f.frame(dt: 1 / 60) }
+    check(f.attempt?.phase == .flying, "the count runs with the throttle in place")
+    let t0 = f.attempt?.time ?? -1
+    for o in [Overlay.academyPause, .help] {
+        f.hud.overlay = o
+        for _ in 0..<60 { f.frame(dt: 1 / 60) }
+        check(f.attempt?.time == t0, "the clock stands during \(o)")
+    }
+    f.hud.overlay = .none
+    f.keyDown(15)
+    check(f.replay == nil, "no replay in the middle of a step")
+    f.keyDown(49); f.frame(dt: 1 / 60)
+    check(f.attempt?.phase == .waiting && f.attempt?.time == 0, "Space restarts the step")
+    f.testSticks = { g in
+        var c = Controls()
+        if g.attempt?.phase == .flying { c.throttle = 1; c.aileron = 0.6; c.elevator = 0.6 }
+        return c
+    }
+    f.flightMode = Gyro.off
+    for _ in 0..<(80 * 60) { f.frame(dt: 1 / 60); if f.hud.overlay == .academyResult { break } }
+    check(f.hud.overlay == .academyResult && f.attempt?.result?.passed == false, "a failed attempt shows its result")
+    check(f.academyProgress.records[s.id]?.attempts == 1, "and is counted once")
+    f.replayAttempt(); f.frame(dt: 1 / 60)
+    check(f.replay != nil && f.hud.overlay == .none, "the attempt can be watched again")
+    f.keyDown(15); f.frame(dt: 1 / 60)
+    check(f.replay == nil && f.hud.overlay == .academyResult, "and the replay comes back to the result")
+    f.hud.overlay = .menu; f.frame(dt: 1 / 60)
+    check(f.hud.overlay == .academyResult, "the menu cannot drop out of a result")
+    f.openAcademy(); f.frame(dt: 1 / 60)
+    check(f.attempt == nil && f.freeFlight != nil, "All steps stays in the Academy")
+    f.closeAcademy(); f.frame(dt: 1 / 60)
+    check(f.freeFlight == nil && f.hud.overlay == .menu, "leaving ends the Academy")
+    check(f.aircraft.spec.name == was.0 && f.site.name == was.1, "aircraft and scenery come back")
+    check(f.flightMode == Gyro.on && f.cameraMode == 1 && f.zoomMode == 2 && f.timeOfDay == 4, "gyro and view come back")
+    check(f.env.windSpeed == 7 && f.env.windFrom == 123 && f.challenge, "weather and challenge come back")
+    f.testSticks = nil
+
+    print("ACADEMY RULES \(checks - failed)/\(checks) checks ok")
+    return failed
+}
+
+/// A game for the Academy's tests: it saves nothing, builds sites at once and has every chapter open if asked.
+func academyTestGame(open: Bool) -> Game {
+    let g = Game(site: 0, aircraft: 0)
+    g.loadsAtOnce = true
+    g.academyProgress = AcademyProgress(store: nil)
+    if open {
+        for s in AcademyCourse.all {
+            g.academyProgress.record(StepResult(passed: true, score: 100, precision: 100, timeScore: 100, time: 1, capped: false, helped: false, reason: ""), for: s)
+        }
+    }
+    return g
+}
+
+/// Fly one step in the real game loop with the given sticks.
+func flyStep(_ g: Game, _ step: AcademyStep, fps: Float, trace: Bool = false, _ sticks: @escaping (Game) -> Controls) -> StepResult? {
+    g.testSticks = sticks
+    defer { g.testSticks = nil }
+    g.startStep(step)
+    guard g.attempt != nil else { return nil }
+    let frames = Int((step.limit + AcademyRules.countdown + 4) * fps)
+    for k in 0..<frames {
+        g.frame(dt: 1 / fps)
+        guard let a = g.attempt else { return nil }
+        if trace && k % Int(fps / 2) == 0, a.phase == .flying {
+            let ac = g.aircraft, p = ac.pos - V3(0, g.terrain.height(ac.pos.x, ac.pos.z), 0)
+            print(String(format: "   t %5.1f task %d pos %6.1f %5.1f %6.1f v %5.1f vy %5.1f pitch %5.0f roll %5.0f up %5.2f head %5.2f %5.2f sticks %5.2f %5.2f %5.2f thr %.2f %@ %@",
+                         a.time, a.index, p.x, p.y, p.z, length(ac.vel), ac.vel.y, ac.pitch / deg, ac.roll / deg, ac.up.y, ac.forward.x, ac.forward.z,
+                         g.controls.aileron, g.controls.elevator, g.controls.rudder, g.controls.throttle, a.progress as NSString, a.note as NSString))
+        }
+        if let r = a.result { return r }
+    }
+    return g.attempt?.result
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--academytest") {
+    // the instructor pilot passes every step; a pilot who does nothing, flails or only visits the boxes does not
+    SoundEngine.offline = true
+    let only = i + 1 < CommandLine.arguments.count && !CommandLine.arguments[i + 1].hasPrefix("--") ? CommandLine.arguments[i + 1] : ""
+    let trace = CommandLine.arguments.contains("--trace")
+    let g = academyTestGame(open: true)
+    var failed = 0, flown = 0
+    for step in AcademyCourse.all where only.isEmpty || step.id.contains(only) {
+        guard step.aircraftIndex != nil, step.siteIndex != nil else {
+            print("ACADEMY \(step.id): no such aircraft or site  FAIL"); failed += 1; continue
+        }
+        flown += 1
+        var line = "", ok = true
+        for (fps, late) in trace ? [(Float(60), Float(0.05))] : [(Float(60), Float(0.05)), (120, 0.05), (60, 0.1)] {
+            let pilot = InstructorPilot(fps: fps); pilot.reaction = late
+            let r = flyStep(g, step, fps: fps, trace: trace) { pilot.sticks($0) }
+            if r?.passed != true { ok = false }
+            line += String(format: "  %3d%% in %4.1f s", r?.score ?? -1, r?.time ?? 0)
+            if let r, !r.reason.isEmpty { line += " (\(r.reason) task \(g.attempt?.index ?? 0))" }
+        }
+        if !ok { failed += 1 }
+        print("ACADEMY \(step.id.padding(toLength: 30, withPad: " ", startingAt: 0))\(line)  \(ok ? "ok" : "FAIL")")
+    }
+    print(failed == 0 ? "ACADEMY all \(flown) steps can be passed" : "ACADEMY \(failed) of \(flown) steps failed")
+    if only.isEmpty {
+        let unskilled = testAcademyUnskilled(g)
+        let rules = testAcademyRules()
+        failed += unskilled + rules
+        print(failed == 0 ? "ACADEMY TEST ok" : "ACADEMY TEST failed")
+    }
+    exit(failed == 0 ? 0 : 1)
+}
+
 if CommandLine.arguments.contains("--selftest") {
     runSelfTest()
     runAutorotationTest()
@@ -1248,9 +1551,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let n = UserDefaults.standard.string(forKey: "lastSite"), let i = SiteSpec.all.firstIndex(where: { $0.name == n }) { siteArg = i }
         }
         game = Game(site: siteArg, aircraft: acArg)
+        if CommandLine.arguments.contains("--nosave") { game.academyProgress = AcademyProgress(store: nil) }       // try the Academy without touching its saved progress
         if CommandLine.arguments.contains("--menu") { game.hud.overlay = .menu }
         if interactive || CommandLine.arguments.contains("--splash") { game.hud.overlay = .splash }
-        if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu, "splash": .splash][o] ?? .none }
+        if let o = arg("--overlay") { game.hud.overlay = ["aircraft": .aircraft, "sites": .sites, "environment": .environment, "help": .help, "menu": .menu, "splash": .splash, "academy": .academy][o] ?? .none }
         game.hud.addPanorama = { [unowned self] in self.addPanorama() }
         game.hud.choosePanoramaFolder = { [unowned self] in self.choosePanoramaFolder() }
         game.hud.openControllerSetup = { [unowned self] in self.showSetup() }
@@ -1411,6 +1715,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if self.game.hud.overlay != .none {
                 if e.type == .keyDown && e.keyCode == 53 {
+                    if self.game.academyEscape() { return nil }
                     let o = self.game.hud.overlay
                     self.game.hud.overlay = o != .menu && self.game.cameFromMenu ? .menu : .none
                     return nil
@@ -1506,6 +1811,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu("Simulation", [
             ClosureMenuItem("Menu Music On / Off") { g.musicEnabled.toggle(); g.say(g.musicEnabled ? "Menu music on" : "Menu music off") },
             ClosureMenuItem("Main Menu") { g.cameFromMenu = false; g.hud.overlay = .menu },
+            ClosureMenuItem("Flight Academy…") { g.openAcademy() },
             ClosureMenuItem("Weather…", key: "e", mods: [.command, .shift]) { g.cameFromMenu = g.hud.overlay == .menu; g.hud.overlay = .environment },
             .separator(),
             ClosureMenuItem("Reset Aircraft", key: "r") { g.resetAircraft() },

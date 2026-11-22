@@ -664,6 +664,14 @@ final class Terrain {
     }
 
     var windsockBase: V3 { V3(32, height(32, -site.runwayWid / 2 - 9), -site.runwayWid / 2 - 9) }
+    /// Where the cones along the runway's edges stand (x, z).
+    var runwayCones: [SIMD2<Float>] {
+        guard site.panorama == nil else { return [] }
+        let hl = site.runwayLen / 2, z = site.runwayWid / 2 + 1.2
+        var out: [SIMD2<Float>] = [], x = -hl
+        while x <= hl + 0.1 { out += [SIMD2(x, -z), SIMD2(x, z)]; x += site.runwayLen / 8 }
+        return out
+    }
     var pilotPos: V3 { site.panorama != nil ? .zero : V3(0, height(0, site.runwayWid / 2 + 7), site.runwayWid / 2 + 7) }
 }
 

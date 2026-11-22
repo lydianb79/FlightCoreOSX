@@ -74,6 +74,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var waterMesh: GPUMesh?
     private var windsockMesh: GPUMesh?
     private var balloonMesh: GPUMesh?
+    private var cubeMesh: GPUMesh?
     private var partMeshes: [GPUMesh?] = []
     private var siteVersion = -1, aircraftVersion = -1
     private var shadow1Key = -1
@@ -104,6 +105,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         balloonMesh = { var b = MeshBuilder(); b.ellipsoid(center: .zero, radii: V3(0.6, 0.72, 0.6), color: rgb(1, 1, 1), seg: 12, rings: 8)
             b.cylinder(from: V3(0, -0.7, 0), to: V3(0, -0.82, 0), r0: 0.03, r1: 0.07, seg: 6, color: rgb(1, 1, 1)); return GPUMesh(dev, b) }()
         windsockMesh = GPUMesh(dev, buildWindsock())
+        cubeMesh = { var b = MeshBuilder(); b.box(center: .zero, size: V3(1, 1, 1), color: rgb(1, 1, 1)); return GPUMesh(dev, b) }()
         game.hud.thumbnailer = { [unowned self] spec in self.thumbnail(for: spec) }
         game.prepareSite = { [weak self] site, terrain in
             guard let self else { return (nil, nil) }
@@ -287,6 +289,61 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// The Flight Academy's target box: faint walls, solid edges that turn green with the aircraft inside, posts and an
+    /// outline on the ground under it to judge the distance by, and the box after it, dimly.
+    private func targetItems(_ a: AcademyAttempt) -> [DrawItem] {
+        guard a.phase != .finished, let cube = cubeMesh, let task = a.task else { return [] }
+        let game = self.game, ter = game.terrain
+        var out: [DrawItem] = []
+        func bar(_ center: V3, _ rot: M4, _ size: V3, _ c: V4) {
+            out.append(DrawItem(mesh: cube, model: M4.translation(center) * rot * M4(diagonal: V4(size.x, size.y, size.z, 1)), tint: c, material: 4))
+        }
+        func draw(_ box: TargetBox, _ c: V4, main: Bool, pad: Bool) {
+            let mid = box.world(ter), ax = box.across
+            let rot = M4(columns: (V4(ax.x, 0, ax.z, 0), V4(0, 1, 0, 0), V4(-box.dir.x, 0, -box.dir.z, 0), V4(0, 0, 0, 1)))
+            let h = box.size / 2
+            // as thick on the screen at any distance and zoom
+            let th = max(0.025, distance(game.eye, mid) * tan(game.fov / 2) * 0.008)
+            if pad {
+                // a pad: its outline and a cross in the middle, on the ground
+                let on = V3(mid.x, ter.height(mid.x, mid.z) + 0.05, mid.z)
+                for i in [Float(-1), 1] {
+                    bar(on + box.dir * (i * h.z), rot, V3(box.size.x, 0.04, max(th, 0.2)), c)
+                    bar(on + ax * (i * h.x), rot, V3(max(th, 0.2), 0.04, box.size.z), c)
+                }
+                let arm = min(box.size.x, box.size.z) * 0.4
+                bar(on, rot, V3(arm, 0.04, max(th, 0.2)), c)
+                bar(on, rot, V3(max(th, 0.2), 0.04, arm), c)
+                return
+            }
+            for i in [Float(-1), 1] {
+                for j in [Float(-1), 1] {
+                    bar(mid + V3(0, i * h.y, 0) + box.dir * (j * h.z), rot, V3(box.size.x, th, th), c)
+                    bar(mid + ax * (i * h.x) + box.dir * (j * h.z), rot, V3(th, box.size.y, th), c)
+                    bar(mid + ax * (i * h.x) + V3(0, j * h.y, 0), rot, V3(th, th, box.size.z), c)
+                }
+            }
+            guard main else { return }
+            bar(mid, rot, box.size, V4(c.x, c.y, c.z, 0.025))
+            let low = ter.height(mid.x, mid.z) + 0.04, under = V3(mid.x, low, mid.z)
+            let shade = V4(c.x, c.y, c.z, 0.5)
+            for i in [Float(-1), 1] {
+                bar(under + box.dir * (i * h.z), rot, V3(box.size.x, 0.03, th), shade)
+                bar(under + ax * (i * h.x), rot, V3(th, 0.03, box.size.z), shade)
+                let top = mid.y - h.y
+                if top > low + 0.2 { bar(V3(mid.x, (top + low) / 2, mid.z) + ax * (i * h.x), rot, V3(th * 0.6, top - low, th * 0.6), V4(c.x, c.y, c.z, 0.3)) }
+            }
+        }
+        func isPad(_ t: AcademyTask) -> Bool { if case .land = t.kind { return true }; return false }
+        let inside = task.box.contains(game.aircraft.pos, ter) && task.pose.match(game.aircraft) != nil
+        draw(task.box, inside ? V4(0.2, 1, 0.35, 0.95) : V4(1, 0.72, 0.1, 0.9), main: true, pad: isPad(task))
+        if a.index + 1 < a.step.tasks.count {
+            let after = a.step.tasks[a.index + 1], next = after.box
+            if next.center != task.box.center || next.size != task.box.size { draw(next, V4(1, 1, 1, 0.22), main: false, pad: isPad(after)) }
+        }
+        return out
+    }
+
     /// One full-screen post-processing pass into `target`.
     private func post(_ cb: MTLCommandBuffer, _ pso: MTLRenderPipelineState, to target: MTLTexture, _ textures: [MTLTexture?], _ fu: inout FrameUniforms) {
         let rpd = MTLRenderPassDescriptor()
@@ -433,6 +490,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             let droop = (1 - clampf(sp / 7, 0, 1)) * 78 * deg + sin(game.env.time * 5) * 0.04 * min(sp, 3)
             world.append(DrawItem(mesh: mesh, model: M4.translation(game.terrain.windsockBase + V3(0, 4.8, 0)) * M4.rotation(yaw, V3(0, 1, 0)) * M4.rotation(droop, V3(1, 0, 0))))
         }
+        if game.replay == nil, let a = game.attempt { acBlend += targetItems(a) }
         if let mesh = balloonMesh {
             for b in game.balloons where b.alive { world.append(DrawItem(mesh: mesh, model: M4.translation(b.pos), tint: b.color, spec: 0.8)) }
         }

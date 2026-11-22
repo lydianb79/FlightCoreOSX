@@ -18,7 +18,7 @@ enum Theme {
     static let faint = cream.opacity(0.42)
 }
 
-private struct GlassBox: ViewModifier {
+struct GlassBox: ViewModifier {
     var radius: CGFloat = 12
     var fill = Theme.glass
     func body(content: Content) -> some View {
@@ -27,11 +27,11 @@ private struct GlassBox: ViewModifier {
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(Theme.stroke, lineWidth: 1))
     }
 }
-private extension View {
+extension View {
     func glass(_ radius: CGFloat = 12, fill: Color = Theme.glass) -> some View { modifier(GlassBox(radius: radius, fill: fill)) }
 }
 
-private struct PrimaryButton: ButtonStyle {
+struct PrimaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13.5, weight: .heavy)).tracking(1.2).textCase(.uppercase)
@@ -40,7 +40,7 @@ private struct PrimaryButton: ButtonStyle {
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.red.opacity(configuration.isPressed ? 0.75 : 1)))
     }
 }
-private struct QuietButton: ButtonStyle {
+struct QuietButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
@@ -73,7 +73,7 @@ private struct Tag: View {
     }
 }
 
-private func specRow(_ k: String, _ v: String) -> some View {
+func specRow(_ k: String, _ v: String) -> some View {
     HStack {
         Text(k).foregroundColor(Theme.dim)
         Spacer()
@@ -220,6 +220,7 @@ struct HUDView: View {
                     }
                     .padding(.leading, m.fullscreen ? 12 : 84).padding(.trailing, 12).padding(.top, 9)
 
+                    if let a = s.academy, !m.overlay.pausesSim { AcademyPanel(h: a).padding(.top, 8).allowsHitTesting(false) }
                     if !s.replay.isEmpty { ReplayBar(text: s.replay, pos: s.replayPos).padding(.top, 8).allowsHitTesting(false) }
                     if !s.score.isEmpty {
                         Text(s.score).font(.system(size: 14, weight: .bold, design: .default)).monospacedDigit().foregroundColor(Theme.cream)
@@ -256,7 +257,7 @@ struct HUDView: View {
             }
             if !s.message.isEmpty && !m.game.simHeld {
                 VStack {
-                    Spacer().frame(height: 74)
+                    Spacer().frame(height: s.academy == nil ? 74 : 178)
                     let big = s.message == "CRASHED" || s.message == "PAUSED"
                     Text(s.message)
                         .font(.system(size: big ? 30 : 14, weight: big ? .heavy : .semibold, design: big ? .rounded : .default))
@@ -276,6 +277,9 @@ struct HUDView: View {
                 case .sites: SiteBrowser(m: m)
                 case .environment: EnvironmentPanel(m: m)
                 case .help: HelpView(m: m)
+                case .academy: AcademyBrowser(m: m)
+                case .academyPause: AcademyPauseView(m: m)
+                case .academyResult: AcademyResultView(m: m)
                 case .splash: SplashView(m: m).transition(.asymmetric(insertion: .identity, removal: .scale(scale: 1.35).combined(with: .opacity)))
                 case .none: EmptyView()
                 }
@@ -388,7 +392,7 @@ private struct ListTile: View, Equatable {
 
 // MARK: - Overlay scaffolding
 
-private struct Sheet<Content: View>: View {
+struct Sheet<Content: View>: View {
     @ObservedObject var m: HUDModel
     var title: String
     var subtitle: String
@@ -796,6 +800,8 @@ struct MainMenu: View {
                         .font(.system(size: 15, weight: .black)).frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 .buttonStyle(CreamButton()).keyboardShortcut(.defaultAction).padding(.top, 16)
+                Button { m.game.openAcademy() } label: { AcademyMenuLabel(progress: m.game.academyProgress) }
+                    .buttonStyle(.plain).focusable(false).padding(.top, 10)
                 HStack(spacing: 8) {
                     Button { m.game.cameFromMenu = true; m.overlay = .environment } label: { Label("Weather", systemImage: "wind") }.buttonStyle(InkButton())
                     Button { m.openControllerSetup?() } label: { Label("Controller", systemImage: "gamecontroller") }.buttonStyle(InkButton())
@@ -834,6 +840,28 @@ struct MainMenu: View {
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .shadow(color: .black.opacity(0.55), radius: 40, y: 16)
         }
+    }
+}
+
+/// The Flight Academy's entry in the main menu.
+private struct AcademyMenuLabel: View {
+    var progress: AcademyProgress
+    var body: some View {
+        let total = AcademyCourse.all.count, done = AcademyCourse.all.filter { progress.records[$0.id]?.passed == true }.count
+        HStack(spacing: 12) {
+            Image(systemName: "graduationcap.fill").font(.system(size: 17, weight: .bold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("FLIGHT ACADEMY").font(.system(size: 14, weight: .black)).tracking(2)
+                Text("Planes, helicopters and multirotors, from beginner to professional").font(.system(size: 11)).opacity(0.75).lineLimit(1)
+            }
+            Spacer()
+            Text("\(done) / \(total)").font(.system(size: 12.5, weight: .heavy)).monospacedDigit()
+            Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+        }
+        .foregroundColor(Theme.cream)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.ink))
+        .contentShape(Rectangle())
     }
 }
 
