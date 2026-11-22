@@ -883,9 +883,9 @@ struct HelpView: View {
     @ObservedObject var m: HUDModel
     private let groups: [(String, [(String, String)])] = [
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
-                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch a hand-held model, otherwise reset")]),
-        ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Helicopter rotor speed: low, normal, high"),
-                      ("F", "Quadcopter flight mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
+                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch (hand-held) or reset")]),
+        ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Rotor speed (helicopters)"),
+                      ("F", "Stabilized / acro mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("F8", "FPV / outside view (3D sites)"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),
                                  ("T", "Slow motion"), (",  .", "Less / more wind"), ("N", "Next flying site"), ("B", "Balloon Burst challenge"),
                                  ("K", "Demo pilot"), ("M", "Mute sound"), ("Esc", "Main menu")]),

@@ -260,6 +260,7 @@ final class Game {
     var flapSetting: Float = 0
     var gearUp = false, smokeOn = false, hold = false
     private var wasCrashed = false, smokeAcc: Float = 0
+    private var soundCheck = 0
     private var rng = LCG(7)
     var challenge = false
     private var score = 0, challengeTime: Float = 0
@@ -876,11 +877,13 @@ final class Game {
 
     private func updateSound() {
         let spec = aircraft.spec
+        soundCheck += 1
+        if soundCheck % 120 == 0 { sound.keepRunning() }       // every couple of seconds: is the audio engine still running?
         let rel = aircraft.pos - eye
         let d = max(length(rel), 0.5)
         let onboard = cameraMode == 2
         var st = SoundState()
-        st.doppler = cameraMode == 0 ? 343 / (343 + dot(aircraft.vel, rel / d)) : 1
+        st.doppler = cameraMode == 0 ? 343 / (343 + clampf(dot(aircraft.vel, rel / d), -150, 150)) : 1
         let lv = aircraft.power
         switch spec.kind {
         case .helicopter:

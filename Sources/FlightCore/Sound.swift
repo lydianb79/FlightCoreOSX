@@ -22,6 +22,19 @@ struct SoundState {
     var reflect: Float = 0      // extra travel time of the sound that bounces off the ground on its way to the pilot (s)
     var reflectGain: Float = 0  // strength of that reflection, 0 = none
     var paused = false
+
+    /// The same state with anything that is not a finite number replaced by a harmless value.
+    var sanitized: SoundState {
+        var s = self
+        func f(_ x: Float, _ d: Float) -> Float { x.isFinite ? x : d }
+        s.shaftHz = min(max(f(shaftHz, 0), 0), 2000); s.blades = f(blades, 2); s.cylinders = f(cylinders, 4)
+        s.power = f(power, 0); s.running = f(running, 0); s.doppler = min(max(f(doppler, 1), 0.5), 2)
+        s.gain = f(gain, 0); s.muffle = f(muffle, 0); s.pan = min(max(f(pan, 0), -1), 1)
+        s.airspeed = f(airspeed, 0); s.groundRoll = f(groundRoll, 0); s.windSpeed = f(windSpeed, 0)
+        s.reflect = min(max(f(reflect, 0), 0), 0.05); s.reflectGain = f(reflectGain, 0)
+        for i in 0..<4 { s.motors[i] = f(motors[i], 0) }
+        return s
+    }
 }
 
 /// The background sounds of a place, each 0 (absent) ... 1 (plenty).
@@ -217,10 +230,23 @@ final class SoundEngine {
         engine.attach(n)
         engine.connect(n, to: engine.mainMixerNode, format: fmt)
         try? engine.start()
+        // macOS stops the engine when the output changes (headphones, another device, sleep): start it again
+        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            self?.keepRunning()
+        }
+    }
+    private var configObserver: NSObjectProtocol?
+
+    /// Start the audio engine again if the system has stopped it. Called on output changes and every few seconds.
+    func keepRunning() {
+        guard node != nil, !engine.isRunning else { return }
+        engine.prepare()
+        try? engine.start()
     }
 
     /// The model flies into branches (`woody`) or knocks against something hard such as a goal post.
     func branches(_ strength: Float, woody: Bool, pan: Float = 0) {
+        guard strength.isFinite, pan.isFinite else { return }
         let s = 0.4 + 0.6 * min(max(strength, 0), 1)
         leafPan = pan
         if woody { leafEnv = max(leafEnv, s); twigs = s; twigTimer = 0 }
@@ -229,6 +255,7 @@ final class SoundEngine {
 
     /// Impact: `strength` 0...1; `water` makes it a splash.
     func crash(_ strength: Float, water: Bool = false, pan: Float = 0) {
+        guard strength.isFinite, pan.isFinite else { return }
         let s = 0.35 + 0.65 * min(max(strength, 0), 1)
         crashPan = pan
         if water { splashEnv = max(splashEnv, s) } else { crashEnv = max(crashEnv, s); crashTone = s; crackle = s }
@@ -237,6 +264,7 @@ final class SoundEngine {
     /// The aircraft touches down. `strength` 0...1 from the speed into the ground; `ground` 0 asphalt, 1 grass, 2 snow,
     /// 3 sand, 4 bare earth, 5 water; `wheel` whether a tyre or the airframe touched; `slide` speed along the ground.
     func touch(_ strength: Float, ground: Int, wheel: Bool, slide: Float, mass: Float, pan: Float = 0) {
+        guard strength.isFinite, slide.isFinite, mass.isFinite, pan.isFinite else { return }
         touchCount += 1
         let s = 0.25 + 0.75 * min(max(strength, 0), 1)
         touchPan = pan
@@ -331,7 +359,7 @@ final class SoundEngine {
     }
 
     func render(left: UnsafeMutablePointer<Float>, right: UnsafeMutablePointer<Float>, count: Int) {
-        let st = state
+        let st = state.sanitized
         let twoPi = 2 * Float.pi
         let k: Float = 0.0012                      // parameter smoothing per sample (~20 ms)
         let masterTarget: Float = (muted || st.paused) ? 0 : 1
@@ -602,7 +630,36 @@ final class SoundEngine {
             left[i] = L / (1 + abs(L)) * 1.6
             right[i] = R / (1 + abs(R)) * 1.6
         }
+        // A value that is not a number would stay in every filter it reached and silence the sound for good:
+        // drop the block and start the synthesizer's filters and voices afresh.
+        if !left[0].isFinite || !right[0].isFinite || !left[count - 1].isFinite || !right[count - 1].isFinite {
+            for i in 0..<count { left[i] = 0; right[i] = 0 }
+            recover()
+        }
     }
+
+    /// Back to a clean start: every oscillator, filter, envelope and voice of the synthesizer.
+    private func recover() {
+        recoveries += 1
+        sHz = 0; sPower = 0; sRun = 0; sGain = 0; sMuffle = 0; sPan = 0; sAir = 0; sRoll = 0; sWind = 0; sMaster = 0; sMotor = .zero
+        pBlade = 0; pShaft = 0; pFire = 0; pWhine = 0; pTail = 0; pMotor = SIMD4(0, 0.31, 0.57, 0.83); pWhine2 = 0; pGear = 0
+        propLo = 0; propBd = 0; jetLo = 0; jetBd = 0; airLo = 0; airBd = 0; windLoL = 0; windBdL = 0; windLoR = 0; windBdR = 0
+        exhaust = 0; rumble = 0; roar = 0; muffL = 0; muffR = 0; wave = 0; lfo1 = 0; lfo2 = 0.4; lfo3 = 0.7
+        flutter = 0; lope = 1; lopePrev = 0; cyl = 0; exh2 = 0; exhDC = 0; raspLo = 0; raspBd = 0
+        exLo = 0; exBd = 0; fanLo = 0; fanBd = 0; lowLo = 0; lowBd = 0; warble = .zero; sReflect = 0; sReflectGain = 0
+        for i in echo.indices { echo[i] = 0 }
+        crashEnv = 0; crashTone = 0; crashPhase = 0; crackle = 0; splashEnv = 0; splashLo = 0; crashPan = 0
+        leafEnv = 0; leafLo = 0; leafBd = 0; leafPan = 0; twigs = 0; twigTimer = 0
+        snapEnv = 0; snapLo = 0; snapBd = 0; snapHz = 900; knockEnv = 0; knockPhase = 0
+        thumpEnv = 0; thumpDecay = 0.999; thumpHz = 90; thumpPhase = 0
+        touchEnv = 0; touchAmp = 1; touchDecay = 0.999; touchFc = 2000; touchQ = 1; touchSweep = 0; touchLo = 0; touchBd = 0; touchGrit = 0; touchPan = 0
+        voices = [Voice](repeating: Voice(), count: 7)
+        lapLo = 0; lapBd = 0; lap1 = 0; lap2 = 0.3; crk1 = 0; crk2 = 0; crkT = 0; cicLo = 0; cicBd = 0; cicP = 0
+        strLo = 0; strBd = 0; strWalk = 0; strLo2 = 0; leafLoL = 0; leafBdL = 0; leafLoR = 0; leafBdR = 0
+        grassLo = 0; sandLo = 0; howlLo = 0; howlBd = 0; howlLo2 = 0; howlBd2 = 0; townLo = 0; townCarLo = 0; townCarBd = 0; townP = 0.6
+        rumbleRoll = 0; sMusic = 0
+    }
+    private(set) var recoveries = 0
     private var rumbleRoll: Float = 0
 }
 
