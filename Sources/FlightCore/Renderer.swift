@@ -51,6 +51,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var timeDebt: Double = 0
     // pacing statistics for --perf: frame intervals and CPU time per frame over the last second
     var statIntervals: [Float] = [], statCpu: [Float] = [], statPresented: [Float] = []
+    /// --perf: time from reading the sticks to that frame reaching the screen
+    var statLatency: [Float] = []
     private var lastPresented: CFTimeInterval = 0
     private var missed: Float = 0            // recent fraction of frames that reached the screen late
     private var lastScaleChange = CACurrentMediaTime()
@@ -317,6 +319,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         } else {
             timeDebt = 0
         }
+        // Take the frame buffer before reading the sticks: with frames queued for the screen, waiting for a free one
+        // can take most of a frame, and sticks read before the wait would be that much older when the frame is shown.
+        _ = view.currentDrawable
+        let sampled = CACurrentMediaTime()
         game.frame(dt: Float(step))
         lastTime = now
         // While a menu or browser is open the simulation stands still, so the scene behind it does not change.
@@ -596,6 +602,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             let t = d.presentedTime
             DispatchQueue.main.async {
                 guard let s = self, t > 0 else { return }
+                s.statLatency.append(Float(t - sampled) * 1000)
                 if s.lastPresented > 0 {
                     let ms = Float(t - s.lastPresented) * 1000
                     s.statPresented.append(ms)

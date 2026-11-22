@@ -195,6 +195,7 @@ struct HUDView: View {
                     }
                     .padding(.leading, m.fullscreen ? 12 : 84).padding(.trailing, 12).padding(.top, 9)
 
+                    if !s.replay.isEmpty { ReplayBar(text: s.replay, pos: s.replayPos).padding(.top, 8).allowsHitTesting(false) }
                     if !s.score.isEmpty {
                         Text(s.score).font(.system(size: 14, weight: .bold, design: .default)).monospacedDigit().foregroundColor(Theme.cream)
                             .padding(.horizontal, 14).padding(.vertical, 6).glass(9).padding(.top, 8).allowsHitTesting(false)
@@ -258,6 +259,28 @@ struct HUDView: View {
         }
         .preferredColorScheme(.dark)
         .tint(Theme.red)
+    }
+}
+
+/// Shown while a recorded flight plays: where in the recording, and the keys.
+private struct ReplayBar: View {
+    var text: String
+    var pos: Float
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Circle().fill(Theme.red).frame(width: 8, height: 8)
+                Text("REPLAY").font(.system(size: 12, weight: .heavy)).tracking(2).foregroundColor(Theme.cream)
+                Text(text).font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundColor(Theme.cream.opacity(0.8))
+            }
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.cream.opacity(0.18)).frame(width: 260, height: 4)
+                Capsule().fill(Theme.red).frame(width: max(CGFloat(pos) * 260, 4), height: 4)
+            }
+            Text("← →  5 s   ·   P  pause   ·   T  slow motion   ·   Return  from the start   ·   R  fly on")
+                .font(.system(size: 9.5, weight: .semibold)).foregroundColor(Theme.cream.opacity(0.55))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8).glass(10)
     }
 }
 
@@ -883,7 +906,7 @@ struct HelpView: View {
     @ObservedObject var m: HUDModel
     private let groups: [(String, [(String, String)])] = [
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
-                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch (hand-held) or reset")]),
+                    ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch (hand-held) or reset"), ("R", "Replay the flight")]),
         ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Rotor speed (helicopters)"),
                       ("F", "Stabilized / acro mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("F8", "FPV / outside view (3D sites)"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),

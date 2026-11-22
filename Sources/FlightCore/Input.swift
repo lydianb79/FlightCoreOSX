@@ -15,6 +15,9 @@ final class HIDJoystick {
     private(set) var joysticks: [IOHIDDevice] = []
     private(set) var gamepads: [IOHIDDevice] = []
     var name = ""
+    /// The controller whose sticks last moved, and its axis elements: read directly every frame (see `refresh`).
+    private var active: IOHIDDevice?
+    private var activeAxes: [IOHIDElement] = []
 
     private static func product(_ d: IOHIDDevice) -> String { (IOHIDDeviceGetProperty(d, kIOHIDProductKey as CFString) as? String) ?? "USB Controller" }
     private static func isGamepad(_ d: IOHIDDevice) -> Bool { (IOHIDDeviceGetProperty(d, kIOHIDPrimaryUsageKey as CFString) as? Int) == kHIDUsage_GD_GamePad }
@@ -46,6 +49,29 @@ final class HIDJoystick {
         }
     }
 
+    /// Bring the sticks up to date at the moment the game reads them. Moves otherwise arrive as events on the main
+    /// thread, which handles them only between frames: whatever the controller sent while a frame was being prepared
+    /// would wait for the next one. The system keeps each element's latest value, so asking for it is cheap.
+    func refresh() {
+        guard let d = active else { return }
+        for el in activeAxes {
+            var ref: Unmanaged<IOHIDValue>?
+            let ok = withUnsafeMutablePointer(to: &ref) { p in
+                p.withMemoryRebound(to: Unmanaged<IOHIDValue>.self, capacity: 1) { IOHIDDeviceGetValue(d, el, $0) == kIOReturnSuccess }
+            }
+            if ok, let v = ref?.takeUnretainedValue() { store(el, IOHIDValueGetIntegerValue(v)) }
+        }
+    }
+
+    private func makeActive(_ d: IOHIDDevice) {
+        guard active != d else { return }
+        active = d
+        activeAxes = ((IOHIDDeviceCopyMatchingElements(d, nil, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement]) ?? []).filter {
+            let idx = Int(IOHIDElementGetUsage($0)) - kHIDUsage_GD_X
+            return IOHIDElementGetUsagePage($0) == UInt32(kHIDPage_GenericDesktop) && idx >= 0 && idx < 9 && IOHIDElementGetType($0) != kIOHIDElementTypeCollection
+        }
+    }
+
     init() {
         let match: [[String: Any]] = [kHIDUsage_GD_Joystick, kHIDUsage_GD_GamePad, kHIDUsage_GD_MultiAxisController].map {
             [kIOHIDDeviceUsagePageKey: kHIDPage_GenericDesktop, kIOHIDDeviceUsageKey: $0]
@@ -57,16 +83,20 @@ final class HIDJoystick {
             if HIDJoystick.isGamepad(device) { me.gamepads.append(device) } else { me.joysticks.append(device) }
             me.name = HIDJoystick.product(device)
             me.readCurrent(device)
+            me.makeActive(device)
         }, ctx)
         IOHIDManagerRegisterDeviceRemovalCallback(manager, { ctx, _, _, device in
             let me = Unmanaged<HIDJoystick>.fromOpaque(ctx!).takeUnretainedValue()
             me.joysticks.removeAll { $0 == device }
             me.gamepads.removeAll { $0 == device }
+            if me.active == device { me.active = nil; me.activeAxes = [] }
             if let d = me.joysticks.last ?? me.gamepads.last { me.name = HIDJoystick.product(d) }
         }, ctx)
         IOHIDManagerRegisterInputValueCallback(manager, { ctx, _, _, value in
             let me = Unmanaged<HIDJoystick>.fromOpaque(ctx!).takeUnretainedValue()
-            me.store(IOHIDValueGetElement(value), IOHIDValueGetIntegerValue(value))
+            let el = IOHIDValueGetElement(value)
+            me.store(el, IOHIDValueGetIntegerValue(value))
+            if IOHIDElementGetUsagePage(el) == UInt32(kHIDPage_GenericDesktop) { me.makeActive(IOHIDElementGetDevice(el)) }
         }, ctx)
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
         IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -135,6 +165,7 @@ final class InputManager {
         ControlAction(id: "trimDown", title: "Pitch trim: nose down", states: 0, key: 27),
         ControlAction(id: "brake", title: "Wheel brakes", states: -1, key: 12),
         ControlAction(id: "reset", title: "Reset aircraft", states: 0, key: 49),
+        ControlAction(id: "replay", title: "Replay the flight", states: 0, key: 15),
         ControlAction(id: "camera", title: "Camera", states: 0, key: 8),
         ControlAction(id: "zoom", title: "Zoom", states: 0, key: 6),
         ControlAction(id: "pause", title: "Pause", states: 0, key: 35),
@@ -234,6 +265,7 @@ final class InputManager {
     }
 
     func poll(dt: Float, kind: AircraftKind) -> Controls {
+        hid.refresh()
         var c = Controls()
         if calibrating { for a in 0..<9 { recMin[a] = min(recMin[a], hid.axes[a]); recMax[a] = max(recMax[a], hid.axes[a]) } }
 

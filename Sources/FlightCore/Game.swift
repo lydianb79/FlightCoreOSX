@@ -11,6 +11,7 @@ struct HUDState: Equatable {
     var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = "", config = ""
     var fps = 0
     var trim = 0, showTrim = false
+    var replay = "", replayPos: Float = 0
     /// Everything but the frame rate, which wobbles from one update to the next.
     func equalsIgnoringTime(_ o: HUDState) -> Bool {
         var a = self, b = o
@@ -260,6 +261,9 @@ final class Game {
     var flapSetting: Float = 0
     var gearUp = false, smokeOn = false, hold = false
     private var wasCrashed = false, smokeAcc: Float = 0
+    /// Flight recording: the flight in progress and the one before it (usually the one that just ended in a crash)
+    private var flight = FlightRecording(), lastFlight = FlightRecording(), recordT: Float = 0
+    private(set) var replay: ReplayState?
     private var soundCheck = 0
     private var rng = LCG(7)
     var challenge = false
@@ -341,6 +345,9 @@ final class Game {
     }
 
     func resetAircraft() {
+        stopReplay()
+        if flight.duration > 1 { lastFlight = flight }
+        flight = FlightRecording()
         let spec = aircraft.spec
         if spec.hasFloats, let p = terrain.waterStart(windFrom: env.windFrom) {
             // floatplanes start on the water, pointing into the wind
@@ -371,7 +378,9 @@ final class Game {
 
     func selectAircraft(_ i: Int) {
         guard i >= 0 && i < AircraftLibrary.all.count else { return }
+        stopReplay()
         aircraftIndex = i
+        flight = FlightRecording(); lastFlight = FlightRecording()      // a recording only plays on the aircraft it was made with
         aircraft = Aircraft(AircraftLibrary.all[i])
         flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
         newSession()
@@ -396,6 +405,8 @@ final class Game {
     /// when it is ready; the menus stay responsive meanwhile.
     func selectSite(_ i: Int) {
         guard i >= 0 && i < SiteSpec.all.count else { return }
+        stopReplay()
+        flight = FlightRecording(); lastFlight = FlightRecording()
         siteToken += 1
         let token = siteToken, spec = SiteSpec.all[i], prep = prepareSite
         loadingSite = spec
@@ -460,9 +471,11 @@ final class Game {
     }
 
     func keyDown(_ k: UInt16) {
+        // in a replay: P pause, T slow motion, C camera, Z zoom, V display and M sound work as in flight
+        if replay != nil && ![35, 17, 8, 6, 9, 46].contains(k) { replayKey(k); return }
         switch k {
         case 49: if held { launch() } else { resetAircraft() }  // Space: throw a model held in the hand, otherwise reset
-        case 15: resetAircraft()
+        case 15: startReplay()
         case 36, 76: if held { launch() }                      // Return or Enter also throw a hand-launched model
         case 35: paused.toggle()
         case 8:
@@ -602,6 +615,7 @@ final class Game {
         if fpsTime >= 0.5 { fps = Int(Float(frames) / fpsTime + 0.5); frames = 0; fpsTime = 0 }
 
         applyBindings()
+        if replay != nil { replayFrame(dt); return }
         if autopilotOn && !aircraft.crashed {
             controls = autopilot.update(aircraft, terrain: terrain, dt: dt)
             _ = input.poll(dt: dt, kind: aircraft.spec.kind)
@@ -646,6 +660,7 @@ final class Game {
             aircraft.touchImpact = 0
             let sdt = dt * timeScale
             if sdt > 0 { climb += ((aircraft.pos.y - lastY) / sdt - climb) * min(1, dt * 4); lastY = aircraft.pos.y }
+            if sdt > 0 && !held { recordT += sdt; flight.add(aircraft.recordFrame(t: recordT, sticks: controls)) }
             postStep(sdt)
         }
         let before = aircraft.renderPos
@@ -653,6 +668,53 @@ final class Game {
         // --perf: how much simulated time this frame's picture advanced by
         let sp = length(aircraft.vel)
         if sp > 3 { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
+        updateCamera(dt)
+        updateSound()
+        messageTimer -= dt
+        hudTimer -= dt
+        if hudTimer <= 0 { hudTimer = 0.08; updateHUD() }
+    }
+
+    // MARK: Replay
+
+    /// R: watch the flight again, from ten seconds before its end. Right after a reset that is the flight before.
+    func startReplay() {
+        if replay != nil { stopReplay(); return }
+        let rec = flight.duration >= 3 || lastFlight.duration < 1 ? flight : lastFlight
+        guard rec.duration >= 1 else { say("Nothing recorded yet: fly, then press R to watch it again"); return }
+        let viewer = Aircraft(aircraft.spec)
+        replay = ReplayState(recording: rec, t: max(0, rec.duration - 10), live: aircraft, viewer: viewer)
+        aircraft = viewer
+        paused = false; camSnap = true; input.keys.removeAll(); messageTimer = 0      // the replay bar shows the keys
+    }
+
+    /// Back to the aircraft being flown, just where it was.
+    func stopReplay() {
+        guard let r = replay else { return }
+        aircraft = r.live; replay = nil
+        paused = false; camSnap = true; input.keys.removeAll()
+    }
+
+    private func replayKey(_ k: UInt16) {
+        guard var r = replay else { return }
+        switch k {
+        case 15, 49: stopReplay()
+        case 123: r.t = max(0, r.t - 5); replay = r; camSnap = true
+        case 124: r.t = min(r.recording.duration, r.t + 5); replay = r; camSnap = true
+        case 36, 76: r.t = 0; replay = r; camSnap = true; paused = false            // Return: from the start
+        default: break
+        }
+    }
+
+    private func replayFrame(_ dt: Float) {
+        guard var r = replay else { return }
+        if !paused && !simHeld { r.t = min(r.t + dt * timeScale, r.recording.duration) }
+        replay = r
+        if let f = r.recording.pose(at: r.recording.start + r.t) {
+            r.viewer.show(f)
+            controls = f.sticks
+            climb = f.vel.y
+        }
         updateCamera(dt)
         updateSound()
         messageTimer -= dt
@@ -954,6 +1016,10 @@ final class Game {
         s.time = (site.panorama != nil ? (photoLight == 0 ? "Photo site" : Game.photoLightNames[photoLight]) : Game.timeNames[timeOfDay]) + (timeScale < 1 ? String(format: " · %.0f%% speed", timeScale * 100) : "")
         if challenge { s.score = String(format: "Balloons %d/%d   %.1f s", score, balloons.count, challengeTime) }
         if held && s.message.isEmpty { s.message = "Open the throttle, then press Space to launch" }
+        if let r = replay {
+            s.replay = String(format: "%.1f / %.1f s", r.t, r.recording.duration) + (paused ? "  ·  paused" : "") + (timeScale < 1 ? String(format: "  ·  %.0f%% speed", timeScale * 100) : "")
+            s.replayPos = r.t / max(r.recording.duration, 0.01)
+        }
         if aircraft.crashed { s.message = "CRASHED" }
         else if paused { s.message = "PAUSED" }
         else if messageTimer > 0 { s.message = message }

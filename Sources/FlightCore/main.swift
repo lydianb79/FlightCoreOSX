@@ -1372,6 +1372,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
                 let iv = self.renderer.statIntervals.sorted(), cpu = self.renderer.statCpu.sorted()
                 let pr = self.renderer.statPresented.sorted(); self.renderer.statPresented = []
+                let lat = self.renderer.statLatency.sorted(); self.renderer.statLatency = []
+                if lat.count > 10 { print(String(format: "LATENCY sticks read to frame on screen: median %.1f ms, 90%% %.1f ms, max %.1f ms (%d frames)", lat[lat.count / 2], lat[lat.count * 9 / 10], lat[lat.count - 1], lat.count)) }
                 self.renderer.statIntervals = []; self.renderer.statCpu = []
                 print(self.game.sound.stats())
                 if !self.renderer.syncLog.isEmpty { print("SYNC " + self.renderer.syncLog.joined(separator: ", ")); self.renderer.clearSyncLog() }
@@ -1412,6 +1414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 if self.game.simHeld || self.game.hud.overlay == .help { self.game.input.keys.removeAll(); return e }
             } else if e.type == .keyDown && !e.modifierFlags.contains(.command) {
+                if e.keyCode == 53 && self.game.replay != nil { self.game.stopReplay(); return nil }      // Esc leaves a replay first
                 if e.keyCode == 53 { self.game.cameFromMenu = false; self.game.hud.overlay = .menu; return nil }
                 if e.keyCode == 48 { self.game.cameFromMenu = false; self.game.hud.overlay = .aircraft; return nil }
             }

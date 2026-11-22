@@ -195,7 +195,7 @@ Press **H** in the app for this list.
 | Q | Wheel brakes |
 | Shift | Full stick deflection |
 | Space | Launch a model held in the hand (wings, gliders and other models without wheels); otherwise reset the aircraft. Return also launches |
-| R | Reset aircraft |
+| R | Replay the flight; R again (or Esc) to fly on |
 | `[` `]`, 1–9 | Previous / next aircraft, or pick one |
 | N | Next flying site |
 | C | Camera: pilot, chase, onboard |
@@ -223,6 +223,10 @@ Press **H** in the app for this list.
 | ⌃⌘F | Full screen / window |
 
 The pitch trim also has a gauge at the bottom right of the display. It stands upright like the elevator trim lever on a transmitter: the upper arrow trims nose down (as pushing the stick forward), the lower one nose up, and the marker sits above the centre when the trim is nose down. Double-click the gauge to centre it.
+
+### Replay
+
+Every flight is recorded, up to its last two minutes. Press **R** to watch it again from ten seconds before the end; right after a crash and the reset that follows, that is the flight that just ended. The replay shows your stick movements on the stick displays and plays the sound, and the cameras, zoom and slow motion work as in flight. **←** and **→** jump 5 seconds back or on, **P** pauses, **T** slows it down, Return starts from the beginning, and **R** or **Esc** takes you back to the aircraft just where you left it. A transmitter switch can be assigned to it in Controller Setup.
 
 ### Controllers
 
@@ -322,7 +326,7 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--launchtest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing and audio load; `--hidtest` for controllers.
+Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--launchtest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing, audio load and the time from reading the sticks to that frame reaching the screen; `--hidtest` for controllers.
 
 Test, check and screenshot runs make no sound; only `--perf`, which measures the audio, does.
 
@@ -330,7 +334,6 @@ Test, check and screenshot runs make no sound; only `--perf`, which measures the
 
 - Multiplayer and VR
 - Aircraft and airport editors
-- Flight recording and playback
 - Flight-instructor lessons
 - Uneven ground on photo sites: the ground is one level or tilted plane, so a summit, a gully or a valley below the camera cannot be followed
 - Occlusion by photographed objects: the model is always drawn in front of the photo, even when it has flown behind a tree
