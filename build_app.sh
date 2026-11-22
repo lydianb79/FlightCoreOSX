@@ -4,8 +4,8 @@
 #   ./build_app.sh x86_64 dist/x86  for another architecture (arm64 or x86_64), into a folder
 set -euo pipefail
 cd "$(dirname "$0")"
-VERSION="1.4.1"     # shown in Finder and used in the release file names
-BUILD="6"
+VERSION="2.0.0"     # shown in Finder and used in the release file names
+BUILD="7"
 ARCH="${1:-}"
 OUT="${2:-.}"
 if [ -n "$ARCH" ]; then
@@ -24,6 +24,8 @@ cp Resources/AppIcon.png Resources/Splash.jpg Resources/RockFPV.png "$APP/Conten
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 cp -R Resources/Previews "$APP/Contents/Resources/Previews"
 cp "$BIN" "$APP/Contents/MacOS/FlightCore"
+find "$APP" -name .DS_Store -delete
+chmod -R u+rwX,go+rX "$APP"     # readable by every user of the Mac it is installed on
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

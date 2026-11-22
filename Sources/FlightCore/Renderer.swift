@@ -53,6 +53,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     var statIntervals: [Float] = [], statCpu: [Float] = [], statPresented: [Float] = []
     /// --perf: time from reading the sticks to that frame reaching the screen
     var statLatency: [Float] = []
+    /// Only --perf reads and empties these, so only it fills them: otherwise they would grow for as long as the app runs.
+    static let collectStats = CommandLine.arguments.contains("--perf")
     private var lastPresented: CFTimeInterval = 0
     private var missed: Float = 0            // recent fraction of frames that reached the screen late
     private var lastScaleChange = CACurrentMediaTime()
@@ -303,8 +305,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     func draw(in view: MTKView) {
         let now = CACurrentMediaTime()
         frameMs += (Float(now - lastTime) * 1000 - frameMs) * 0.08
-        statIntervals.append(Float(now - lastTime) * 1000)
-        defer { statCpu.append(Float(CACurrentMediaTime() - now) * 1000) }
+        if Renderer.collectStats { statIntervals.append(Float(now - lastTime) * 1000) }
+        defer { if Renderer.collectStats { statCpu.append(Float(CACurrentMediaTime() - now) * 1000) } }
         // Frames reach the screen exactly one refresh apart, but this callback's timing wobbles by up to a
         // millisecond. Step the simulation by whole refresh periods so motion is even, and keep a running
         // account of the difference so simulated time never drifts from real time.
@@ -416,7 +418,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             }
             acItems.append(DrawItem(mesh: mesh, model: base * local, spec: 1))
         }
-        for d in game.debris {
+        for d in game.debris where game.replay == nil {      // a replay shows the model before it broke
             guard d.part < partMeshes.count, let mesh = partMeshes[d.part] else { continue }
             acItems.append(DrawItem(mesh: mesh, model: M4.translation(d.pos) * M4(d.q) * M4.translation(d.offset), spec: 1))
         }
@@ -602,10 +604,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             let t = d.presentedTime
             DispatchQueue.main.async {
                 guard let s = self, t > 0 else { return }
-                s.statLatency.append(Float(t - sampled) * 1000)
+                if Renderer.collectStats { s.statLatency.append(Float(t - sampled) * 1000) }
                 if s.lastPresented > 0 {
                     let ms = Float(t - s.lastPresented) * 1000
-                    s.statPresented.append(ms)
+                    if Renderer.collectStats { s.statPresented.append(ms) }
                     let period = 1000 / Float(max(NSScreen.main?.maximumFramesPerSecond ?? 60, 30))
                     s.missed += ((ms > period * 1.5 ? 1 : 0) - s.missed) * 0.03
                 }

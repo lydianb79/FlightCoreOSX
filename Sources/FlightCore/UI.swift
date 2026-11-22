@@ -131,14 +131,35 @@ private struct Metric: View {
 
 private struct BarButton: View {
     var icon: String, help: String
+    var enabled = true
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.cream.opacity(0.9))
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.cream.opacity(enabled ? 0.9 : 0.25))
                 .frame(width: 32, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.cream.opacity(0.08)))
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.cream.opacity(enabled ? 0.08 : 0.03)))
         }
-        .buttonStyle(.plain).focusable(false).help(help)
+        .buttonStyle(.plain).focusable(false).disabled(!enabled).help(help)
+    }
+}
+
+/// The gyro setting, shown on its button. Of fixed width, so the bar does not move as the setting changes.
+private struct GyroButton: View {
+    var setting: Int, short: String, name: String
+    var action: () -> Void
+    var body: some View {
+        let on = setting != Gyro.off
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "gyroscope").font(.system(size: 13, weight: .semibold))
+                Text(short).font(.system(size: 9.5, weight: .heavy)).tracking(0.5).lineLimit(1).fixedSize()
+            }
+            .foregroundColor(Theme.cream.opacity(on ? 1 : 0.65))
+            .frame(width: 64, height: 28)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(on ? Theme.red : Theme.cream.opacity(0.08)))
+        }
+        .buttonStyle(.plain).focusable(false).help("Gyro: \(name). Click or press F for the next setting")
+        .accessibilityLabel("Gyro: \(name)")
     }
 }
 
@@ -179,13 +200,17 @@ struct HUDView: View {
                             Text(s.camera).font(.system(size: 11, weight: .medium)).foregroundColor(Theme.cream.opacity(0.85))
                             Text("\(s.input) · \(s.rates) · \(s.fps) fps").font(.system(size: 10)).monospacedDigit().foregroundColor(Theme.dim)
                         }
+                        .lineLimit(1)
                         .padding(.trailing, 4).allowsHitTesting(false)
                         HStack(spacing: 5) {
-                            if m.game.site.panorama == nil {
-                                BarButton(icon: m.game.isFPV ? "person.fill" : "video.fill", help: m.game.isFPV ? "Back to the view from outside (F8)" : "FPV: fly from the onboard camera (F8)") {
-                                    m.game.toggleFPV(); m.objectWillChange.send()
-                                }
+                            // the same buttons on both kinds of site; a photo has only the pilot's view
+                            let photo = m.game.site.panorama != nil
+                            BarButton(icon: !photo && m.game.isFPV ? "person.fill" : "video.fill",
+                                      help: photo ? "Photo sites use the pilot camera only" : (m.game.isFPV ? "Back to the view from outside (F8)" : "FPV: fly from the onboard camera (F8)"),
+                                      enabled: !photo) {
+                                m.game.toggleFPV(); m.objectWillChange.send()
                             }
+                            GyroButton(setting: s.gyro, short: s.gyroName, name: s.mode) { m.game.cycleGyro() }
                             BarButton(icon: "wind", help: "Wind, weather and time of day") { m.game.cameFromMenu = false; m.overlay = m.overlay == .environment ? .none : .environment }
                             BarButton(icon: "gamecontroller", help: "Controller setup") { m.toggleControllerSetup?() }
                             BarButton(icon: "questionmark", help: "Keyboard controls (H)") { m.game.cameFromMenu = false; m.overlay = m.overlay == .help ? .none : .help }
@@ -908,7 +933,7 @@ struct HelpView: View {
         ("Flying", [("← →", "Aileron (roll)"), ("↑ ↓", "Elevator — ↓ pulls up"), ("A  D", "Rudder (yaw)"), ("W  S", "Throttle / collective"),
                     ("X", "Throttle cut"), ("Q", "Wheel brakes"), ("Shift", "Full stick deflection"), ("L", "High / low rates"), ("−  =", "Pitch trim: nose down / up"), ("0", "Centre the pitch trim"), ("Space", "Launch (hand-held) or reset"), ("R", "Replay the flight")]),
         ("Aircraft", [("E", "Flaps: up, half, full"), ("G", "Landing gear"), ("Y", "Smoke"), ("U", "Helicopter throttle hold"), ("I", "Rotor speed (helicopters)"),
-                      ("F", "Stabilized / acro mode"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
+                      ("F", "Gyro: off, on, stabilized"), ("[  ]", "Previous / next aircraft"), ("Tab", "Aircraft browser")]),
         ("View and simulation", [("C", "Camera: pilot, chase, onboard"), ("F8", "FPV / outside view (3D sites)"), ("Z", "Zoom mode"), ("V", "Hide / show display"), ("P", "Pause"),
                                  ("T", "Slow motion"), (",  .", "Less / more wind"), ("N", "Next flying site"), ("B", "Balloon Burst challenge"),
                                  ("K", "Demo pilot"), ("M", "Mute sound"), ("Esc", "Main menu")]),

@@ -11,7 +11,12 @@ struct Controls {
     var elevator: Float = 0     // + pitch up (stick back)
     var rudder: Float = 0       // + yaw right
     var throttle: Float = 0     // 0...1 (collective for helicopters)
-    var mode: Int = 0
+    var mode: Int = 0           // gyro setting, see `Gyro`; 0 is off
+    /// Airplanes in stabilized mode: the sticks before rates (aileron, elevator). Without it the aileron and
+    /// elevator are taken as the sticks. `climb` is what trim and launch assist ask for, as elevator stick: the
+    /// gyro would simply cancel a deflection of the surface, so they change the angle it holds instead.
+    var lean: SIMD2<Float>? = nil
+    var climb: Float = 0
     var flaps: Float = 0        // 0...1
     var gearUp = false
     var rotorSpeed = 2          // helicopters: head speed setting, 0 low, 1 normal, 2 high
@@ -212,8 +217,7 @@ struct AircraftSpec {
     var endurance: Float = 240      // seconds of full-throttle running on a fresh battery
     var smokePos = V3(0, 0, 0.2)
     var parts: [Part] = []
-    var modes: [String] = []
-    var defaultMode = 0             // flight mode selected when the aircraft is chosen
+    var modes: [String] { Gyro.names(kind) }
     var lowRate: Float = 0.6        // control throw on low rates that suits this aircraft
     var expo: Float = 0.3           // stick expo that suits this aircraft
     var soundBase: Float = 120   // blade-pass frequency (Hz) at full power
@@ -274,6 +278,12 @@ final class Aircraft {
     let restHeight: Float
     private let wingY: Float
     private var want: [Float]
+    /// What the gyro works with: angular acceleration per full deflection of aileron, elevator and rudder right now.
+    private(set) var ctrlPower = V3.zero
+    /// And how hard the airframe resists rolling, pitching and yawing right now, per second.
+    private(set) var rateDamping = V3.zero
+    let wing: WingFigures
+    private var gyro = AirplaneGyro()
 
     init(_ spec: AircraftSpec) {
         self.spec = spec
@@ -287,6 +297,7 @@ final class Aircraft {
         cDamp = 0.5 * sqrt(kSpring * spec.mass)
         restHeight = -(spec.contacts.map { $0.pos.y }.min() ?? 0)
         wingY = spec.surfaces.first { $0.isWing }?.pos.y ?? 0
+        wing = WingFigures(spec)
     }
 
     var power: Float {
@@ -308,6 +319,7 @@ final class Aircraft {
         for i in offGround.indices { offGround[i] = 0 }
         battery = 1; eps = 0; motorLoad = 0; vortexRing = 0; groundPhi = 1
         for i in stallT.indices { stallT[i] = 0; stalled[i] = false }
+        gyro.reset(); ctrlPower = .zero; rateDamping = .zero
         if spec.kind == .helicopter { levels[0] = 1 }    // rotor already at speed
     }
 
@@ -352,11 +364,18 @@ final class Aircraft {
     func step(dt: Float, c: Controls, terrain: Terrain, wind: V3, rollMu: Float) {
         let R = simd_float3x3(q)
         let Rt = R.transpose
-        servo += (V3(c.aileron, c.elevator, c.rudder) - servo) * min(1, dt / 0.04)
         if spec.hasFlaps { flap += clampf(c.flaps - flap, -dt / 1.5, dt / 1.5) }
         if spec.hasRetracts { gear += clampf((c.gearUp && !crashed ? 1 : 0) - gear, -dt / 1.2, dt / 1.2) }
         let va = Rt * (vel - wind)            // velocity through the air, body frame
         airspeed = length(va)
+        var command = V3(c.aileron, c.elevator, c.rudder)
+        let gyroOn = spec.kind == .airplane && c.mode != Gyro.off
+        if spec.kind == .airplane {
+            var g = gyro            // a copy, as it reads the aircraft it belongs to
+            command = g.update(self, c, va: va, R: R, dt: dt)
+            gyro = g
+        }
+        servo += (command - servo) * min(1, dt / 0.04)
         var fb = V3.zero                       // body-frame force
         var tb = V3.zero                       // body-frame torque
         let thr = crashed ? 0 : clampf(c.throttle, 0, 1)
@@ -423,6 +442,7 @@ final class Aircraft {
                 groundPhi = r * r / (1 + r * r)
             }
             var wingCl: Float = 0, wingArea: Float = 0
+            var bite = V3.zero, resist = V3.zero
             var stallSum: Float = 0, stallArea: Float = 0
             for (i, s) in spec.surfaces.enumerated() {
                 var v = va + cross(omega, s.pos)
@@ -473,7 +493,23 @@ final class Aircraft {
                 // in separated flow the centre of pressure moves back toward mid-chord, which steadies a stalled wing
                 let cp = s.pos - s.chordDir * (0.25 * s.chord * stallT[i])
                 fb += f; tb += cross(cp, f)
+                if gyroOn {
+                    // the turning moment a small deflection of this surface would add, and the one its own movement
+                    // through the air adds when the aircraft rotates
+                    let m = cross(cp, l) * (qS * s.liftSlope * s.load * max(vf / sp, 0) * (1 - 0.5 * stallT[i]))
+                    let r = cross(s.pos, s.normal)      // speed along the normal per rad/s about each axis
+                    resist += V3(m.z * r.z, m.x * r.x, m.y * r.y) / sp
+                    switch s.flapCh {
+                    case 0: bite.x -= m.z * s.flapGain
+                    case 1: bite.y += m.x * s.flapGain
+                    case 2: bite.z -= m.y * s.flapGain
+                    default: break
+                    }
+                    if s.elevGain != 0 { bite.y += (m.x - 0.3 * qS * s.chord * s.liftSlope * (1 - 0.85 * stallT[i])) * s.elevGain }
+                }
             }
+            let axes = V3(spec.inertia.z, spec.inertia.x, spec.inertia.y)
+            ctrlPower = bite / axes; rateDamping = resist / axes
             if stallArea > 0 { wingStallNow = stallSum / stallArea }
             // downwash behind the wing reduces the tail's angle of attack; when the wing stalls it collapses
             // It is the lift the wing is actually making that deflects the air, and the deflection is an angle only
@@ -498,7 +534,7 @@ final class Aircraft {
             let sag = 1 - 0.1 * load * load                          // battery voltage drops under load
             if flying && !crashed {
                 var wd: V3
-                if c.mode == 0 {
+                if c.mode != Gyro.off {
                     var fh = R * V3(0, 0, -1); fh.y = 0
                     fh = length(fh) > 0.15 ? normalize(fh) : V3(0, 0, -1)
                     let hr = cross(fh, V3(0, 1, 0))
@@ -578,8 +614,8 @@ final class Aircraft {
             let tip = max(om * h.rotorR, 1)
             let A = Float.pi * h.rotorR * h.rotorR
             // The throttle stick is collective pitch, symmetric about its centre, in both flight modes; the rotor is
-            // held at a set speed by the governor, chosen with a three-position switch. Mode 0, Stabilized: the cyclic
-            // stick commands a lean angle and the machine levels itself when it is released. Mode 1, Acro: the cyclic
+            // held at a set speed by the governor, chosen with a three-position switch. Gyro on, Stabilized: the cyclic
+            // stick commands a lean angle and the machine levels itself when it is released. Gyro off, Acro: the cyclic
             // commands a rate of rotation and the attitude stays where it is put.
             let theta = (2 * thr - 1) * h.collMax
             let headSpeed: Float = [0.8, 0.9, 1.0][min(max(c.rotorSpeed, 0), 2)]
@@ -623,7 +659,7 @@ final class Aircraft {
             if !crashed {
                 let auth = min(lv * lv, 1.2)
                 var wx: Float, wz: Float
-                if c.mode == 0 {
+                if c.mode != Gyro.off {
                     var fh = R * V3(0, 0, -1); fh.y = 0
                     fh = length(fh) > 0.15 ? normalize(fh) : V3(0, 0, -1)
                     let hr = cross(fh, V3(0, 1, 0))

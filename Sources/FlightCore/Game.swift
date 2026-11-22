@@ -10,6 +10,7 @@ struct HUDState: Equatable {
     var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0
     var leftLabel = "THR / RUD", rightLabel = "ELE / AIL", rates = "", config = ""
     var fps = 0
+    var gyro = 0, gyroName = "OFF"
     var trim = 0, showTrim = false
     var replay = "", replayPos: Float = 0
     /// Everything but the frame rate, which wobbles from one update to the next.
@@ -283,7 +284,6 @@ final class Game {
         panoLight = site.panorama != nil ? Panoramas.analyze(site) : nil
         timeOfDay = Game.time(forSite: site.defaultTime)
         aircraft = Aircraft(AircraftLibrary.all[aircraftIndex])
-        flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
         newSession()
         resetAircraft()
         hud.game = self
@@ -342,6 +342,7 @@ final class Game {
         input.aircraftLowRate = aircraft.spec.lowRate; input.aircraftExpo = aircraft.spec.expo
         input.lowRates = true
         rotorSpeed = 1
+        flightMode = Gyro.off           // every aircraft starts with the gyro off
     }
 
     func resetAircraft() {
@@ -382,7 +383,6 @@ final class Game {
         aircraftIndex = i
         flight = FlightRecording(); lastFlight = FlightRecording()      // a recording only plays on the aircraft it was made with
         aircraft = Aircraft(AircraftLibrary.all[i])
-        flightMode = min(aircraft.spec.defaultMode, max(aircraft.spec.modes.count - 1, 0))
         newSession()
         aircraftVersion += 1
         resetAircraft()
@@ -435,6 +435,9 @@ final class Game {
         loadingSite = nil
         siteVersion += 1
         if challenge { spawnBalloons() }
+        stopReplay()
+        // what was recorded while the site loaded belongs to the site before
+        flight = FlightRecording(); lastFlight = FlightRecording()
         resetAircraft()
         UserDefaults.standard.set(site.name, forKey: "lastSite")
         say(site.name, 3)
@@ -504,9 +507,7 @@ final class Game {
         case 45: selectSite((siteIndex + 1) % SiteSpec.all.count)
         case 11: toggleChallenge()
         case 40: autopilotOn.toggle(); autopilot = Autopilot(); say(autopilotOn ? "Demo pilot flying" : "You have control")
-        case 3:
-            let n = aircraft.spec.modes.count
-            if n > 1 { flightMode = (flightMode + 1) % n; say("Flight mode: " + aircraft.spec.modes[flightMode]) }
+        case 3: cycleGyro()
         case 43: env.windSpeed = max(0, env.windSpeed - 1); say(String(format: "Wind %.0f m/s", env.windSpeed))
         case 47: env.windSpeed = min(20, env.windSpeed + 1); say(String(format: "Wind %.0f m/s", env.windSpeed))
         case 18, 19, 20, 21, 23, 22, 26, 28, 25:
@@ -515,6 +516,21 @@ final class Game {
         case 33: selectAircraft((aircraftIndex + AircraftLibrary.all.count - 1) % AircraftLibrary.all.count)
         default: break
         }
+    }
+
+    // MARK: Gyro
+
+    /// The top bar button, F and the menu: the next setting this aircraft has.
+    func cycleGyro() {
+        guard replay == nil else { return }
+        if autopilotOn { say("The demo pilot sets the gyro itself: K to take over"); return }
+        setGyro((flightMode + 1) % aircraft.spec.modes.count)
+    }
+
+    private func setGyro(_ m: Int) {
+        flightMode = m
+        hudTimer = 0                    // show it on the button at once
+        say("Gyro: " + aircraft.spec.modes[m])
     }
 
     // MARK: Switches and buttons
@@ -544,7 +560,7 @@ final class Game {
             let spec = aircraft.spec
             switch a.id {
             case "rates": input.lowRates = pos == 0; say(input.lowRates ? String(format: "Low rates (%.0f%%)", input.lowRateInUse * 100) : "High rates")
-            case "mode": if spec.modes.count > 1 { flightMode = min(pos, spec.modes.count - 1); say("Flight mode: " + spec.modes[flightMode]) }
+            case "mode": setGyro(min(pos, spec.modes.count - 1))
             case "rotor": if spec.kind == .helicopter { rotorSpeed = pos; say("Rotor speed: " + Game.rotorNames[rotorSpeed]) }
             case "hold": if spec.kind == .helicopter { hold = pos == 1; say(hold ? "Throttle hold — autorotate!" : "Engine engaged") }
             case "flaps": if spec.hasFlaps { flapSetting = Float(pos) * 0.5; say(["Flaps up", "Flaps half", "Flaps full"][pos]) }
@@ -575,9 +591,7 @@ final class Game {
     static func launchAssist(_ ac: Aircraft, age: Float, climbed: Float) -> (elev: Float, ail: Float) {
         // it lets go after four and a half seconds, or, if the model is still low by then, once it has climbed
         // some seven metres (nine seconds at most)
-        let byTime = clampf((launchAssistTime - age) / 1.2, 0, 1)
-        let byHeight = clampf((7 - climbed) / 2, 0, 1) * clampf((9 - age) / 1.2, 0, 1)
-        let fade = max(byTime, byHeight)
+        let fade = launchFade(age: age, climbed: climbed)
         guard fade > 0 else { return (0, 0) }
         let pitch = asin(clampf(ac.forward.y, -1, 1)), right = ac.q.act(V3(1, 0, 0))
         // climb away at first, then a shallow climb while the speed builds; never so steep that it stalls
@@ -588,6 +602,14 @@ final class Game {
         return (elev * fade, ail * fade)
     }
     static let launchAssistTime: Float = 4.5
+    /// How much of the launch assist is still in, 1 to 0.
+    static func launchFade(age: Float, climbed: Float) -> Float {
+        let byTime = clampf((launchAssistTime - age) / 1.2, 0, 1)
+        let byHeight = clampf((7 - climbed) / 2, 0, 1) * clampf((9 - age) / 1.2, 0, 1)
+        return max(byTime, byHeight)
+    }
+    /// Launch assist with the gyro stabilized, which levels the wings by itself: the climb asked of it, as stick.
+    static func launchClimb(age: Float, climbed: Float) -> Float { 0.22 * launchFade(age: age, climbed: climbed) }
 
     private func hold(heading: Float) {
         let yaw = simd_quatf(angle: heading, axis: V3(0, 1, 0))
@@ -624,15 +646,27 @@ final class Game {
             controls.mode = flightMode
             controls.rotorSpeed = rotorSpeed
         }
+        let sticks = SIMD2(controls.aileron, controls.elevator)         // before trim and launch assist
+        let levelled = aircraft.spec.kind == .airplane && controls.mode == Gyro.stabilized
+        var climbAsked: Float = levelled && !autopilotOn ? Float(pitchTrim) * Game.trimStep : 0
         if !autopilotOn { controls.elevator = clampf(controls.elevator + Float(pitchTrim) * Game.trimStep, -1, 1) }
         if !paused && !simHeld {
             if held { heldTime += dt; if autopilotOn && heldTime > 0.8 { launch() } } else if launchAge < 50 { launchAge += dt }
             if !held && !autopilotOn {
                 // a firm pull or push on the stick takes over from the assist at once
                 if launchAge > 0.6 && abs(controls.elevator - Float(pitchTrim) * Game.trimStep) > 0.3 { launchAge = 100 }
-                let a = Game.launchAssist(aircraft, age: launchAge, climbed: aircraft.pos.y - heldPos.y)
-                controls.elevator = clampf(controls.elevator + a.elev, -1, 1); controls.aileron = clampf(controls.aileron + a.ail, -1, 1)
+                if levelled {
+                    climbAsked += Game.launchClimb(age: launchAge, climbed: aircraft.pos.y - heldPos.y)
+                } else {
+                    let a = Game.launchAssist(aircraft, age: launchAge, climbed: aircraft.pos.y - heldPos.y)
+                    controls.elevator = clampf(controls.elevator + a.elev, -1, 1); controls.aileron = clampf(controls.aileron + a.ail, -1, 1)
+                }
             }
+        }
+        if levelled {
+            // stabilized, the stick is an angle: its full travel is the full angle, on low rates as on high
+            controls.lean = sticks / (input.lowRates ? max(input.lowRateInUse, 0.1) : 1)
+            controls.climb = climbAsked
         }
         // on a hillside the model is held until the throttle is opened, so it does not roll away
         if site.slope != 0, site.panorama != nil, aircraft.onGround, controls.throttle < 0.06, length(aircraft.vel) < 2 { controls.brake = 1 }
@@ -667,7 +701,7 @@ final class Game {
         aircraft.updateRenderPose(ahead: paused || simHeld || aircraft.crashed || Game.noInterp ? 0 : acc)
         // --perf: how much simulated time this frame's picture advanced by
         let sp = length(aircraft.vel)
-        if sp > 3 { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
+        if sp > 3 && Renderer.collectStats { advanceMs.append(length(aircraft.renderPos - before) / sp * 1000) }
         updateCamera(dt)
         updateSound()
         messageTimer -= dt
@@ -1011,7 +1045,9 @@ final class Game {
         let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         s.wind = env.windSpeed < 0.1 ? "Calm" : String(format: "%@ %.0f m/s", dirs[Int((env.windFrom + 22.5) / 45) % 8], env.windSpeed)
         s.camera = Game.cameraNames[cameraMode] + (cameraMode == 0 ? " · " + Game.zoomNames[zoomMode] : "")
-        s.mode = spec.modes.count > 1 ? spec.modes[flightMode] : ""
+        // a replay shows the setting it was flown with, the demo pilot the one it flies with
+        s.gyro = min(replay != nil || autopilotOn ? controls.mode : flightMode, spec.modes.count - 1)
+        s.mode = spec.modes[s.gyro]; s.gyroName = Gyro.shortNames(spec.kind)[s.gyro]
         s.input = autopilotOn ? "Demo pilot" : input.source
         s.time = (site.panorama != nil ? (photoLight == 0 ? "Photo site" : Game.photoLightNames[photoLight]) : Game.timeNames[timeOfDay]) + (timeScale < 1 ? String(format: " · %.0f%% speed", timeScale * 100) : "")
         if challenge { s.score = String(format: "Balloons %d/%d   %.1f s", score, balloons.count, challengeTime) }

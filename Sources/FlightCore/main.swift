@@ -13,7 +13,10 @@ func runSelfTest() {
         let ac = Aircraft(spec)
         var ap = Autopilot()
         if spec.handLaunch {
-            ac.reset(pos: V3(2, 1.9, 0), heading: 0, speed: clampf(spec.stallSpeed * 1.7, 4, 9))
+            // thrown as the game throws it
+            let t = Game.throwState(spec, heading: 0)
+            ac.reset(pos: V3(2, 1.9, 0), heading: 0)
+            ac.q = t.q; ac.vel = t.vel
         } else {
             ac.reset(pos: V3(spec.kind == .airplane ? -50 : -6, ac.restHeight + 0.02, 0), heading: -.pi / 2)
         }
@@ -41,7 +44,7 @@ func runAutorotationTest() {
     let ac = Aircraft(AircraftLibrary.all[4])
     ac.reset(pos: V3(0, 90, 0), heading: 0)
     ac.vel = V3(0, 0, -8)
-    var c = Controls(); c.hold = true
+    var c = Controls(); c.hold = true; c.mode = Gyro.on
     print("== Autorotation: \(ac.spec.name), engine off at 90 m, 8 m/s forward")
     for i in 0..<12_000 {
         let agl = ac.pos.y - terrain.height(ac.pos.x, ac.pos.z)
@@ -241,7 +244,7 @@ func runEnvTest() {
         var maxV: Float = 0, sinkIn: Float = 0, sinkOut: Float = 0
         for i in 0..<16000 {
             let t = Float(i) / 1000
-            var c = Controls()
+            var c = Controls(); c.mode = Gyro.on
             let eb = simd_float3x3(ac.q).transpose * cross(ac.up, t < 9 ? V3(0, 1, 0) : normalize(V3(0, 1, -0.45)))
             c.elevator = clampf(eb.x * 6 / 5, -1, 1); c.aileron = clampf(-eb.z * 6 / 5, -1, 1)
             c.throttle = t < 3 ? 0.52 : (t < 9 ? 0.66 : 0.8)          // settle into a descent, then pull collective
@@ -458,13 +461,13 @@ func runRotorTest() {
         let hov = spec.hoverThrottle
         func start() { ac.reset(pos: V3(0, 150, 0), heading: 0); for i in ac.levels.indices { ac.levels[i] = sqrt(spec.mass * gravity / (Float(spec.multi!.motors.count) * spec.multi!.maxThrust)) } }
         // punch out
-        start(); var c = Controls(); c.mode = 1; c.throttle = hov
+        start(); var c = Controls(); c.mode = Gyro.off; c.throttle = hov
         fly(ac, 0.5) { _ in c }
         c.throttle = 1; fly(ac, 0.06) { _ in c }; let v0 = ac.vel.y; fly(ac, 0.1) { _ in c }
         let climb = (ac.vel.y - v0) / 0.1
         // roll rates
         func rollRate(_ stick: Float, thr: Float) -> Float {
-            start(); var c = Controls(); c.mode = 1; c.throttle = hov
+            start(); var c = Controls(); c.mode = Gyro.off; c.throttle = hov
             fly(ac, 0.3) { _ in c }
             c.aileron = stick; c.throttle = thr
             var peak: Float = 0
@@ -473,11 +476,11 @@ func runRotorTest() {
         }
         let full = rollRate(1, thr: hov), part = rollRate(0.3, thr: hov), closed = rollRate(1, thr: 0)
         // top speed: self-level, full forward stick, full throttle
-        start(); c = Controls(); c.mode = 0; c.throttle = 1; c.elevator = -1
+        start(); c = Controls(); c.mode = Gyro.on; c.throttle = 1; c.elevator = -1
         var top: Float = 0
         fly(ac, 8, { _ in c }, each: { _ in top = max(top, sqrt(ac.vel.x * ac.vel.x + ac.vel.z * ac.vel.z)) })
         // propwash: let it sink straight down at hover throttle after a brief cut
-        start(); c = Controls(); c.mode = 0
+        start(); c = Controls(); c.mode = Gyro.on
         var wash: Float = 0, wob: Float = 0
         fly(ac, 4, { t in c.throttle = t < 0.9 ? 0.0 : hov * 0.98; return c }, each: { t in if t > 1.5 { wash = max(wash, ac.vortexRing); wob = max(wob, abs(ac.omega.x) + abs(ac.omega.z)) } })
         print(String(format: "%@ %6.0f  %4.1f   %3.0f%%   %5.1f      %5.0f       %5.0f        %5.0f           %5.0f      %4.1f  %3.0f%%  %3.0f", spec.name.padding(toLength: 26, withPad: " ", startingAt: 0),
@@ -486,13 +489,13 @@ func runRotorTest() {
     // direction check: stick forward (elevator -1) must tip the nose down and move the machine forward, in both modes
     for name in ["Quad X450", "Apex 5 Racer", "Kestrel 550"] {
         guard let spec = AircraftLibrary.all.first(where: { $0.name == name }) else { continue }
-        for mode in 0..<2 {
+        for mode in [Gyro.on, Gyro.off] {
             let ac = Aircraft(spec); ac.unlimitedBattery = true
             ac.reset(pos: V3(0, 150, 0), heading: 0); for i in ac.levels.indices { ac.levels[i] = spec.kind == .helicopter ? 1 : 0.5 }
             var c = Controls(); c.mode = mode; c.throttle = spec.kind == .helicopter ? 0.66 : spec.hoverThrottle; c.elevator = -0.3
             fly(ac, 0.6) { _ in c }
             let nose = ac.q.act(V3(0, 0, -1))
-            print(String(format: "DIRECTION %@ mode %d, stick forward: nose %@ (%.0f deg), moving %@ at %.1f m/s", name, mode, nose.y < 0 ? "DOWN" : "UP", asin(clampf(nose.y, -1, 1)) / deg,
+            print(String(format: "DIRECTION %@ gyro %@, stick forward: nose %@ (%.0f deg), moving %@ at %.1f m/s", name, mode == Gyro.on ? "on" : "off", nose.y < 0 ? "DOWN" : "UP", asin(clampf(nose.y, -1, 1)) / deg,
                          dot(ac.vel, V3(0, 0, -1)) > 0 ? "FORWARD" : "BACKWARD", abs(dot(ac.vel, V3(0, 0, -1)))))
         }
     }
@@ -502,23 +505,23 @@ func runRotorTest() {
         let ac = Aircraft(spec); ac.unlimitedBattery = true
         func hoverStick(_ mode: Int) -> Float {
             ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
-            var c = Controls(); c.mode = 1; c.rotorSpeed = mode; c.throttle = 0.7
+            var c = Controls(); c.mode = Gyro.off; c.rotorSpeed = mode; c.throttle = 0.7
             var integ = c.throttle
             fly(ac, 5) { _ in integ = clampf(integ - 0.4 * ac.vel.y * 0.001, 0, 1); c.throttle = clampf(integ - 0.08 * ac.vel.y, 0, 1); c.elevator = clampf(-2 * ac.pitch - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(-2 * ac.roll + 0.3 * ac.omega.z, -1, 1); return c }
             return integ
         }
         let h3 = hoverStick(2), hn = hoverStick(0)
-        var c = Controls(); c.throttle = 1
+        var c = Controls(); c.mode = Gyro.on; c.throttle = 1
         var droop: Float = 9
         ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
         fly(ac, 3, { _ in c.elevator = clampf(-2 * ac.pitch - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(-2 * ac.roll + 0.3 * ac.omega.z, -1, 1); return c }, each: { t in if t > 1 { droop = min(droop, ac.levels[0]) } })
         let climb = ac.vel.y
         ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
-        c = Controls(); c.mode = 1; c.throttle = h3; c.aileron = 1
+        c = Controls(); c.mode = Gyro.off; c.throttle = h3; c.aileron = 1
         var flip: Float = 0
         fly(ac, 0.8, { _ in c }, each: { _ in flip = max(flip, abs(ac.omega.z)) })
         ac.reset(pos: V3(0, 150, 0), heading: 0); ac.levels[0] = 1
-        c = Controls(); c.mode = 1; c.throttle = h3; c.rudder = 1
+        c = Controls(); c.mode = Gyro.off; c.throttle = h3; c.rudder = 1
         var piro: Float = 0
         fly(ac, 0.8, { _ in c }, each: { _ in piro = max(piro, abs(ac.omega.y)) })
         // inverted hover: start upside down on negative pitch and hold it
@@ -527,7 +530,7 @@ func runRotorTest() {
         var integ = 1 - h3, worst: Float = 0
         fly(ac, 3, { _ in
             integ = clampf(integ + 0.4 * ac.vel.y * 0.001, 0, 1)
-            c = Controls(); c.mode = 1; c.throttle = clampf(integ + 0.08 * ac.vel.y, 0, 1)
+            c = Controls(); c.mode = Gyro.off; c.throttle = clampf(integ + 0.08 * ac.vel.y, 0, 1)
             let up = ac.q.inverse.act(V3(0, -1, 0))             // straight down, as the machine sees it: should be its own up axis
             c.elevator = clampf(2 * up.z - 0.3 * ac.omega.x, -1, 1); c.aileron = clampf(2 * up.x + 0.3 * ac.omega.z, -1, 1); return c
         }, each: { _ in worst = max(worst, acos(clampf(-ac.q.act(V3(0, 1, 0)).y, -1, 1))) })
@@ -1511,7 +1514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             ClosureMenuItem("Balloon Burst Challenge", key: "b") { g.toggleChallenge() },
             ClosureMenuItem("Demo Pilot", key: "k") { g.keyDown(40) },
-            ClosureMenuItem("Flight Mode (Self-level / Acro)") { g.keyDown(3) },
+            ClosureMenuItem("Gyro: Off / On / Stabilized") { g.cycleGyro() },
             ClosureMenuItem("Unlimited Battery On / Off") { g.unlimitedBattery.toggle(); g.say(g.unlimitedBattery ? "Unlimited battery" : "Battery drains with use") },
         ])
         var envItems: [NSMenuItem] = [0, 2, 5, 8, 12].map { s in ClosureMenuItem("Wind \(s) m/s") { g.env.windSpeed = Float(s); g.say("Wind \(s) m/s") } }

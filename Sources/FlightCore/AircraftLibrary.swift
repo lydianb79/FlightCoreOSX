@@ -571,7 +571,6 @@ func makeQuad(shell: V4 = rgb(0.95, 0.55, 0.05), front: V4 = rgb(0.9, 0.1, 0.1),
                          inertia: V3(0.012, 0.022, 0.012), span: 0.55)
     s.multi = MultiSpec(motors: motors, dirs: [1, -1, 1, -1], maxThrust: 8)
     s.cdA = 0.02
-    s.modes = ["Self-level", "Acro"]
     s.soundBase = 210
     for m in motors { s.contacts.append(Contact(pos: V3(m.x * 0.8, -0.09, m.z * 0.8), crashSpeed: 4, mu: 0.6)) }
     for m in motors { s.contacts.append(Contact(pos: V3(m.x * 1.6, 0.06, m.z * 1.6), crashSpeed: 3, mu: 0.6)) }
@@ -596,7 +595,6 @@ func makeHeli(body yel: V4 = rgb(0.98, 0.8, 0.05), canopy: V4 = rgb(0.1, 0.1, 0.
     s.parts = buildHeliModel(rotorR: R, body: yel, accent: canopy, blades: blades, scale: scale)
     s.eyeOffset = V3(0, -0.02, -0.42)
     s.smokePos = V3(0, 0, 0.3)
-    s.modes = ["Stabilized", "Acro"]
     return s
 }
 
@@ -639,7 +637,6 @@ func makeFpv(_ name: String, _ blurb: String, mass: Float, prop: Float, wheelbas
     m.gain = 36
     s.multi = m
     s.cdA = 1.3 * a * a * (ducted ? 2.2 : 1) + 0.0004 * u * u
-    s.modes = ["Self-level", "Acro"]
     s.soundBase = sound
     s.category = "Multirotors"
     let low: Float = style == 2 ? -0.02 * u : (style == 3 ? -0.037 * u : -0.012 * u), high: Float = (style == 2 ? 0.035 : 0.075) * u
@@ -1544,7 +1541,7 @@ enum AircraftLibrary {
             var s = AircraftSpec(name: "Hexa 680 Lifter", kind: .multirotor, blurb: "Six-rotor camera platform: heavy, unhurried and rock steady, with power in hand if a motor is working hard",
                                  mass: 3.9, inertia: V3(0.014, 0.026, 0.014), span: 0.6)
             s.multi = MultiSpec(motors: motors, dirs: [1, -1, 1, -1, 1, -1], maxThrust: 13.5)
-            s.cdA = 0.024; s.modes = ["Self-level", "Acro"]; s.soundBase = 210
+            s.cdA = 0.024; s.soundBase = 210
             for m in motors { s.contacts.append(Contact(pos: V3(m.x * 0.8, -0.09, m.z * 0.8), crashSpeed: 4, mu: 0.6)) }
             for m in motors { s.contacts.append(Contact(pos: V3(m.x * 1.5, 0.06, m.z * 1.5), crashSpeed: 3, mu: 0.6)) }
             s.contacts.append(Contact(pos: V3(0, 0.09, 0), crashSpeed: 2.5))

@@ -155,7 +155,7 @@ final class InputManager {
     static let actions: [ControlAction] = [
         ControlAction(id: "launch", title: "Launch (hand launch)", states: 0, key: 36),
         ControlAction(id: "rates", title: "Rates: low / high", states: 2, key: 37),
-        ControlAction(id: "mode", title: "Flight mode", states: 2, key: 3),
+        ControlAction(id: "mode", title: "Gyro: off / on / stabilized", states: 3, key: 3),
         ControlAction(id: "rotor", title: "Rotor speed (helicopters)", states: 3, key: 34),
         ControlAction(id: "hold", title: "Throttle hold (helicopters)", states: 2, key: 32),
         ControlAction(id: "flaps", title: "Flaps: up / half / full", states: 3, key: 14),

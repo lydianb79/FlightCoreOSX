@@ -8,6 +8,6 @@ VERSION="$(grep '^VERSION=' build_app.sh | cut -d'"' -f2)"
 rm -rf dist
 for ARCH in arm64 x86_64; do
     ./build_app.sh "$ARCH" "dist/$ARCH"
-    ditto -c -k --keepParent "dist/$ARCH/FlightCore.app" "dist/FlightCore-OSX-$VERSION-$ARCH.zip"
+    ditto -c -k --norsrc --noextattr --keepParent "dist/$ARCH/FlightCore.app" "dist/FlightCore-OSX-$VERSION-$ARCH.zip"
     echo "dist/FlightCore-OSX-$VERSION-$ARCH.zip  ($(lipo -archs "dist/$ARCH/FlightCore.app/Contents/MacOS/FlightCore"))"
 done
