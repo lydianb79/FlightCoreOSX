@@ -1233,7 +1233,13 @@ func testAcademyUnskilled(_ g: Game) -> Int {
         }
         for (name, pilot) in pilots {
             tried += 1
-            if let r = flyStep(g, step, fps: 60, pilot), r.passed {
+            let bings = g.sound.chimeCount
+            let r = flyStep(g, step, fps: 60, pilot)
+            if g.sound.chimeCount - bings != (g.attempt?.index ?? 0) {
+                bad += 1
+                print("ACADEMY BING \(step.id): \(name) heard a bing for something not done  FAIL")
+            }
+            if let r, r.passed {
                 bad += 1
                 let p = g.aircraft.pos
                 print("ACADEMY UNSKILLED \(step.id): \(name) passed with \(r.score)%, ending at \(Int(p.x)), \(Int(p.z))  FAIL")
@@ -1242,6 +1248,100 @@ func testAcademyUnskilled(_ g: Game) -> Int {
     }
     print("ACADEMY UNSKILLED \(tried - bad)/\(tried) attempts without the skill did not pass")
     return bad
+}
+
+/// The count before a step.
+func testAcademyTimer() -> Int {
+    var failed = 0, checks = 0
+    let g = academyTestGame(open: true)
+    for step in AcademyCourse.all {
+        let band = step.start.throttle
+        let inside = (band.lowerBound + band.upperBound) / 2
+        let outside = band.upperBound < 0.95 ? band.upperBound + 0.04 : band.lowerBound - 0.04
+        // a band that covers the whole stick has no outside
+        let hasOutside = outside >= 0
+        var thr = inside
+        var falseStall = false
+        func run(_ seconds: Float) {
+            for _ in 0..<Int(seconds * 60) {
+                g.frame(dt: 1 / 60)
+                if g.hud.s.academy?.waiting == true && g.hud.s.config.contains("STALL") { falseStall = true }
+            }
+        }
+        func check(_ ok: Bool, _ what: String) { checks += 1; if !ok { failed += 1; print("ACADEMY TIMER \(step.id): \(what)  FAIL") } }
+        g.testSticks = { _ in var c = Controls(); c.throttle = thr; return c }
+        if hasOutside { thr = outside }
+        g.startStep(step)
+        if hasOutside {
+            run(2)
+            check(g.hud.s.academy?.countdown == 3 && g.hud.s.academy?.ready == false && g.attempt?.countdown == 3, "stands at 3 outside the green")
+            thr = inside
+        }
+        run(1.3)
+        check(g.hud.s.academy?.countdown == 2 && g.hud.s.academy?.ready == true, "counts down in the green")
+        check((g.hud.s.academy?.countLeft ?? 1) < 0.7 && g.attempt?.time == 0, "the ring runs, the step's clock does not")
+        if hasOutside {
+            thr = outside; run(0.2)
+            check(g.hud.s.academy?.countdown == 3 && g.attempt?.countdown == 3, "back to 3 on leaving the green")
+            thr = inside; run(2.8)
+        } else {
+            run(1.5)
+        }
+        check(g.attempt?.phase == .waiting && g.hud.s.academy?.countdown == 1, "1 just before go")
+        check(!falseStall, "no stall warning while held for the count")
+        run(0.4)
+        check(g.attempt?.phase == .flying && g.hud.s.academy?.go == true, "GO after three seconds")
+        run(1.1)
+        // a step may already be over by now, if it was left to crash
+        check(g.hud.s.academy?.go != true && (g.attempt?.time ?? 0) > 0.5, "then the step's clock runs")
+        g.hud.overlay = .none
+    }
+    g.testSticks = nil
+    print("ACADEMY TIMER \(checks - failed)/\(checks) checks ok")
+    return failed
+}
+
+/// The bing can be heard over each kind of engine at full power close by, and not with the sound off.
+func testAcademyBing() -> Int {
+    let frames = 4410           // a tenth of a second
+    let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+    defer { l.deallocate(); r.deallocate() }
+    func render(engine: Int, bing: Bool, muted: Bool) -> (tone: Float, peak: Float, jump: Float, tail: Float) {
+        let s = SoundEngine(start: false)
+        s.muted = muted
+        var st = SoundState()
+        st.engine = engine; st.power = 1; st.running = 1; st.gain = 1; st.cylinders = 4
+        st.shaftHz = [160, 90, 300, 75, 38, 300][engine]; st.motors = SIMD4(repeating: 1); st.airspeed = 15; st.windSpeed = 2
+        s.state = st
+        for _ in 0..<10 { s.render(left: l, right: r, count: frames) }
+        if bing { s.chime() }
+        var tone: Float = 0, peak: Float = 0, jump: Float = 0, tail: Float = 0
+        for block in 0..<20 {
+            s.render(left: l, right: r, count: frames)
+            // how much of the bell's main note is in the sound
+            var re: Float = 0, im: Float = 0
+            for i in 0..<frames {
+                let w = 2 * Float.pi * 1318.5 * Float(i) / s.sampleRate
+                re += l[i] * cos(w); im += l[i] * sin(w)
+                peak = max(peak, abs(l[i]))
+                if i > 0 { jump = max(jump, abs(l[i] - l[i - 1])) }
+            }
+            let mag = sqrt(re * re + im * im) / Float(frames) * 2
+            if block == 0 { tone = mag }
+            if block == 19 { tail = mag }
+        }
+        return (tone, peak, jump, tail)
+    }
+    var failed = 0
+    let names = ["electric", "piston", "jet", "turboprop", "helicopter", "multirotor"]
+    for e in 0..<6 {
+        let off = render(engine: e, bing: false, muted: false), on = render(engine: e, bing: true, muted: false)
+        let silent = render(engine: e, bing: true, muted: true)
+        let ok = on.tone > 0.1 && on.tone > off.tone * 3 && on.tail < off.tail + 0.01 && on.peak < 1 && silent.tone < 0.002
+        if !ok { failed += 1 }
+        print(String(format: "ACADEMY BING over %@: its note %.3f, without it %.3f, after 2 s %.3f, peak %.2f, sound off %.4f %@", names[e], on.tone, off.tone, on.tail, on.peak, silent.tone, ok ? "ok" : "FAIL"))
+    }
+    return failed
 }
 
 /// The rules: pass mark, weights, gyro limit, unlocking, saving, and that nothing gets round a step's set-up.
@@ -1471,8 +1571,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--academytest") {
         var line = "", ok = true
         for (fps, late) in trace ? [(Float(60), Float(0.05))] : [(Float(60), Float(0.05)), (120, 0.05), (60, 0.1)] {
             let pilot = InstructorPilot(fps: fps); pilot.reaction = late
+            let bings = g.sound.chimeCount
             let r = flyStep(g, step, fps: fps, trace: trace) { pilot.sticks($0) }
             if r?.passed != true { ok = false }
+            if g.sound.chimeCount - bings != step.tasks.count { ok = false; line += " (\(g.sound.chimeCount - bings) bings for \(step.tasks.count) tasks)" }
             line += String(format: "  %3d%% in %4.1f s", r?.score ?? -1, r?.time ?? 0)
             if let r, !r.reason.isEmpty { line += " (\(r.reason) task \(g.attempt?.index ?? 0))" }
         }
@@ -1483,7 +1585,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--academytest") {
     if only.isEmpty {
         let unskilled = testAcademyUnskilled(g)
         let rules = testAcademyRules()
-        failed += unskilled + rules
+        failed += unskilled + rules + testAcademyTimer() + testAcademyBing()
         print(failed == 0 ? "ACADEMY TEST ok" : "ACADEMY TEST failed")
     }
     exit(failed == 0 ? 0 : 1)

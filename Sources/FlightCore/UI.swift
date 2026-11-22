@@ -255,9 +255,19 @@ struct HUDView: View {
                     .padding(.horizontal, 14).padding(.bottom, 12).allowsHitTesting(false)
                 }
             }
+            // laid over the display rather than stacked in it, so that nothing below moves when it goes
+            let counting = s.academy.map { $0.waiting || $0.go } ?? false
+            if let a = s.academy, counting, m.visible, !m.overlay.pausesSim {
+                VStack {
+                    Spacer().frame(height: 156)
+                    AcademyCountdown(h: a)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
             if !s.message.isEmpty && !m.game.simHeld {
                 VStack {
-                    Spacer().frame(height: s.academy == nil ? 74 : 178)
+                    Spacer().frame(height: s.academy == nil ? 74 : (counting ? 156 + AcademyCountdown.height + 10 : 178))
                     let big = s.message == "CRASHED" || s.message == "PAUSED"
                     Text(s.message)
                         .font(.system(size: big ? 30 : 14, weight: big ? .heavy : .semibold, design: big ? .rounded : .default))

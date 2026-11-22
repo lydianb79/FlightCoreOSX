@@ -18,6 +18,8 @@ struct AcademyHUD: Equatable {
     var title = "", task = "", count = "", whereTo = "", progress = "", note = ""
     var clock = "", hurry = false
     var waiting = false, ready = false, countdown = 0
+    var countLeft: Float = 1        // of the count, 1 to 0
+    var go = false                  // the moment after the count
     var throttle: Float = 0, bandLow: Float = 0, bandHigh: Float = 0
     var gyroHelp = false
 }

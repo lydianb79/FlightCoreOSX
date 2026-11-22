@@ -181,6 +181,9 @@ final class SoundEngine {
     // one-shots
     private var crashEnv: Float = 0, crashTone: Float = 0, crashPhase: Float = 0, crackle: Float = 0, splashEnv: Float = 0, splashLo: Float = 0
     private var crashPan: Float = 0
+    // the Flight Academy's bing
+    private var chimeEnv: Float = 0, chimeAmp: Float = 0, chimeP1: Float = 0, chimeP2: Float = 0, chimeP3: Float = 0
+    private(set) var chimeCount = 0
     // flying into a tree: the swish of leaves, twigs snapping one after another; or a knock on something hard
     private var leafEnv: Float = 0, leafLo: Float = 0, leafBd: Float = 0, leafPan: Float = 0, twigs: Float = 0, twigTimer: Float = 0
     private var snapEnv: Float = 0, snapLo: Float = 0, snapBd: Float = 0, snapHz: Float = 900, knockEnv: Float = 0, knockPhase: Float = 0
@@ -251,6 +254,13 @@ final class SoundEngine {
         leafPan = pan
         if woody { leafEnv = max(leafEnv, s); twigs = s; twigTimer = 0 }
         else { knockEnv = max(knockEnv, s); knockPhase = 0 }
+    }
+
+    /// A short, bright bell for something achieved. It is for the pilot, not a sound in the world: equally loud at
+    /// any distance and in either ear, and heard over the engine.
+    func chime() {
+        chimeEnv = 1
+        chimeCount += 1
     }
 
     /// Impact: `strength` 0...1; `water` makes it a splash.
@@ -627,8 +637,19 @@ final class SoundEngine {
             let musicTarget: Float = musicOn && !muted ? 1 : 0
             sMusic += (musicTarget - sMusic) * (musicTarget > sMusic ? 0.00006 : 0.00004)
             if sMusic > 0.0004 { let m = music.next(); L += m.0 * sMusic; R += m.1 * sMusic }
-            left[i] = L / (1 + abs(L)) * 1.6
-            right[i] = R / (1 + abs(R)) * 1.6
+            var outL = L / (1 + abs(L)) * 1.6, outR = R / (1 + abs(R)) * 1.6
+            if chimeEnv > 0.0005 || chimeAmp > 0.0005 {
+                // after the limiter, which would squash it on a loud model, and with everything else dipped a little
+                chimeEnv *= 0.999919                                        // rings for about a second
+                chimeAmp += (chimeEnv - chimeAmp) * 0.012                   // no click at the start
+                wrap(&chimeP1, 1318.5); wrap(&chimeP2, 1975.5); wrap(&chimeP3, 2637)
+                let a = chimeAmp * sMaster
+                let bell = (sin(twoPi * chimeP1) + 0.35 * sin(twoPi * chimeP2) * a + 0.3 * sin(twoPi * chimeP3) * a) * a * 0.3
+                let dip = 1 - 0.45 * a
+                outL = clampf(outL * dip + bell, -1, 1); outR = clampf(outR * dip + bell, -1, 1)
+            }
+            left[i] = outL
+            right[i] = outR
         }
         // A value that is not a number would stay in every filter it reached and silence the sound for good:
         // drop the block and start the synthesizer's filters and voices afresh.
@@ -658,6 +679,7 @@ final class SoundEngine {
         strLo = 0; strBd = 0; strWalk = 0; strLo2 = 0; leafLoL = 0; leafBdL = 0; leafLoR = 0; leafBdR = 0
         grassLo = 0; sandLo = 0; howlLo = 0; howlBd = 0; howlLo2 = 0; howlBd2 = 0; townLo = 0; townCarLo = 0; townCarBd = 0; townP = 0.6
         rumbleRoll = 0; sMusic = 0
+        chimeEnv = 0; chimeAmp = 0; chimeP1 = 0; chimeP2 = 0; chimeP3 = 0
     }
     private(set) var recoveries = 0
     private var rumbleRoll: Float = 0

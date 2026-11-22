@@ -102,7 +102,8 @@ The last aircraft and site are remembered between launches, and both browsers re
 
 - **Order:** the steps of a chapter can be flown in any order. A chapter is complete with 4 of its 5 steps passed (80%), and completing a level opens the next one for that type of aircraft.
 - **Each step** explains what to do and how, then sets the aircraft, 3D scenery, view, weather, gyro and rates by itself. These are put back as they were when you leave the Academy.
-- **Start:** the count of three runs once the throttle stick is in the green band.
+- **Start:** a large timer counts down from three while the throttle stick is in the green band, and goes back to three if it leaves it. At GO the step's clock starts.
+- **Bing:** a bell sounds over the engine each time a task is done: a box or gate flown through, a hover held, a figure, a stall recovered, a landing.
 - **Target box:** yellow, and green while you are in it as asked, with posts or an outline on the ground to judge the distance by. The next one shows in white, and the panel says which way the target is.
 - **Score:** 80% precision and 20% time. Time earns full marks up to a par and nothing at the limit, where the step ends. A step passes at 80%; a crash, running out of time or an unfinished task never passes.
 - **Gyro:** each step suggests a setting and you can change it. More help than suggested limits the score to 80%, which still passes.
@@ -380,7 +381,7 @@ A headless test flies every aircraft for 60 simulated seconds under the autopilo
 swift run -c release FlightCore --selftest
 ```
 
-`--academytest` checks the Flight Academy: an instructor pilot has to pass all 45 steps through the game's own loop, on the step's rates, at two frame rates and two reaction times; pilots without the skill (hands off, flailing, only steering for the boxes) must not pass; and the rules, unlocking, locks and restoring of free flight are checked. Run it after any change to the flight model or a step. `--nosave` opens the app without reading or saving Academy progress.
+`--academytest` checks the Flight Academy: an instructor pilot has to pass all 45 steps through the game's own loop, on the step's rates, at two frame rates and two reaction times; pilots without the skill (hands off, flailing, only steering for the boxes) must not pass; and the rules, unlocking, locks, restoring of free flight, the countdown and the bing (one for each task done, audible over every engine) are checked. Run it after any change to the flight model or a step. `--nosave` opens the app without reading or saving Academy progress.
 
 Other checks, each run the same way: `--physicstest`, `--handlingtest`, `--balancetest`, `--launchtest`, `--glidetest`, `--powertest` (elevator needed to fly level at full and half throttle), `--ruddertest`, `--rotortest` and `--envtest` for the flight model; `--districttest` (industrial and city sites: what is built, that the field is clear, and that the demo pilot flies a minute without hitting anything); `--collisiontest`, `--depthcheck <folder>`, `--parktest`, `--panocheck <folder>`, `--panocrop <out.jpg> <name> <from> <to>`, `--maskcheck <folder>`, `--obstaclelist` and `--panostats` for photo sites; `--pano <photo> --treehit --shot <png>` flies into the first tree of a photo site and saves a picture of it; `--powerlist` prints what drives each aircraft; `--soundtest <wav>`, `--flightsound <wav> <site> <aircraft>`, `--ambiencetest` and `--touchtest` for sound; `--perf` for frame pacing, audio load and the time from reading the sticks to that frame reaching the screen; `--hidtest` for controllers.
 

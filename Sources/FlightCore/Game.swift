@@ -908,7 +908,13 @@ final class Game {
         case .waiting:
             a.wait(dt: dt, throttle: throttle)
         case .flying:
+            let done = a.index
             a.update(aircraft, terrain: terrain, dt: dt, gyro: flightMode)
+            if a.index > done {
+                // a gate, a hold, a figure, a landing: each task done gets its bing, the last one included
+                sound.chime()
+                hudTimer = 0
+            }
             if a.phase == .finished, let r = a.result {
                 academyProgress.record(r, for: a.step)
                 hudTimer = 0
@@ -963,6 +969,8 @@ final class Game {
         h.hurry = a.phase == .flying && a.timeLeft < 10
         h.waiting = a.phase == .waiting
         h.ready = a.throttleReady
+        h.countLeft = clampf(a.countdown / AcademyRules.countdown, 0, 1)
+        h.go = a.phase == .flying && a.time < 0.8
         h.countdown = min(Int(max(a.countdown, 0).rounded(.up)), Int(AcademyRules.countdown))
         h.throttle = throttle; h.bandLow = a.step.start.throttle.lowerBound; h.bandHigh = a.step.start.throttle.upperBound
         h.gyroHelp = max(a.mostHelp, flightMode) > a.step.gyro
@@ -1355,7 +1363,7 @@ final class Game {
         if spec.hasFlaps { cfg.append(["Flaps up", "Flaps ½", "Flaps full"][Int(flapSetting * 2)]) }
         if spec.hasRetracts { cfg.append(gearUp ? "Gear up" : "Gear down") }
         if spec.kind == .airplane && !unlimitedBattery { cfg.append(String(format: spec.burnsFuel ? "Fuel %.0f%%" : "Battery %.0f%%", aircraft.battery * 100)) }
-        if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround && !held { cfg.append("STALL") }
+        if spec.kind == .airplane && aircraft.wingStall > 0.35 && !aircraft.onGround && !held && attempt?.phase != .waiting { cfg.append("STALL") }
         if spec.kind == .helicopter && aircraft.vortexRing > 0.3 { cfg.append("VORTEX RING") }
         if controls.brake > 0.5 && aircraft.onGround { cfg.append("Brakes") }
         if spec.kind == .helicopter { cfg.append(String(format: "Rotor %.0f%%%@", aircraft.levels[0] * 100, hold ? " HOLD" : "")) }

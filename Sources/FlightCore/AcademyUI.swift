@@ -226,7 +226,7 @@ struct AcademyPanel: View {
                 HStack(spacing: 10) {
                     throttleMarker
                     Spacer(minLength: 0)
-                    Text(h.ready ? "Starting in \(h.countdown)" : "Move the throttle into the green")
+                    Text(h.ready ? "Throttle ready" : "Move the throttle into the green")
                         .font(.system(size: 12, weight: .heavy)).foregroundColor(h.ready ? passGreen : Theme.cream)
                 }
             } else {
@@ -246,6 +246,36 @@ struct AcademyPanel: View {
         }
         .frame(width: 520)
         .padding(.horizontal, 14).padding(.vertical, 9).glass(10)
+    }
+}
+
+/// The count before a step: it stands at three until the throttle is in the green, runs down while it stays there,
+/// and goes back to three if it leaves.
+struct AcademyCountdown: View {
+    var h: AcademyHUD
+    static let height: CGFloat = 150
+    var body: some View {
+        let lit = h.go || h.ready
+        VStack(spacing: 7) {
+            ZStack {
+                Circle().fill(Theme.glass)
+                Circle().stroke(Theme.cream.opacity(0.18), lineWidth: 7).padding(5)
+                Circle().trim(from: 0, to: h.go ? 1 : CGFloat(h.countLeft))
+                    .stroke(lit ? passGreen : Theme.cream.opacity(0.4), style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                    .rotationEffect(.degrees(-90)).padding(5)
+                    .animation(h.ready && !h.go ? .linear(duration: 0.09) : nil, value: h.countLeft)
+                Text(h.go ? "GO" : "\(max(h.countdown, 1))")
+                    .font(.system(size: h.go ? 34 : 52, weight: .black, design: .rounded)).monospacedDigit()
+                    .foregroundColor(lit ? passGreen : Theme.cream.opacity(0.6))
+            }
+            .frame(width: 112, height: 112)
+            if !h.go {
+                Text(h.ready ? "GET READY" : "THROTTLE INTO THE GREEN")
+                    .font(.system(size: 11, weight: .heavy)).tracking(1.5).foregroundColor(Theme.cream)
+                    .padding(.horizontal, 10).padding(.vertical, 5).glass(7)
+            }
+        }
+        .frame(height: Self.height, alignment: .top)
     }
 }
 
